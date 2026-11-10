@@ -1,0 +1,42 @@
+# IPCA-Casa
+
+> Calculadora brasileira de inflação pessoal e familiar (Índice de Laspeyres) com leitura em Reais (R$), análise de poder de compra salarial e integração em tempo real com os dados oficiais do IBGE (API SIDRA).
+
+## O que é e qual o objetivo do IPCA-Casa
+O IPCA-Casa é uma aplicação web voltada para famílias e cidadãos brasileiros compreenderem como a inflação afeta seu orçamento real. Enquanto notícias econômicas apresentam um percentual médio nacional abstrato, a plataforma traduz a alta dos preços para a realidade de cada domicílio com base em sua própria cesta de compras e rendimentos.
+
+## Relação entre inflação, salário e poder de compra
+Mesmo quando um trabalhador recebe aumento salarial nominal, seu padrão de vida cai se o custo da sua cesta familiar subir acima desse reajuste. O IPCA-Casa calcula:
+- A variação nominal da renda no período analisado.
+- A variação real do poder de compra por deflação composta: `r = ((1 + g) / (1 + π)) - 1`.
+- O salário de equilíbrio necessário para manter o mesmo padrão de compras sem perda real.
+- O custo mensal e em 12 meses que a inflação retira do bolso em Reais (R$).
+
+## Diferença entre o IPCA Oficial (IBGE) e o IPCA-Casa (Inflação Percebida)
+- **IPCA Oficial (IBGE):** Mede a inflação média das famílias brasileiras com rendimento de 1 a 40 salários mínimos segundo os pesos fixos da Pesquisa de Orçamentos Familiares (POF/IBGE).
+- **IPCA-Casa (Pessoal):** Calcula a inflação específica do domicílio aplicando a fórmula clássica de **Laspeyres** (`IPCA_casa = Σ (w_i × ΔP_i)`), onde `w_i` é o peso real de cada despesa no gasto mensal da família e `ΔP_i` é a variação observada de preço do item.
+
+## Dados oficiais do IBGE e transparência metodológica
+A plataforma consulta diretamente a API pública de dados abertos do **SIDRA / IBGE**:
+- **Tabela 1737:** Série histórica nacional do IPCA — variação mensal (variável 63), acumulado no ano (variável 69) e acumulado em 12 meses (variável 2265).
+- **Tabela 7060:** Abertura por 9 grupos de consumo e índices regionais de capitais e regiões metropolitanas, além dos pesos nacionais (variável 66).
+- Quando há falha ou atraso externo na API, a aplicação exibe claramente o último período efetivamente publicado ou identifica os dados como cache com data de referência, sem inventar estatísticas oficiais.
+- Os valores utilizados no modo demonstração têm finalidade exclusivamente educativa e não representam dados oficiais nem registros reais de usuários.
+
+## Funcionalidades principais
+- Simulador rápido em Reais (R$) na página inicial sem necessidade de cadastro.
+- Consulta pública do IPCA Oficial do IBGE com gráfico histórico, filtro de períodos, grupos de produtos e recorte regional.
+- Painel familiar autenticado para gestão da cesta pessoal, histórico de preços, análise econométrica de Laspeyres (Top vilões vs. maiores altas) e estratégias práticas de economia.
+- Exportação de relatórios executivos e backups estruturados em CSV/JSON sob controle exclusivo do titular.
+
+## Páginas públicas principais
+- **Página Inicial e Simulador Rápido (`/`)**: Apresentação da plataforma, simulador instantâneo em Reais e perguntas frequentes.
+- **Como Funciona (`/como-funciona`)**: Fluxo completo de uso para montar a cesta familiar e interpretar resultados em Reais.
+- **Metodologia e Fórmulas (`/metodologia`)**: Detalhamento matemático do Índice de Laspeyres, peso orçamentário, contribuição em pontos percentuais e deflação salarial.
+- **IPCA Oficial do IBGE (`/ipca-oficial`)**: Indicadores atualizados diretamente do SIDRA/IBGE com variação mensal, ano e 12 meses, grupos e regiões.
+- **Privacidade e Proteção de Dados (`/privacidade`)**: Política clara de isolamento de dados via Firebase Authentication e Cloud Firestore, além de controles de consentimento de analytics.
+
+## Referências oficiais externas
+- IBGE — Página oficial do IPCA: https://www.ibge.gov.br/estatisticas/economicas/precos-e-custos/9256-ipca.html
+- SIDRA / IBGE — Tabela 1737 (Série histórica nacional): https://sidra.ibge.gov.br/tabela/1737
+- SIDRA / IBGE — Tabela 7060 (Grupos de consumo e localidades): https://sidra.ibge.gov.br/tabela/7060

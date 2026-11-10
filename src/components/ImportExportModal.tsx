@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
 import { BasketItem } from '../types';
+import { trackExportData } from '../services/analytics';
 
 interface ImportExportModalProps {
   isOpen: boolean;
@@ -56,6 +57,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
     link.download = `ipca_casa_cesta_${new Date().toISOString().substring(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
+    trackExportData('csv');
   };
 
   // Exportar Backup JSON
@@ -68,6 +70,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
     link.download = `ipca_casa_backup_${new Date().toISOString().substring(0, 10)}.json`;
     link.click();
     URL.revokeObjectURL(url);
+    trackExportData('json');
   };
 
   // Importar arquivo JSON ou CSV

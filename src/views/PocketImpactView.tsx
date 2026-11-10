@@ -6,6 +6,7 @@ import {
   calculateRealIncomeDifference,
   calculateObservedBasketDifference,
 } from '../services/economics';
+import { trackCalculateImpact } from '../services/analytics';
 
 interface PocketImpactViewProps {
   summary: EconomicCalculationSummary;
@@ -83,6 +84,7 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
   const handleSaveIncome = () => {
     if (onUpdateIncome) {
       onUpdateIncome(initialIncomeInput, currentIncomeInput);
+      trackCalculateImpact(perspective, 'pocket-impact');
       setIncomeSavedMsg('Rendas salvas e parâmetros recalculados com sucesso!');
     }
   };
@@ -132,7 +134,10 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
           <div className="flex items-center p-1 bg-[#eff4ff] rounded-xl border border-[#e5eeff]">
             <button
               type="button"
-              onClick={() => setPerspective('ipca-casa')}
+              onClick={() => {
+                setPerspective('ipca-casa');
+                trackCalculateImpact('ipca-casa', 'pocket-impact');
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                 perspective === 'ipca-casa'
                   ? 'bg-[#000000] text-[#ffffff] shadow-sm'
@@ -143,7 +148,10 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setPerspective('ipca-oficial')}
+              onClick={() => {
+                setPerspective('ipca-oficial');
+                trackCalculateImpact('ipca-oficial', 'pocket-impact');
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                 perspective === 'ipca-oficial'
                   ? 'bg-[#000000] text-[#ffffff] shadow-sm'
@@ -154,7 +162,10 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setPerspective('variacao-cesta')}
+              onClick={() => {
+                setPerspective('variacao-cesta');
+                trackCalculateImpact('variacao-cesta', 'pocket-impact');
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                 perspective === 'variacao-cesta'
                   ? 'bg-[#000000] text-[#ffffff] shadow-sm'

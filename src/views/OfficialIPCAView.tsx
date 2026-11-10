@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { IBGESeriesMetadata, fetchOfficialIPCA } from '../services/ibge';
-import { IBGEHistoricalPoint, IBGEGroupDetail, IBGERegionalItem } from '../types';
+import { IBGEHistoricalPoint } from '../types';
+import { trackViewIpca } from '../services/analytics';
 
 interface OfficialIPCAViewProps {
   onNavigateTab?: (tab: any) => void;
+  analyticsSurface?: 'public' | 'dashboard';
 }
 
-export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = () => {
+export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
+  analyticsSurface = 'dashboard',
+}) => {
   const [metadata, setMetadata] = useState<IBGESeriesMetadata | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -21,8 +25,17 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = () => {
     try {
       const data = await fetchOfficialIPCA('N1[all]', force);
       setMetadata(data);
+      trackViewIpca({
+        surface: analyticsSurface,
+        timeframe: timeframeFilter,
+        source_mode: data.isContingencyData ? 'cache' : 'live',
+      });
       if (force) {
-        setFeedbackMessage('Dados oficiais do IBGE sincronizados com sucesso diretamente via SIDRA!');
+        setFeedbackMessage(
+          data.isContingencyData
+            ? 'Consulta externa ao IBGE indisponível no momento. Exibindo dados em cache com data de referência.'
+            : 'Dados oficiais do IBGE sincronizados com sucesso diretamente via SIDRA!'
+        );
         setTimeout(() => setFeedbackMessage(null), 4000);
       }
     } catch (err) {
@@ -70,14 +83,17 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = () => {
           />
           <span className="font-mono text-xs uppercase tracking-wider text-[#45464d] font-semibold">
             {meta.isContingencyData
-              ? 'Dados em Cache de Contingência Auditado'
+              ? `Dados em Cache de Contingência — Referência ${meta.latestMonthLabel}`
               : 'Conexão em Tempo Real com API SIDRA / IBGE'}
           </span>
         </div>
         <div className="flex items-center gap-3 text-xs font-mono text-[#45464d]">
           <span>Ref: {meta.latestMonthLabel}</span>
           <span className="text-[#c6c6cd]">•</span>
-          <span>Sincronizado: {new Date(meta.consultedAt).toLocaleTimeString('pt-BR')}</span>
+          <span>
+            {meta.isContingencyData ? 'Cache em:' : 'Sincronizado:'}{' '}
+            {new Date(meta.consultedAt).toLocaleString('pt-BR')}
+          </span>
         </div>
       </div>
 
@@ -218,9 +234,9 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = () => {
       <div className="bg-[#ffffff] rounded-2xl p-6 shadow-sm border border-[#eff4ff] flex flex-col gap-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#eff4ff]">
           <div>
-            <h3 className="text-base font-bold text-[#0b1c30]">
+            <h2 className="text-base font-bold text-[#0b1c30]">
               Evolução Histórica do IPCA Oficial
-            </h3>
+            </h2>
             <p className="text-xs text-[#45464d]">
               Série de variações mensais divulgadas pelo IBGE nos últimos {timeframeFilter === '12M' ? '12 meses' : '24 meses'}.
             </p>
@@ -230,7 +246,14 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = () => {
             <div className="flex items-center bg-[#eff4ff] p-1 rounded-lg">
               <button
                 type="button"
-                onClick={() => setTimeframeFilter('12M')}
+                onClick={() => {
+                  setTimeframeFilter('12M');
+                  trackViewIpca({
+                    surface: analyticsSurface,
+                    timeframe: '12M',
+                    source_mode: meta.isContingencyData ? 'cache' : 'live',
+                  });
+                }}
                 className={`px-3 py-1 rounded text-xs font-mono font-semibold transition-colors cursor-pointer ${
                   timeframeFilter === '12M'
                     ? 'bg-[#ffffff] text-[#0b1c30] shadow-sm'
@@ -241,7 +264,14 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = () => {
               </button>
               <button
                 type="button"
-                onClick={() => setTimeframeFilter('24M')}
+                onClick={() => {
+                  setTimeframeFilter('24M');
+                  trackViewIpca({
+                    surface: analyticsSurface,
+                    timeframe: '24M',
+                    source_mode: meta.isContingencyData ? 'cache' : 'live',
+                  });
+                }}
                 className={`px-3 py-1 rounded text-xs font-mono font-semibold transition-colors cursor-pointer ${
                   timeframeFilter === '24M'
                     ? 'bg-[#ffffff] text-[#0b1c30] shadow-sm'
@@ -299,9 +329,9 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = () => {
         <div className="lg:col-span-8 bg-[#ffffff] rounded-2xl p-6 shadow-sm border border-[#eff4ff] flex flex-col gap-4">
           <div className="flex items-center justify-between pb-3 border-b border-[#eff4ff]">
             <div>
-              <h3 className="text-base font-bold text-[#0b1c30]">
+              <h2 className="text-base font-bold text-[#0b1c30]">
                 Variações por Grupos de Produtos e Serviços
-              </h3>
+              </h2>
               <p className="text-xs text-[#45464d]">
                 Taxas mensais, acumuladas e peso orçamentário médio na POF/IBGE (Tabela 7060).
               </p>
@@ -355,9 +385,9 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = () => {
                 <span className="material-symbols-outlined text-[20px]">map</span>
               </div>
               <div>
-                <h3 className="text-base font-bold text-[#0b1c30]">
+                <h2 className="text-base font-bold text-[#0b1c30]">
                   Inflação por Região
-                </h3>
+                </h2>
                 <p className="text-xs text-[#45464d]">
                   Selecione uma localidade para comparar com a média nacional.
                 </p>

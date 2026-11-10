@@ -240,7 +240,11 @@ export const Header: React.FC<HeaderProps> = ({
             {userAvatarUrl && !avatarLoadError ? (
               <img
                 src={userAvatarUrl}
-                alt={activeProfile.name}
+                alt={`Foto de perfil de ${activeProfile.name}`}
+                width={32}
+                height={32}
+                loading="lazy"
+                decoding="async"
                 referrerPolicy="no-referrer"
                 onError={() => setAvatarLoadError(true)}
                 onClick={onNavigateToSettings}

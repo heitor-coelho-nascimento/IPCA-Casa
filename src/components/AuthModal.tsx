@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AuthService } from '../services/auth';
 import { UserAccount } from '../types';
-import { GoogleSignInButton, startGoogleOAuthPopup } from './GoogleSignInButton';
+import { GoogleSignInButton } from './GoogleSignInButton';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -48,6 +48,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setGoogleLoading(true);
 
     try {
+      const { startGoogleOAuthPopup } = await import('../services/googleOAuth');
       const result = await startGoogleOAuthPopup();
       if (!result.success || !result.session) {
         setError(result.error || 'Falha ao entrar com Google.');

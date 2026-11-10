@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { FamilyProfile, UserAccount } from '../types';
 import { StorageService } from '../services/storage';
 import { IBGEService } from '../services/ibge';
+import { trackExportData } from '../services/analytics';
 
 interface SettingsViewProps {
   activeProfile: FamilyProfile;
@@ -97,6 +98,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
+    trackExportData('backup_json');
   };
 
   return (
@@ -385,7 +387,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   {currentUser.avatarUrl ? (
                     <img
                       src={currentUser.avatarUrl}
-                      alt={currentUser.displayName}
+                      alt={`Foto de perfil de ${currentUser.displayName}`}
+                      width={32}
+                      height={32}
+                      loading="lazy"
+                      decoding="async"
                       referrerPolicy="no-referrer"
                       className="w-8 h-8 rounded-full object-cover border border-[#ffffff] shrink-0"
                     />

@@ -1,5 +1,6 @@
 import React from 'react';
 import { EconomicCalculationSummary } from '../types';
+import { trackExportData } from '../services/analytics';
 
 interface ReportsViewProps {
   summary: EconomicCalculationSummary;
@@ -20,6 +21,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ summary, isDemo }) => 
   } = summary;
 
   const handlePrint = () => {
+    trackExportData('print_pdf');
     window.print();
   };
 

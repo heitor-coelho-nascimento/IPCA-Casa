@@ -64,12 +64,16 @@
   }
 }
 
-/* Material Symbols standard sizing and alignment */
+/* Material Symbols standard sizing and alignment (prevents font-swap CLS) */
 .material-symbols-outlined {
   font-family: 'Material Symbols Outlined';
   font-weight: normal;
   font-style: normal;
   display: inline-block;
+  width: 1em;
+  height: 1em;
+  overflow: hidden;
+  flex-shrink: 0;
   line-height: 1;
   text-transform: none;
   letter-spacing: normal;
@@ -77,6 +81,7 @@
   white-space: nowrap;
   direction: ltr;
   vertical-align: middle;
+  user-select: none;
   font-feature-settings: 'liga';
   -webkit-font-smoothing: antialiased;
 }

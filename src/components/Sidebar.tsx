@@ -148,7 +148,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {userAvatar ? (
               <img
                 src={userAvatar}
-                alt={userName}
+                alt={`Avatar de ${userName}`}
+                width={28}
+                height={28}
+                loading="lazy"
+                decoding="async"
                 referrerPolicy="no-referrer"
                 className="w-7 h-7 rounded-full object-cover border border-[#e5eeff] shrink-0"
               />
