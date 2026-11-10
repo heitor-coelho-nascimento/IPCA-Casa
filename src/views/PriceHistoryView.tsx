@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { BasketItem, PriceHistory, EconomicCalculationSummary } from '../types';
 import { StorageService } from '../services/storage';
 
@@ -7,6 +7,14 @@ interface PriceHistoryViewProps {
   onRefreshData: () => void;
   isDemo: boolean;
   selectedItemForHistory?: BasketItem | null;
+  priceRecords?: PriceHistory[];
+  onAddPriceRecord?: (record: {
+    itemId: string;
+    price: number;
+    referenceDate: string;
+    unit?: string;
+    origin?: string;
+  }) => void | Promise<void>;
 }
 
 export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
@@ -14,19 +22,41 @@ export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
   onRefreshData,
   isDemo,
   selectedItemForHistory,
+  priceRecords: propPriceRecords,
+  onAddPriceRecord,
 }) => {
   const { calculatedItems } = summary;
   const [selectedItemId, setSelectedItemId] = useState<string>(
     selectedItemForHistory?.id || calculatedItems[0]?.id || ''
   );
 
+  useEffect(() => {
+    if (selectedItemForHistory?.id) {
+      setSelectedItemId(selectedItemForHistory.id);
+    } else if ((!selectedItemId || !calculatedItems.some((i) => i.id === selectedItemId)) && calculatedItems[0]?.id) {
+      setSelectedItemId(calculatedItems[0].id);
+    }
+  }, [selectedItemForHistory, calculatedItems, selectedItemId]);
+
   const selectedItem = calculatedItems.find((i) => i.id === selectedItemId);
-  const [priceHistory, setPriceHistory] = useState<PriceHistory[]>(() => {
-    if (selectedItemId) {
+  const [localPriceHistory, setLocalPriceHistory] = useState<PriceHistory[]>(() => {
+    if (selectedItemId && !propPriceRecords) {
       return StorageService.getPriceHistory(selectedItemId);
     }
     return [];
   });
+
+  useEffect(() => {
+    if (!propPriceRecords) {
+      setLocalPriceHistory(selectedItemId ? StorageService.getPriceHistory(selectedItemId) : []);
+    }
+  }, [selectedItemId, propPriceRecords, isDemo]);
+
+  const priceHistory = propPriceRecords
+    ? propPriceRecords
+        .filter((p) => p.itemId === selectedItemId)
+        .sort((a, b) => a.referenceDate.localeCompare(b.referenceDate))
+    : localPriceHistory;
 
   // Modal / Formulário rápido de novo preço
   const [isAddingPrice, setIsAddingPrice] = useState(false);
@@ -39,23 +69,31 @@ export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
     const item = calculatedItems.find((i) => i.id === id);
     if (item) {
       setNewPrice(item.currentPrice);
-      setPriceHistory(StorageService.getPriceHistory(id));
+    }
+    if (!propPriceRecords) {
+      setLocalPriceHistory(StorageService.getPriceHistory(id));
     }
   };
 
-  const handleSaveNewPrice = (e: React.FormEvent) => {
+  const handleSaveNewPrice = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedItemId || newPrice <= 0) return;
 
-    StorageService.addPriceRecord({
+    const recordPayload = {
       itemId: selectedItemId,
       price: newPrice,
       referenceDate: newDate,
       unit: selectedItem?.unit || 'un',
       origin: newOrigin,
-    });
+    };
 
-    setPriceHistory(StorageService.getPriceHistory(selectedItemId));
+    if (onAddPriceRecord) {
+      await onAddPriceRecord(recordPayload);
+    } else {
+      StorageService.addPriceRecord(recordPayload);
+      setLocalPriceHistory(StorageService.getPriceHistory(selectedItemId));
+    }
+
     setIsAddingPrice(false);
     onRefreshData();
   };
@@ -104,8 +142,12 @@ export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
 
         <button
           type="button"
-          onClick={() => setIsAddingPrice(true)}
-          className="h-10 px-4 rounded-lg bg-[#000000] text-[#ffffff] hover:bg-[#213145] text-xs font-mono font-semibold transition-all shadow-sm flex items-center gap-2 cursor-pointer shrink-0"
+          onClick={() => {
+            setNewPrice(selectedItem?.currentPrice || 0);
+            setIsAddingPrice(true);
+          }}
+          disabled={!selectedItem}
+          className="h-10 px-4 rounded-lg bg-[#000000] text-[#ffffff] hover:bg-[#213145] text-xs font-mono font-semibold transition-all shadow-sm flex items-center gap-2 cursor-pointer shrink-0 disabled:opacity-50"
         >
           <span className="material-symbols-outlined text-[18px]">add_chart</span>
           <span>Registrar Nova Cotação</span>
@@ -290,28 +332,36 @@ export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#eff4ff] text-[#0b1c30]">
-                      {priceHistory.map((record) => (
-                        <tr key={record.id} className="hover:bg-[#eff4ff]/60 transition-colors">
-                          <td className="py-3 px-4 font-mono font-semibold">
-                            {new Date(record.referenceDate).toLocaleDateString('pt-BR')}
-                          </td>
-                          <td className="py-3 px-4 font-mono font-bold text-[#0b1c30]">
-                            R$ {record.price.toFixed(2).replace('.', ',')}
-                          </td>
-                          <td className="py-3 px-4 font-mono text-[#76777d]">
-                            {record.unit || selectedItem.unit || 'un'}
-                          </td>
-                          <td className="py-3 px-4 text-[#45464d]">
-                            <span className="inline-flex items-center gap-1.5">
-                              <span className="material-symbols-outlined text-[15px] text-[#76777d]">storefront</span>
-                              {record.source || 'Supermercado Local'}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 text-right font-mono text-[11px] text-[#76777d]">
-                            {new Date(record.createdAt).toLocaleDateString('pt-BR')}
+                      {priceHistory.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="py-6 px-4 text-center text-[#76777d] font-mono">
+                            Nenhuma cotação histórica registrada ainda para este item. Clique em &quot;Registrar Nova Cotação&quot; para iniciar a série.
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        priceHistory.map((record) => (
+                          <tr key={record.id} className="hover:bg-[#eff4ff]/60 transition-colors">
+                            <td className="py-3 px-4 font-mono font-semibold">
+                              {new Date(record.referenceDate).toLocaleDateString('pt-BR')}
+                            </td>
+                            <td className="py-3 px-4 font-mono font-bold text-[#0b1c30]">
+                              R$ {record.price.toFixed(2).replace('.', ',')}
+                            </td>
+                            <td className="py-3 px-4 font-mono text-[#76777d]">
+                              {record.unit || selectedItem.unit || 'un'}
+                            </td>
+                            <td className="py-3 px-4 text-[#45464d]">
+                              <span className="inline-flex items-center gap-1.5">
+                                <span className="material-symbols-outlined text-[15px] text-[#76777d]">storefront</span>
+                                {record.source || 'Supermercado Local'}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-right font-mono text-[11px] text-[#76777d]">
+                              {new Date(record.createdAt).toLocaleDateString('pt-BR')}
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>

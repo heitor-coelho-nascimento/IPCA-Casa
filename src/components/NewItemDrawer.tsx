@@ -8,6 +8,7 @@ interface NewItemDrawerProps {
   onSave: (item: Partial<BasketItem>) => void;
   editingItem: BasketItem | null;
   totalMonthlySpend: number;
+  groups?: ConsumptionGroup[];
 }
 
 export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
@@ -16,6 +17,7 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
   onSave,
   editingItem,
   totalMonthlySpend,
+  groups: propGroups,
 }) => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -29,10 +31,10 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
   const [unit, setUnit] = useState('unidade');
   const [notes, setNotes] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
-  const [groups, setGroups] = useState<ConsumptionGroup[]>(() => StorageService.getGroups());
+  const [groups, setGroups] = useState<ConsumptionGroup[]>(() => propGroups ?? StorageService.getGroups());
 
   useEffect(() => {
-    setGroups(StorageService.getGroups());
+    setGroups(propGroups ?? StorageService.getGroups());
     if (editingItem) {
       setName(editingItem.name);
       setDescription(editingItem.description || '');

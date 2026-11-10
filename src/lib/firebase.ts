@@ -1,41 +1,111 @@
 /**
- * IPCA-Casa: Inicialização Client-Side do Firebase Auth exclusivamente para Login com Google.
- * A persistência de dados continua no repositório MySQL/local configurado no servidor.
+ * IPCA-Casa: Configuração e Inicialização Oficial do Firebase (Auth + Cloud Firestore)
+ * Utiliza o banco Cloud Firestore provisionado em firebase-applet-config.json.
  */
-import { getApp, getApps, initializeApp, FirebaseApp } from 'firebase/app';
+import { FirebaseApp, getApp, getApps, initializeApp } from 'firebase/app';
 import {
   Auth,
-  getAuth,
   GoogleAuthProvider,
+  User,
+  getAuth,
+  onAuthStateChanged,
   signInWithPopup,
   signOut,
 } from 'firebase/auth';
+import {
+  Firestore,
+  doc,
+  getDocFromServer,
+  getFirestore,
+} from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-let cachedApp: FirebaseApp | null = null;
-let cachedAuth: Auth | null = null;
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
 
-export function isFirebaseGoogleAuthAvailable(): boolean {
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  };
+}
+
+export function isFirebaseConfigured(): boolean {
   return Boolean(
     firebaseConfig?.apiKey &&
       firebaseConfig?.projectId &&
       firebaseConfig?.authDomain &&
+      firebaseConfig?.firestoreDatabaseId &&
       firebaseConfig.projectId !== 'remixed-project-id'
   );
 }
 
-function getFirebaseAuthInstance(): Auth {
-  if (!isFirebaseGoogleAuthAvailable()) {
-    throw new Error('Autenticação Google não configurada neste ambiente.');
-  }
+const app: FirebaseApp | null = isFirebaseConfigured()
+  ? getApps().length
+    ? getApp()
+    : initializeApp(firebaseConfig)
+  : null;
 
-  if (!cachedApp) {
-    cachedApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
+export const auth: Auth | null = app ? getAuth(app) : null;
+export const db: Firestore | null = app
+  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+  : null;
+
+export function handleFirestoreError(
+  error: unknown,
+  operationType: OperationType,
+  path: string | null
+): never {
+  const currentUser = auth?.currentUser;
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: currentUser?.uid ?? null,
+      email: currentUser?.email ?? null,
+      emailVerified: currentUser?.emailVerified ?? null,
+      isAnonymous: currentUser?.isAnonymous ?? null,
+      tenantId: currentUser?.tenantId ?? null,
+      providerInfo:
+        currentUser?.providerData?.map((provider) => ({
+          providerId: provider.providerId,
+          email: provider.email,
+        })) || [],
+    },
+    operationType,
+    path,
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+export async function testFirestoreConnection(): Promise<boolean> {
+  if (!db) return false;
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+    return true;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.error('Verifique a configuração do Firebase: cliente Firestore offline.');
+      return false;
+    }
+    return true;
   }
-  if (!cachedAuth) {
-    cachedAuth = getAuth(cachedApp);
-  }
-  return cachedAuth;
 }
 
 function createGoogleProvider(): GoogleAuthProvider {
@@ -60,9 +130,9 @@ export function mapFirebaseAuthError(err: unknown): string {
     case 'auth/popup-blocked':
       return 'O navegador bloqueou a janela de login do Google. Permita pop-ups para este site e tente novamente.';
     case 'auth/unauthorized-domain':
-      return 'Este domínio não está autorizado no provedor de login Google.';
+      return 'Este domínio não está autorizado no Firebase Authentication.';
     case 'auth/network-request-failed':
-      return 'Erro de rede ao conectar com o Google. Verifique sua conexão e tente novamente.';
+      return 'Erro de rede ao conectar com o Firebase/Google. Verifique sua conexão e tente novamente.';
     case 'auth/account-exists-with-different-credential':
       return 'Já existe uma conta cadastrada com este e-mail usando outro método de login.';
     default:
@@ -72,23 +142,33 @@ export function mapFirebaseAuthError(err: unknown): string {
   }
 }
 
-export async function signInWithGooglePopup(): Promise<{ idToken: string }> {
-  const auth = getFirebaseAuthInstance();
+export async function signInWithGooglePopup(): Promise<User> {
+  if (!auth) {
+    throw new Error('Firebase Authentication não está configurado neste ambiente.');
+  }
   const provider = createGoogleProvider();
   const result = await signInWithPopup(auth, provider);
-  const idToken = await result.user.getIdToken();
-  if (!idToken) {
-    throw new Error('Não foi possível obter o token de verificação do Google.');
+  if (!result.user) {
+    throw new Error('Não foi possível obter os dados da sua conta Google.');
   }
-  return { idToken };
+  return result.user;
 }
 
 export async function signOutFirebase(): Promise<void> {
-  if (!isFirebaseGoogleAuthAvailable() || !getApps().length) return;
+  if (!auth) return;
   try {
-    const auth = getFirebaseAuthInstance();
     await signOut(auth);
   } catch {
-    // Ignora falhas silenciosas ao limpar sessão auxiliar do Firebase
+    // Ignora falhas silenciosas ao encerrar sessão Firebase
   }
+}
+
+export function subscribeFirebaseAuthState(
+  callback: (user: User | null) => void
+): () => void {
+  if (!auth) {
+    callback(null);
+    return () => {};
+  }
+  return onAuthStateChanged(auth, callback);
 }

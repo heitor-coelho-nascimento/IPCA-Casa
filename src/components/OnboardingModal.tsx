@@ -2,11 +2,18 @@ import React, { useState } from 'react';
 import { FamilyProfile, BasketItem } from '../types';
 import { DEMO_BASKET_ITEMS, StorageService } from '../services/storage';
 
+export interface OnboardingBundle {
+  initialIncome: number;
+  currentIncome: number;
+  items: BasketItem[];
+}
+
 interface OnboardingModalProps {
   isOpen: boolean;
   userDisplayName: string;
   targetProfileId?: string;
-  onFinish: (profile: FamilyProfile) => void;
+  skipLocalPersistence?: boolean;
+  onFinish: (profile: FamilyProfile, bundle?: OnboardingBundle) => void;
   onSkip: () => void;
 }
 
@@ -14,6 +21,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   isOpen,
   userDisplayName,
   targetProfileId,
+  skipLocalPersistence = false,
   onFinish,
   onSkip,
 }) => {
@@ -41,7 +49,6 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   if (!isOpen) return null;
 
   const handleComplete = () => {
-    // 1. Salva perfil do usuário
     const profileId = targetProfileId || `prof_user_${Date.now()}`;
     const newProfile: FamilyProfile = {
       id: profileId,
@@ -53,23 +60,16 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    StorageService.saveProfile(newProfile);
-    StorageService.setActiveProfileId(profileId);
 
-    // 2. Salva histórico de renda inicial
-    StorageService.saveIncome(initialIncome, currentIncome);
-
-    // 3. Configura itens da cesta no perfil do usuário
+    let onboardingItems: BasketItem[];
     if (basketChoice === 'copy-demo') {
-      const clonedDemoItems: BasketItem[] = DEMO_BASKET_ITEMS.map((item, idx) => ({
+      onboardingItems = DEMO_BASKET_ITEMS.map((item, idx) => ({
         ...item,
         id: `item-usr-${Date.now()}-${idx}`,
         profileId,
       }));
-      StorageService.importItems(clonedDemoItems);
     } else {
-      // Inicia com os 3 itens informados no onboarding
-      const itemsToAdd: BasketItem[] = [
+      onboardingItems = [
         {
           id: `item-ob-1-${Date.now()}`,
           profileId,
@@ -119,10 +119,20 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
           updatedAt: new Date().toISOString(),
         },
       ];
-      StorageService.importItems(itemsToAdd);
     }
 
-    onFinish(newProfile);
+    if (!skipLocalPersistence) {
+      StorageService.saveProfile(newProfile);
+      StorageService.setActiveProfileId(profileId);
+      StorageService.saveIncome(initialIncome, currentIncome);
+      StorageService.importItems(onboardingItems);
+    }
+
+    onFinish(newProfile, {
+      initialIncome,
+      currentIncome,
+      items: onboardingItems,
+    });
   };
 
   return (

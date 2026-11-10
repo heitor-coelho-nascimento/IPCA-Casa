@@ -1,10 +1,11 @@
 import React from 'react';
-import { AuthSession, UserAccount } from '../types';
+import { AuthSession } from '../types';
 import {
-  isFirebaseGoogleAuthAvailable,
+  isFirebaseConfigured,
   mapFirebaseAuthError,
   signInWithGooglePopup,
 } from '../lib/firebase';
+import { FirestoreService } from '../services/firestore';
 
 export interface GoogleLoginResult {
   success: boolean;
@@ -14,145 +15,32 @@ export interface GoogleLoginResult {
 }
 
 export async function startGoogleOAuthPopup(): Promise<GoogleLoginResult> {
-  if (isFirebaseGoogleAuthAvailable()) {
-    try {
-      const { idToken } = await signInWithGooglePopup();
-      const response = await fetch('/api/auth/google/firebase', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ idToken }),
-      });
-
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data?.session?.user) {
-        return {
-          success: false,
-          error:
-            data?.error ||
-            'Não foi possível validar sua conta Google no servidor. Tente novamente.',
-        };
-      }
-
-      return {
-        success: true,
-        session: data.session as AuthSession,
-        isNewUser: Boolean(data.isNewUser),
-      };
-    } catch (err) {
-      return {
-        success: false,
-        error: mapFirebaseAuthError(err),
-      };
-    }
+  if (!isFirebaseConfigured()) {
+    return {
+      success: false,
+      error: 'Autenticação Google via Firebase não está configurada neste ambiente.',
+    };
   }
 
   try {
-    const originParam = encodeURIComponent(window.location.origin);
-    const response = await fetch(`/api/auth/google/url?origin=${originParam}`, {
-      credentials: 'include',
-    });
-
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || !data.url) {
+    const firebaseUser = await signInWithGooglePopup();
+    if (!firebaseUser.email || firebaseUser.emailVerified === false) {
       return {
         success: false,
-        error:
-          data.error ||
-          'Login com Google não está disponível no momento. Verifique as credenciais OAuth no servidor.',
+        error: 'Sua conta Google precisa possuir um e-mail verificado.',
       };
     }
 
-    const width = 520;
-    const height = 640;
-    const left = Math.max(0, window.screenX + (window.outerWidth - width) / 2);
-    const top = Math.max(0, window.screenY + (window.outerHeight - height) / 2);
-
-    const popup = window.open(
-      data.url,
-      'ipca_casa_google_oauth',
-      `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
-    );
-
-    if (!popup) {
-      return {
-        success: false,
-        error: 'O navegador bloqueou a janela de login do Google. Permita pop-ups para este site e tente novamente.',
-      };
-    }
-
-    return await new Promise<GoogleLoginResult>((resolve) => {
-      let settled = false;
-
-      const cleanup = () => {
-        window.removeEventListener('message', onMessage);
-        window.clearInterval(pollTimer);
-        window.clearTimeout(timeoutTimer);
-      };
-
-      const finish = (result: GoogleLoginResult) => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        resolve(result);
-      };
-
-      const onMessage = (event: MessageEvent) => {
-        const origin = event.origin || '';
-        const isAllowedOrigin =
-          origin === window.location.origin ||
-          origin.endsWith('.run.app') ||
-          origin.includes('localhost') ||
-          origin.includes('127.0.0.1');
-
-        if (!isAllowedOrigin) return;
-
-        if (event.data?.type === 'GOOGLE_OAUTH_SUCCESS' && event.data?.payload?.user) {
-          const user = event.data.payload.user as UserAccount;
-          const token = String(event.data.payload.token || '');
-          const isNewUser = Boolean(event.data.payload.isNewUser);
-          finish({
-            success: true,
-            session: { user, token },
-            isNewUser,
-          });
-        } else if (event.data?.type === 'GOOGLE_OAUTH_ERROR') {
-          finish({
-            success: false,
-            error: event.data.error || 'Falha ao autenticar com o Google.',
-          });
-        }
-      };
-
-      window.addEventListener('message', onMessage);
-
-      const pollTimer = window.setInterval(() => {
-        try {
-          if (popup.closed) {
-            // Pequeno atraso para dar chance ao postMessage chegar antes do fechamento
-            window.setTimeout(() => {
-              finish({
-                success: false,
-                error: 'A janela de autenticação com o Google foi fechada antes da conclusão.',
-              });
-            }, 350);
-          }
-        } catch {
-          // Ignora bloqueios de leitura cross-origin caso ocorram
-        }
-      }, 400);
-
-      const timeoutTimer = window.setTimeout(() => {
-        finish({
-          success: false,
-          error: 'Tempo limite excedido ao aguardar resposta do Google.',
-        });
-      }, 180000);
-    });
-  } catch {
+    const { user, isNewUser } = await FirestoreService.ensureUserBootstrapped(firebaseUser);
+    return {
+      success: true,
+      session: { user, token: '' },
+      isNewUser,
+    };
+  } catch (err) {
     return {
       success: false,
-      error: 'Erro de conexão ao iniciar autenticação com o Google.',
+      error: mapFirebaseAuthError(err),
     };
   }
 }

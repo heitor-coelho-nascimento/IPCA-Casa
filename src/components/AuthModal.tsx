@@ -52,7 +52,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       if (!result.success || !result.session) {
         setError(result.error || 'Falha ao entrar com Google.');
       } else {
-        AuthService.setSession(result.session);
         onSuccess(result.session.user, Boolean(result.isNewUser));
         onClose();
       }
@@ -69,41 +68,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setLoading(true);
 
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ email, password }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.session) {
-          AuthService.setSession(data.session);
-          onSuccess(data.session.user, false);
-          onClose();
-          return;
-        }
-      }
-
-      // Fallback para contas locais já armazenadas no navegador antes de sincronizar com MySQL
       const localResult = await AuthService.login({ email, password });
       if (localResult.success && localResult.session) {
         onSuccess(localResult.session.user, false);
         onClose();
         return;
       }
-
-      const apiData = await res.json().catch(() => ({}));
-      setError(apiData.error || localResult.error || 'Falha ao autenticar.');
+      setError(localResult.error || 'Falha ao autenticar.');
     } catch {
-      const fallback = await AuthService.login({ email, password });
-      if (fallback.success && fallback.session) {
-        onSuccess(fallback.session.user, false);
-        onClose();
-      } else {
-        setError(fallback.error || 'Erro ao processar autenticação. Tente novamente.');
-      }
+      setError('Erro ao processar autenticação. Tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -120,26 +93,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ email, displayName, password }),
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data?.session) {
-        AuthService.setSession(data.session);
-        onSuccess(data.session.user, true);
-        onClose();
-        return;
-      }
-
-      if (res.status >= 400 && res.status < 500) {
-        setError(data.error || 'Falha ao cadastrar conta.');
-        return;
-      }
-
       const localResult = await AuthService.register({ email, displayName, password });
       if (!localResult.success || !localResult.session) {
         setError(localResult.error || 'Falha ao cadastrar conta.');
@@ -148,13 +101,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         onClose();
       }
     } catch {
-      const fallback = await AuthService.register({ email, displayName, password });
-      if (!fallback.success || !fallback.session) {
-        setError(fallback.error || 'Erro ao registrar conta. Tente novamente.');
-      } else {
-        onSuccess(fallback.session.user, true);
-        onClose();
-      }
+      setError('Erro ao registrar conta. Tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -255,12 +202,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               onClick={handleGoogleSignIn}
               loading={googleLoading}
               disabled={loading}
-              label={mode === 'register' ? 'Cadastrar com Google' : 'Continuar com Google'}
+              label={mode === 'register' ? 'Cadastrar com Google (Nuvem)' : 'Continuar com Google (Nuvem)'}
               className="w-full"
             />
+            <p className="text-[11px] text-[#76777d] text-center leading-snug">
+              A sincronização em nuvem no Cloud Firestore utiliza Login com Google. E-mail e senha operam localmente neste navegador.
+            </p>
             <div className="flex items-center gap-3">
               <div className="flex-1 h-px bg-[#eff4ff]" />
-              <span className="text-[11px] font-mono text-[#76777d]">ou com e-mail e senha</span>
+              <span className="text-[11px] font-mono text-[#76777d]">ou acesso local neste dispositivo</span>
               <div className="flex-1 h-px bg-[#eff4ff]" />
             </div>
           </div>
@@ -437,7 +387,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               2. <strong>Dados Oficiais:</strong> Os indicadores do IPCA são coletados diretamente da API pública do SIDRA/IBGE para fins de auditoria e cálculo do poder de compra real.
             </p>
             <p>
-              3. <strong>Segurança de Acesso:</strong> Senhas de usuários são criptografadas com hash SHA-256 e contas Google utilizam autenticação OAuth 2.0 com tokens assinados.
+              3. <strong>Segurança de Acesso:</strong> Contas Google utilizam Firebase Authentication com verificação de identidade e isolamento automático por usuário via Cloud Firestore Security Rules.
             </p>
             <button
               type="button"

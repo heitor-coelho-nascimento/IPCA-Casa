@@ -1,0 +1,445 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Global Security Primitives
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isBoundedString(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isNonNegativeNumber(val) {
+      return (val is int || val is float) && val >= 0;
+    }
+
+    function userExists(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId));
+    }
+
+    function profileExists(userId, profileId) {
+      return exists(/databases/$(database)/documents/users/$(userId)/profiles/$(profileId));
+    }
+
+    function itemExists(userId, itemId) {
+      return exists(/databases/$(database)/documents/users/$(userId)/basketItems/$(itemId));
+    }
+
+    // 3. Entity Validation Blueprints (Anti-Update-Gap)
+    function isValidUserPublic(data, userId) {
+      return data.keys().hasAll([
+          'id', 'userId', 'displayName', 'authProvider', 'defaultProfileId', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'userId', 'displayName', 'avatarUrl', 'authProvider', 'defaultProfileId', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.id == userId &&
+        data.userId == request.auth.uid &&
+        data.userId == userId &&
+        isBoundedString(data.displayName, 1, 120) &&
+        (!('avatarUrl' in data) || isBoundedString(data.avatarUrl, 0, 1000)) &&
+        data.authProvider in ['google', 'local'] &&
+        isValidId(data.defaultProfileId) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUserPrivate(data, userId) {
+      return data.keys().hasAll(['id', 'userId', 'email', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'userId', 'email', 'createdAt', 'updatedAt']) &&
+        data.id == 'account' &&
+        data.userId == request.auth.uid &&
+        data.userId == userId &&
+        isBoundedString(data.email, 3, 255) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidFamilyProfile(data, userId, profileId) {
+      return data.keys().hasAll([
+          'id', 'userId', 'name', 'membersCount', 'referenceRegion', 'currency', 'isDemo', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'userId', 'name', 'membersCount', 'referenceRegion', 'currency', 'isDemo', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.id == profileId &&
+        data.userId == request.auth.uid &&
+        data.userId == userId &&
+        isBoundedString(data.name, 1, 120) &&
+        data.membersCount is int &&
+        data.membersCount >= 1 &&
+        data.membersCount <= 50 &&
+        isBoundedString(data.referenceRegion, 1, 120) &&
+        isBoundedString(data.currency, 1, 10) &&
+        data.isDemo is bool &&
+        data.isDemo == false &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidBasketItem(data, userId, itemId) {
+      return data.keys().hasAll([
+          'id', 'userId', 'profileId', 'name', 'group', 'classification',
+          'monthlySpend', 'oldPrice', 'currentPrice', 'oldPriceDate', 'currentPriceDate',
+          'unit', 'active', 'isArchived', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'userId', 'profileId', 'name', 'description', 'group', 'classification',
+          'monthlySpend', 'oldPrice', 'currentPrice', 'oldPriceDate', 'currentPriceDate',
+          'unit', 'notes', 'active', 'isArchived', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.id == itemId &&
+        data.userId == request.auth.uid &&
+        data.userId == userId &&
+        isValidId(data.profileId) &&
+        isBoundedString(data.name, 1, 200) &&
+        (!('description' in data) || isBoundedString(data.description, 0, 500)) &&
+        isBoundedString(data.group, 1, 120) &&
+        data.classification in ['Essencial', 'Supérfluo', 'Não classificado'] &&
+        isNonNegativeNumber(data.monthlySpend) &&
+        isNonNegativeNumber(data.oldPrice) &&
+        isNonNegativeNumber(data.currentPrice) &&
+        isBoundedString(data.oldPriceDate, 0, 32) &&
+        isBoundedString(data.currentPriceDate, 0, 32) &&
+        isBoundedString(data.unit, 1, 40) &&
+        (!('notes' in data) || isBoundedString(data.notes, 0, 1000)) &&
+        data.active is bool &&
+        data.isArchived is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidPriceRecord(data, userId, priceId) {
+      return data.keys().hasAll(['id', 'userId', 'itemId', 'price', 'referenceDate', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'userId', 'itemId', 'price', 'referenceDate', 'unit', 'source', 'notes', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.id == priceId &&
+        data.userId == request.auth.uid &&
+        data.userId == userId &&
+        isValidId(data.itemId) &&
+        isNonNegativeNumber(data.price) &&
+        isBoundedString(data.referenceDate, 1, 32) &&
+        (!('unit' in data) || isBoundedString(data.unit, 0, 40)) &&
+        (!('source' in data) || isBoundedString(data.source, 0, 255)) &&
+        (!('notes' in data) || isBoundedString(data.notes, 0, 500)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidIncomeRecord(data, userId, incomeId) {
+      return data.keys().hasAll(['id', 'userId', 'profileId', 'referenceDate', 'nominalIncome', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'userId', 'profileId', 'referenceDate', 'nominalIncome', 'source', 'notes', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.id == incomeId &&
+        data.userId == request.auth.uid &&
+        data.userId == userId &&
+        isValidId(data.profileId) &&
+        isBoundedString(data.referenceDate, 1, 32) &&
+        isNonNegativeNumber(data.nominalIncome) &&
+        (!('source' in data) || isBoundedString(data.source, 0, 255)) &&
+        (!('notes' in data) || isBoundedString(data.notes, 0, 500)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidConsumptionGroup(data, userId, groupId) {
+      return data.keys().hasAll(['id', 'userId', 'name', 'description', 'color', 'icon', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'userId', 'name', 'description', 'color', 'icon', 'nationalWeightIBGE', 'isCustom', 'active', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.id == groupId &&
+        data.userId == request.auth.uid &&
+        data.userId == userId &&
+        isBoundedString(data.name, 1, 120) &&
+        isBoundedString(data.description, 0, 300) &&
+        isBoundedString(data.color, 1, 32) &&
+        isBoundedString(data.icon, 1, 64) &&
+        (!('nationalWeightIBGE' in data) || (isNonNegativeNumber(data.nationalWeightIBGE) && data.nationalWeightIBGE <= 100)) &&
+        (!('isCustom' in data) || data.isCustom is bool) &&
+        (!('active' in data) || data.active is bool) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSavingStrategy(data, userId, strategyId) {
+      return data.keys().hasAll([
+          'id', 'userId', 'profileId', 'planType', 'title', 'applied', 'monthlySavings', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'userId', 'profileId', 'planType', 'title', 'description', 'applied', 'monthlySavings',
+          'originalItemId', 'originalItemName', 'originalPrice', 'substituteName', 'substitutePrice',
+          'qualitativeTradeoff', 'resourceName', 'unit', 'tariffPerUnit', 'currentConsumption',
+          'targetConsumption', 'currentSpend', 'progressPercent', 'notes', 'monthlyInvestment',
+          'nominalAnnualRate', 'expectedAnnualInflation', 'realAnnualYield',
+          'projection12Months', 'projection24Months', 'projection36Months', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.id == strategyId &&
+        data.userId == request.auth.uid &&
+        data.userId == userId &&
+        isValidId(data.profileId) &&
+        data.planType in ['PLAN_A', 'PLAN_B', 'PLAN_C'] &&
+        isBoundedString(data.title, 1, 200) &&
+        (!('description' in data) || isBoundedString(data.description, 0, 600)) &&
+        data.applied is bool &&
+        isNonNegativeNumber(data.monthlySavings) &&
+        (!('originalItemId' in data) || isBoundedString(data.originalItemId, 0, 128)) &&
+        (!('originalItemName' in data) || isBoundedString(data.originalItemName, 0, 200)) &&
+        (!('originalPrice' in data) || isNonNegativeNumber(data.originalPrice)) &&
+        (!('substituteName' in data) || isBoundedString(data.substituteName, 0, 200)) &&
+        (!('substitutePrice' in data) || isNonNegativeNumber(data.substitutePrice)) &&
+        (!('qualitativeTradeoff' in data) || isBoundedString(data.qualitativeTradeoff, 0, 600)) &&
+        (!('resourceName' in data) || isBoundedString(data.resourceName, 0, 200)) &&
+        (!('unit' in data) || isBoundedString(data.unit, 0, 40)) &&
+        (!('tariffPerUnit' in data) || isNonNegativeNumber(data.tariffPerUnit)) &&
+        (!('currentConsumption' in data) || isNonNegativeNumber(data.currentConsumption)) &&
+        (!('targetConsumption' in data) || isNonNegativeNumber(data.targetConsumption)) &&
+        (!('currentSpend' in data) || isNonNegativeNumber(data.currentSpend)) &&
+        (!('progressPercent' in data) || isNonNegativeNumber(data.progressPercent)) &&
+        (!('notes' in data) || isBoundedString(data.notes, 0, 600)) &&
+        (!('monthlyInvestment' in data) || isNonNegativeNumber(data.monthlyInvestment)) &&
+        (!('nominalAnnualRate' in data) || isNonNegativeNumber(data.nominalAnnualRate)) &&
+        (!('expectedAnnualInflation' in data) || isNonNegativeNumber(data.expectedAnnualInflation)) &&
+        (!('realAnnualYield' in data) || (data.realAnnualYield is int || data.realAnnualYield is float)) &&
+        (!('projection12Months' in data) || isNonNegativeNumber(data.projection12Months)) &&
+        (!('projection24Months' in data) || isNonNegativeNumber(data.projection24Months)) &&
+        (!('projection36Months' in data) || isNonNegativeNumber(data.projection36Months)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // 4. Collection Rules
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false;
+      allow create: if isOwner(userId) &&
+        isValidId(userId) &&
+        isValidUserPublic(incoming(), userId) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isOwner(userId) &&
+        isValidId(userId) &&
+        isValidUserPublic(incoming(), userId) &&
+        incoming().id == existing().id &&
+        incoming().userId == existing().userId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'displayName', 'avatarUrl', 'authProvider', 'defaultProfileId', 'updatedAt'
+        ]);
+      allow delete: if false;
+
+      // Isolated PII subcollection
+      match /private/{docId} {
+        allow get: if isOwner(userId) && docId == 'account' && userExists(userId);
+        allow list: if false;
+        allow create: if isOwner(userId) &&
+          docId == 'account' &&
+          isValidUserPrivate(incoming(), userId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          (userExists(userId) || existsAfter(/databases/$(database)/documents/users/$(userId)));
+        allow update: if isOwner(userId) &&
+          docId == 'account' &&
+          userExists(userId) &&
+          isValidUserPrivate(incoming(), userId) &&
+          incoming().id == existing().id &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['email', 'updatedAt']);
+        allow delete: if false;
+      }
+
+      // Family Profiles
+      match /profiles/{profileId} {
+        allow get: if isOwner(userId) && isValidId(profileId) && userExists(userId);
+        allow list: if isOwner(userId) && existing().userId == request.auth.uid;
+        allow create: if isOwner(userId) &&
+          isValidId(profileId) &&
+          isValidFamilyProfile(incoming(), userId, profileId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          (userExists(userId) || existsAfter(/databases/$(database)/documents/users/$(userId)));
+        allow update: if isOwner(userId) &&
+          isValidId(profileId) &&
+          userExists(userId) &&
+          isValidFamilyProfile(incoming(), userId, profileId) &&
+          incoming().id == existing().id &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'membersCount', 'referenceRegion', 'currency', 'updatedAt'
+          ]);
+        allow delete: if isOwner(userId) && isValidId(profileId) && userExists(userId);
+      }
+
+      // Basket Items
+      match /basketItems/{itemId} {
+        allow get: if isOwner(userId) && isValidId(itemId) && userExists(userId);
+        allow list: if isOwner(userId) && existing().userId == request.auth.uid;
+        allow create: if isOwner(userId) &&
+          isValidId(itemId) &&
+          isValidBasketItem(incoming(), userId, itemId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          userExists(userId) &&
+          profileExists(userId, incoming().profileId);
+        allow update: if isOwner(userId) &&
+          isValidId(itemId) &&
+          userExists(userId) &&
+          isValidBasketItem(incoming(), userId, itemId) &&
+          incoming().id == existing().id &&
+          incoming().userId == existing().userId &&
+          incoming().profileId == existing().profileId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'description', 'group', 'classification', 'monthlySpend',
+            'oldPrice', 'currentPrice', 'oldPriceDate', 'currentPriceDate',
+            'unit', 'notes', 'active', 'isArchived', 'updatedAt'
+          ]);
+        allow delete: if isOwner(userId) && isValidId(itemId) && userExists(userId);
+      }
+
+      // Price History
+      match /priceHistory/{priceId} {
+        allow get: if isOwner(userId) && isValidId(priceId) && userExists(userId);
+        allow list: if isOwner(userId) && existing().userId == request.auth.uid;
+        allow create: if isOwner(userId) &&
+          isValidId(priceId) &&
+          isValidPriceRecord(incoming(), userId, priceId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          userExists(userId) &&
+          itemExists(userId, incoming().itemId);
+        allow update: if isOwner(userId) &&
+          isValidId(priceId) &&
+          userExists(userId) &&
+          isValidPriceRecord(incoming(), userId, priceId) &&
+          incoming().id == existing().id &&
+          incoming().userId == existing().userId &&
+          incoming().itemId == existing().itemId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'price', 'referenceDate', 'unit', 'source', 'notes', 'updatedAt'
+          ]);
+        allow delete: if isOwner(userId) && isValidId(priceId) && userExists(userId);
+      }
+
+      // Income History
+      match /incomeHistory/{incomeId} {
+        allow get: if isOwner(userId) && isValidId(incomeId) && userExists(userId);
+        allow list: if isOwner(userId) && existing().userId == request.auth.uid;
+        allow create: if isOwner(userId) &&
+          isValidId(incomeId) &&
+          isValidIncomeRecord(incoming(), userId, incomeId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          userExists(userId) &&
+          profileExists(userId, incoming().profileId);
+        allow update: if isOwner(userId) &&
+          isValidId(incomeId) &&
+          userExists(userId) &&
+          isValidIncomeRecord(incoming(), userId, incomeId) &&
+          incoming().id == existing().id &&
+          incoming().userId == existing().userId &&
+          incoming().profileId == existing().profileId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'referenceDate', 'nominalIncome', 'source', 'notes', 'updatedAt'
+          ]);
+        allow delete: if isOwner(userId) && isValidId(incomeId) && userExists(userId);
+      }
+
+      // Consumption Groups
+      match /consumptionGroups/{groupId} {
+        allow get: if isOwner(userId) && isValidId(groupId) && userExists(userId);
+        allow list: if isOwner(userId) && existing().userId == request.auth.uid;
+        allow create: if isOwner(userId) &&
+          isValidId(groupId) &&
+          isValidConsumptionGroup(incoming(), userId, groupId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          userExists(userId);
+        allow update: if isOwner(userId) &&
+          isValidId(groupId) &&
+          userExists(userId) &&
+          isValidConsumptionGroup(incoming(), userId, groupId) &&
+          incoming().id == existing().id &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'description', 'color', 'icon', 'nationalWeightIBGE', 'isCustom', 'active', 'updatedAt'
+          ]);
+        allow delete: if isOwner(userId) && isValidId(groupId) && userExists(userId);
+      }
+
+      // Saving Strategies (Plans A, B, C)
+      match /strategies/{strategyId} {
+        allow get: if isOwner(userId) && isValidId(strategyId) && userExists(userId);
+        allow list: if isOwner(userId) && existing().userId == request.auth.uid;
+        allow create: if isOwner(userId) &&
+          isValidId(strategyId) &&
+          isValidSavingStrategy(incoming(), userId, strategyId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          userExists(userId) &&
+          profileExists(userId, incoming().profileId);
+        allow update: if isOwner(userId) &&
+          isValidId(strategyId) &&
+          userExists(userId) &&
+          isValidSavingStrategy(incoming(), userId, strategyId) &&
+          incoming().id == existing().id &&
+          incoming().userId == existing().userId &&
+          incoming().profileId == existing().profileId &&
+          incoming().planType == existing().planType &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'description', 'applied', 'monthlySavings',
+            'originalItemId', 'originalItemName', 'originalPrice', 'substituteName', 'substitutePrice',
+            'qualitativeTradeoff', 'resourceName', 'unit', 'tariffPerUnit', 'currentConsumption',
+            'targetConsumption', 'currentSpend', 'progressPercent', 'notes', 'monthlyInvestment',
+            'nominalAnnualRate', 'expectedAnnualInflation', 'realAnnualYield',
+            'projection12Months', 'projection24Months', 'projection36Months', 'updatedAt'
+          ]);
+        allow delete: if isOwner(userId) && isValidId(strategyId) && userExists(userId);
+      }
+    }
+  }
+}

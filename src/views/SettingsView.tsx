@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { FamilyProfile, UserAccount } from '../types';
 import { StorageService } from '../services/storage';
 import { IBGEService } from '../services/ibge';
@@ -11,6 +11,8 @@ interface SettingsViewProps {
   isDemo: boolean;
   onRefreshData: () => void;
   currentUser?: UserAccount | null;
+  isFirebaseMode?: boolean;
+  onExportBackupData?: () => unknown;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -21,15 +23,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   isDemo,
   onRefreshData,
   currentUser = null,
+  isFirebaseMode = false,
+  onExportBackupData,
 }) => {
   const [profileName, setProfileName] = useState(activeProfile.name);
   const [region, setRegion] = useState(activeProfile.referenceRegion);
   const [membersCount, setMembersCount] = useState(activeProfile.membersCount);
+  const [profileFeedback, setProfileFeedback] = useState<string | null>(null);
 
   // IBGE SIDRA sync state
   const [isSyncingIBGE, setIsSyncingIBGE] = useState(false);
   const [lastSyncDate, setLastSyncDate] = useState<string>('Sincronizado automaticamente');
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    setProfileName(activeProfile.name);
+    setRegion(activeProfile.referenceRegion);
+    setMembersCount(activeProfile.membersCount);
+  }, [activeProfile.id, activeProfile.name, activeProfile.referenceRegion, activeProfile.membersCount]);
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,9 +51,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       membersCount,
       updatedAt: new Date().toISOString(),
     };
-    StorageService.saveProfile(updated);
+    if (!isFirebaseMode) {
+      StorageService.saveProfile(updated);
+    }
     onUpdateProfile(updated);
-    alert('Configurações do perfil familiar salvas com sucesso!');
+    setProfileFeedback('Configurações do perfil familiar salvas com sucesso!');
   };
 
   const handleForceSyncIBGE = async () => {
@@ -63,17 +76,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   const handleExportFullBackup = () => {
-    const backup = {
-      profile: StorageService.getProfile(),
-      items: StorageService.getItems(),
-      prices: StorageService.getAllPrices(),
-      income: StorageService.getIncomeHistory(),
-      plansA: StorageService.getPlansA(),
-      plansB: StorageService.getPlansB(),
-      planC: StorageService.getPlanC(),
-      exportedAt: new Date().toISOString(),
-      version: '3.0.0',
-    };
+    const backup = onExportBackupData
+      ? onExportBackupData()
+      : {
+          profile: StorageService.getProfile(),
+          items: StorageService.getItems(),
+          prices: StorageService.getAllPrices(),
+          income: StorageService.getIncomeHistory(),
+          plansA: StorageService.getPlansA(),
+          plansB: StorageService.getPlansB(),
+          planC: StorageService.getPlanC(),
+          exportedAt: new Date().toISOString(),
+          version: '3.0.0',
+        };
 
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(backup, null, 2));
     const downloadAnchor = document.createElement('a');
@@ -260,6 +275,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
               </div>
 
+              {profileFeedback && (
+                <div className="p-3 bg-[#86f2e4]/20 border border-[#006a61]/30 rounded-xl text-xs font-mono text-[#005049]">
+                  {profileFeedback}
+                </div>
+              )}
+
               <div className="flex items-center justify-between pt-2 border-t border-[#eff4ff]">
                 <span className="text-xs text-[#76777d] font-mono">
                   Moeda: Real Brasileiro (BRL / R$)
@@ -376,8 +397,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <div className="min-w-0">
                     <div className="text-xs font-bold text-[#0b1c30] truncate">
                       {currentUser.authProvider === 'google'
-                        ? 'Conta conectada via Google'
-                        : 'Conta com E-mail e Senha'}
+                        ? isFirebaseMode
+                          ? 'Conta Google sincronizada (Firebase + Firestore)'
+                          : 'Conta conectada via Google'
+                        : 'Conta com E-mail e Senha (Local)'}
                     </div>
                     <div className="text-[11px] font-mono text-[#45464d] truncate">
                       {currentUser.email}

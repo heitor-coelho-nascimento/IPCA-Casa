@@ -1,95 +1,140 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { signSessionToken, verifySessionToken, parseCookies } from '../src/db/auth-tokens';
-import { Repository } from '../src/db/repository';
-import { isFirebaseAdminConfigured, verifyFirebaseGoogleIdToken } from '../src/lib/firebase-admin';
-import { UserAccount } from '../src/types';
+import {
+  isFirebaseConfigured,
+  mapFirebaseAuthError,
+  OperationType,
+} from '../src/lib/firebase';
+import { AuthService } from '../src/services/auth';
+import { safeStorage } from '../src/services/storage';
+import type { UserAccount } from '../src/types';
 
-describe('Autenticação Google OAuth & Tokens de Sessão (IPCA-Casa)', () => {
+describe('Autenticação Firebase (Google Sign-In) & Fallback Local (IPCA-Casa)', () => {
   beforeEach(() => {
-    delete process.env.MYSQL_HOST;
-    delete process.env.MYSQL_USER;
-    delete process.env.MYSQL_DATABASE;
+    safeStorage.clear();
   });
 
-  it('Detecta configuração OAuth do Google provisionada em firebase-applet-config.json', () => {
-    expect(isFirebaseAdminConfigured()).toBe(true);
+  it('Detecta configuração válida do Firebase Auth e Firestore em firebase-applet-config.json', () => {
+    expect(isFirebaseConfigured()).toBe(true);
   });
 
-  it('Rejeita token ID do Google malformado na verificação server-side', async () => {
-    await expect(verifyFirebaseGoogleIdToken('invalid.jwt.token')).rejects.toThrow();
+  it('Mapeia códigos de erro do Firebase Auth para mensagens claras em português', () => {
+    expect(mapFirebaseAuthError({ code: 'auth/popup-closed-by-user' })).toContain('fechada');
+    expect(mapFirebaseAuthError({ code: 'auth/cancelled-popup-request' })).toContain('cancelada');
+    expect(mapFirebaseAuthError({ code: 'auth/popup-blocked' })).toContain('bloqueou');
+    expect(mapFirebaseAuthError({ code: 'auth/unauthorized-domain' })).toContain('não está autorizado');
+    expect(mapFirebaseAuthError({ code: 'auth/network-request-failed' })).toContain('Erro de rede');
+    expect(mapFirebaseAuthError({ code: 'auth/account-exists-with-different-credential' })).toContain(
+      'outro método de login'
+    );
+    expect(mapFirebaseAuthError(new Error('Falha customizada'))).toBe('Falha customizada');
+    expect(mapFirebaseAuthError({})).toBe('Falha ao autenticar com o Google.');
   });
 
-  it('Assina e verifica tokens de sessão HMAC-SHA256 para conta Google', () => {
-    const user: UserAccount = {
-      id: 'usr_google_1',
-      email: 'usuario@gmail.com',
-      displayName: 'Maria Silva',
-      avatarUrl: 'https://lh3.googleusercontent.com/a/example',
-      authProvider: 'google',
-      createdAt: '2026-01-01T00:00:00.000Z',
-      lastLoginAt: '2026-01-01T00:00:00.000Z',
-      profileId: 'prof_usr_google_1',
-    };
-
-    const token = signSessionToken(user);
-    const verified = verifySessionToken(token);
-
-    expect(verified).not.toBeNull();
-    expect(verified?.sub).toBe('usr_google_1');
-    expect(verified?.email).toBe('usuario@gmail.com');
-    expect(verified?.profileId).toBe('prof_usr_google_1');
-    expect(verified?.authProvider).toBe('google');
+  it('Mantém os tipos de operação do Firestore alinhados para auditoria de erros', () => {
+    expect(OperationType.CREATE).toBe('create');
+    expect(OperationType.UPDATE).toBe('update');
+    expect(OperationType.DELETE).toBe('delete');
+    expect(OperationType.LIST).toBe('list');
+    expect(OperationType.GET).toBe('get');
+    expect(OperationType.WRITE).toBe('write');
   });
 
-  it('Rejeita tokens adulterados ou inválidos', () => {
-    const user: UserAccount = {
-      id: 'usr_123',
-      email: 'teste@gmail.com',
-      displayName: 'Teste',
-      authProvider: 'google',
-      createdAt: '2026-01-01T00:00:00.000Z',
-      lastLoginAt: '2026-01-01T00:00:00.000Z',
-      profileId: 'prof_usr_123',
-    };
-
-    const token = signSessionToken(user);
-    const parts = token.split('.');
-    const tampered = `${parts[0]}.${parts[1]}.invalid_signature`;
-
-    expect(verifySessionToken(tampered)).toBeNull();
-    expect(verifySessionToken('')).toBeNull();
-    expect(verifySessionToken('abc.def')).toBeNull();
-  });
-
-  it('Faz parsing seguro de cabeçalhos Cookie', () => {
-    const cookies = parseCookies('foo=bar; ipca_session=tok123.abc.sig; theme=light');
-    expect(cookies.foo).toBe('bar');
-    expect(cookies.ipca_session).toBe('tok123.abc.sig');
-    expect(cookies.theme).toBe('light');
-  });
-
-  it('Cria e reutiliza usuário Google no repositório sem duplicação', async () => {
-    const first = await Repository.upsertGoogleUser({
-      googleSub: 'google-sub-999',
-      email: 'Familia.Teste@gmail.com',
+  it('Permite cadastro, login e logout local em navegador quando sem nuvem', async () => {
+    const reg = await AuthService.register({
+      email: 'Familia.Teste@Exemplo.com',
       displayName: 'Família Teste',
-      avatarUrl: 'https://example.com/avatar.png',
+      password: 'segredo_valido_123',
     });
 
-    expect(first.isNewUser).toBe(true);
-    expect(first.user.email).toBe('familia.teste@gmail.com');
-    expect(first.user.authProvider).toBe('google');
+    expect(reg.success).toBe(true);
+    expect(reg.session?.user.email).toBe('familia.teste@exemplo.com');
+    expect(reg.session?.user.authProvider).toBe('local');
+    expect(AuthService.getCurrentUser()?.displayName).toBe('Família Teste');
 
-    const second = await Repository.upsertGoogleUser({
-      googleSub: 'google-sub-999',
-      email: 'familia.teste@gmail.com',
-      displayName: 'Família Teste Atualizada',
-      avatarUrl: 'https://example.com/avatar2.png',
+    AuthService.logout();
+    expect(AuthService.getCurrentUser()).toBeNull();
+
+    const wrongLogin = await AuthService.login({
+      email: 'familia.teste@exemplo.com',
+      password: 'senha_errada',
+    });
+    expect(wrongLogin.success).toBe(false);
+
+    const validLogin = await AuthService.login({
+      email: 'familia.teste@exemplo.com',
+      password: 'segredo_valido_123',
+    });
+    expect(validLogin.success).toBe(true);
+    expect(AuthService.getCurrentUser()?.email).toBe('familia.teste@exemplo.com');
+  });
+
+  it('Impede cadastro duplicado e valida e-mail e tamanho mínimo da senha', async () => {
+    const invalidEmail = await AuthService.register({
+      email: 'invalido',
+      displayName: 'Maria',
+      password: '123456',
+    });
+    expect(invalidEmail.success).toBe(false);
+
+    const shortPwd = await AuthService.register({
+      email: 'maria@exemplo.com',
+      displayName: 'Maria',
+      password: '123',
+    });
+    expect(shortPwd.success).toBe(false);
+
+    const ok = await AuthService.register({
+      email: 'maria@exemplo.com',
+      displayName: 'Maria Silva',
+      password: 'senha_segura',
+    });
+    expect(ok.success).toBe(true);
+
+    const duplicate = await AuthService.register({
+      email: 'MARIA@exemplo.com',
+      displayName: 'Outra Maria',
+      password: 'outra_senha',
+    });
+    expect(duplicate.success).toBe(false);
+  });
+
+  it('Bloqueia login por senha local quando a conta está vinculada ao Google', async () => {
+    const googleUser: UserAccount = {
+      id: 'google_uid_1',
+      email: 'google.user@gmail.com',
+      displayName: 'Usuário Google',
+      authProvider: 'google',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      lastLoginAt: '2026-01-01T00:00:00.000Z',
+      profileId: 'prof_google_uid_1',
+    };
+
+    AuthService.setSession({
+      user: googleUser,
+      token: 'firebase_google_google_uid_1',
+    });
+    AuthService.logout();
+
+    const attempt = await AuthService.login({
+      email: 'google.user@gmail.com',
+      password: 'qualquer_senha',
+    });
+    expect(attempt.success).toBe(false);
+    expect(attempt.error).toContain('Google');
+  });
+
+  it('Executa recuperação de acesso local apenas para e-mails cadastrados', async () => {
+    await AuthService.register({
+      email: 'recupera@exemplo.com',
+      displayName: 'Carlos',
+      password: 'senha_forte',
     });
 
-    expect(second.isNewUser).toBe(false);
-    expect(second.user.id).toBe(first.user.id);
-    expect(second.user.profileId).toBe(first.user.profileId);
-    expect(second.user.displayName).toBe('Família Teste Atualizada');
+    const missing = AuthService.recoverPassword('desconhecido@exemplo.com');
+    expect(missing.success).toBe(false);
+
+    const found = AuthService.recoverPassword('RECUPERA@exemplo.com');
+    expect(found.success).toBe(true);
+    expect(found.message).toContain('recupera@exemplo.com');
   });
 });

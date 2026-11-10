@@ -13,47 +13,84 @@ import { PocketImpactView } from './views/PocketImpactView';
 import { OfficialIPCAView } from './views/OfficialIPCAView';
 import { LandingPageView } from './views/LandingPageView';
 import { AuthModal } from './components/AuthModal';
-import { OnboardingModal } from './components/OnboardingModal';
+import { OnboardingBundle, OnboardingModal } from './components/OnboardingModal';
 import { NewItemDrawer } from './components/NewItemDrawer';
 import { QuickPriceModal } from './components/QuickPriceModal';
 import { ImportExportModal } from './components/ImportExportModal';
+import { ConfirmModal } from './components/ConfirmModal';
 import { startGoogleOAuthPopup } from './components/GoogleSignInButton';
-import { signOutFirebase } from './lib/firebase';
-import { BasketItem, FamilyProfile, UserAccount } from './types';
-import { StorageService } from './services/storage';
+import {
+  isFirebaseConfigured,
+  signOutFirebase,
+  subscribeFirebaseAuthState,
+  testFirestoreConnection,
+} from './lib/firebase';
+import {
+  BasketItem,
+  ConsumptionGroup,
+  EfficiencyPlanB,
+  FamilyProfile,
+  IncomeRecord,
+  OpportunityPlanC,
+  PriceRecord,
+  SubstitutePlanA,
+  UserAccount,
+} from './types';
+import { DEFAULT_GROUPS, StorageService } from './services/storage';
 import { AuthService } from './services/auth';
+import { FirestoreService, sanitizeFirestoreId } from './services/firestore';
 import { processBasketEconomics } from './services/economics';
-import { IBGEService } from './services/ibge';
+import { IBGESeriesMetadata, IBGEService } from './services/ibge';
 
-function getAuthHeaders(): HeadersInit {
-  const token = AuthService.getActiveToken();
-  return token
-    ? { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
-    : { 'Content-Type': 'application/json' };
+function loadInitialLocalUser(): UserAccount | null {
+  const localUser = AuthService.getCurrentUser();
+  if (!localUser) return null;
+  if (localUser.authProvider === 'google') {
+    return null;
+  }
+  return localUser;
 }
 
 export default function App() {
-  // Autenticação & Sessão
-  const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => AuthService.getCurrentUser());
+  // Autenticação & Sessão (Firebase Auth + fallback local neste navegador)
+  const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => loadInitialLocalUser());
+  const [firebaseUid, setFirebaseUid] = useState<string | null>(null);
   const [isDemo, setIsDemo] = useState<boolean>(false);
 
-  // Modais de Autenticação e Onboarding
+  // Modais de Autenticação, Onboarding e Confirmação
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<'login' | 'register' | 'recover' | 'terms'>('login');
   const [authModalError, setAuthModalError] = useState<string | null>(null);
   const [googleLandingLoading, setGoogleLandingLoading] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+  const [isConfirmEmptyOpen, setIsConfirmEmptyOpen] = useState(false);
 
   // Navegação
   const [activeTab, setActiveTab] = useState<NavTab>('visao-geral');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
-  // Perfil da família
-  const [activeProfile, setActiveProfile] = useState<FamilyProfile>(() => StorageService.getProfile());
-  const [profiles, setProfiles] = useState<FamilyProfile[]>(() => StorageService.getProfiles());
+  // Metadados oficiais do IBGE em segundo plano
+  const [ibgeMetadata, setIbgeMetadata] = useState<IBGESeriesMetadata | null>(null);
 
-  // Cesta de itens
-  const [items, setItems] = useState<BasketItem[]>(() => StorageService.getItems());
+  // Estados Locais (Modo Demonstração / Local neste navegador)
+  const [localActiveProfile, setLocalActiveProfile] = useState<FamilyProfile>(() =>
+    StorageService.getProfile()
+  );
+  const [localProfiles, setLocalProfiles] = useState<FamilyProfile[]>(() =>
+    StorageService.getProfiles()
+  );
+  const [localItems, setLocalItems] = useState<BasketItem[]>(() => StorageService.getItems());
+
+  // Estados Cloud Firestore (Sincronizados em Tempo Real para contas Google)
+  const [activeCloudProfileId, setActiveCloudProfileId] = useState<string>('');
+  const [cloudProfiles, setCloudProfiles] = useState<FamilyProfile[]>([]);
+  const [cloudItems, setCloudItems] = useState<BasketItem[]>([]);
+  const [cloudIncomeHistory, setCloudIncomeHistory] = useState<IncomeRecord[]>([]);
+  const [cloudPriceHistory, setCloudPriceHistory] = useState<PriceRecord[]>([]);
+  const [cloudConsumptionGroups, setCloudConsumptionGroups] = useState<ConsumptionGroup[]>([]);
+  const [cloudPlansA, setCloudPlansA] = useState<SubstitutePlanA[]>([]);
+  const [cloudPlansB, setCloudPlansB] = useState<EfficiencyPlanB[]>([]);
+  const [cloudPlanC, setCloudPlanC] = useState<OpportunityPlanC | undefined>(undefined);
 
   // Período selecionado
   const [selectedTimeframe, setSelectedTimeframe] = useState<'12M' | 'YTD' | '1M'>('12M');
@@ -65,104 +102,187 @@ export default function App() {
   const [isImportExportOpen, setIsImportExportOpen] = useState(false);
   const [selectedItemForHistory, setSelectedItemForHistory] = useState<BasketItem | null>(null);
 
-  // Sincronizar dados do usuário autenticado com o backend (MySQL quando configurado)
-  const syncUserAccountData = useCallback(async (user: UserAccount) => {
-    try {
-      const headers = getAuthHeaders();
-      const [profRes, basketRes, incomeRes] = await Promise.all([
-        fetch(`/api/profiles`, { headers, credentials: 'include' }),
-        fetch(`/api/basket?profileId=${encodeURIComponent(user.profileId)}`, { headers, credentials: 'include' }),
-        fetch(`/api/income?profileId=${encodeURIComponent(user.profileId)}`, { headers, credentials: 'include' }),
-      ]);
+  const isFirebaseMode = Boolean(
+    firebaseUid && currentUser?.authProvider === 'google' && !isDemo && isFirebaseConfigured()
+  );
 
-      if (profRes.ok) {
-        const remoteProfiles = (await profRes.json()) as FamilyProfile[];
-        if (Array.isArray(remoteProfiles)) {
-          const ownProfile = remoteProfiles.find((p) => p.id === user.profileId);
-          if (ownProfile) {
-            StorageService.saveProfile(ownProfile);
-            setActiveProfile(ownProfile);
-          }
-          setProfiles(StorageService.getProfiles());
-        }
-      }
-
-      if (basketRes.ok) {
-        const remoteItems = (await basketRes.json()) as BasketItem[];
-        if (Array.isArray(remoteItems) && remoteItems.length > 0) {
-          StorageService.setActiveProfileId(user.profileId);
-          StorageService.importItems(remoteItems);
-          setItems(StorageService.getItems(user.profileId));
-        }
-      }
-
-      if (incomeRes.ok) {
-        const remoteIncome = (await incomeRes.json()) as Array<{ nominalIncome: number }>;
-        if (Array.isArray(remoteIncome) && remoteIncome.length > 0) {
-          StorageService.setActiveProfileId(user.profileId);
-          StorageService.saveIncome(
-            remoteIncome[0].nominalIncome,
-            remoteIncome[remoteIncome.length - 1].nominalIncome
-          );
-        }
-      }
-    } catch (err) {
-      console.warn('Sincronização com repositório remoto indisponível no momento:', err);
-    }
-  }, []);
-
-  // Inicializar IBGE em segundo plano e restaurar sessão no servidor caso cookie esteja ativo
+  // Inicialização: testar conexão Firestore, carregar IBGE e assinar Firebase Auth
   useEffect(() => {
-    IBGEService.getOfficialSeries().catch((err) => {
-      console.warn('Sincronização em segundo plano do IBGE:', err);
+    let active = true;
+
+    testFirestoreConnection().catch(() => {});
+
+    IBGEService.getMetadata()
+      .then((meta) => {
+        if (active) setIbgeMetadata(meta);
+      })
+      .catch((err) => {
+        console.warn('Sincronização em segundo plano do IBGE:', err);
+      });
+
+    const unsubAuth = subscribeFirebaseAuthState(async (firebaseUser) => {
+      if (!active) return;
+
+      if (!firebaseUser || !firebaseUser.email || firebaseUser.emailVerified === false) {
+        setFirebaseUid(null);
+        setCloudProfiles([]);
+        setCloudItems([]);
+        setCloudIncomeHistory([]);
+        setCloudPriceHistory([]);
+        setCloudConsumptionGroups([]);
+        setCloudPlansA([]);
+        setCloudPlansB([]);
+        setCloudPlanC(undefined);
+        setCurrentUser((prev) => (prev?.authProvider === 'google' ? null : prev));
+        return;
+      }
+
+      try {
+        const { user } = await FirestoreService.ensureUserBootstrapped(firebaseUser);
+        if (!active) return;
+        setFirebaseUid(user.id);
+        setIsDemo(false);
+        setCurrentUser((prev) => {
+          if (prev && prev.id === user.id && prev.authProvider === 'google') {
+            return { ...prev, ...user };
+          }
+          return user;
+        });
+        setActiveCloudProfileId((prevId) => prevId || user.profileId);
+      } catch (err) {
+        console.error('Erro ao inicializar sessão no Cloud Firestore:', err);
+      }
     });
 
-    const restoreSession = async () => {
-      try {
-        const res = await fetch('/api/auth/me', {
-          headers: getAuthHeaders(),
-          credentials: 'include',
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data?.user) {
-          const user = data.user as UserAccount;
-          const existingToken = AuthService.getActiveToken() || '';
-          AuthService.setSession({ user, token: existingToken });
-          setCurrentUser(user);
-
-          const userProfile = StorageService.getProfiles().find((p) => p.id === user.profileId) || {
-            id: user.profileId,
-            name: user.displayName,
-            membersCount: 2,
-            referenceRegion: 'Brasil',
-            currency: 'BRL',
-            isDemo: false,
-            createdAt: user.createdAt,
-            updatedAt: new Date().toISOString(),
-          };
-          StorageService.saveProfile(userProfile);
-          StorageService.setActiveProfileId(userProfile.id);
-          setActiveProfile(userProfile);
-          setProfiles(StorageService.getProfiles());
-          setItems(StorageService.getItems(userProfile.id));
-          await syncUserAccountData(user);
-        }
-      } catch {
-        // Segue normalmente com sessão local caso servidor esteja indisponível
-      }
+    return () => {
+      active = false;
+      unsubAuth();
     };
+  }, []);
 
-    restoreSession();
-  }, [syncUserAccountData]);
+  // Listeners em tempo real do Cloud Firestore para o titular autenticado
+  useEffect(() => {
+    if (!firebaseUid || !isFirebaseConfigured()) {
+      return;
+    }
 
-  // Cálculo da economia com base nos dados atuais
+    const unsubscribe = FirestoreService.subscribeUserCollections(firebaseUid, {
+      onProfiles: (remoteProfiles) => {
+        setCloudProfiles(remoteProfiles);
+      },
+      onBasketItems: (remoteItems) => {
+        setCloudItems(remoteItems);
+      },
+      onIncomeHistory: (remoteIncome) => {
+        setCloudIncomeHistory(remoteIncome);
+      },
+      onPriceHistory: (remotePrices) => {
+        setCloudPriceHistory(remotePrices);
+      },
+      onConsumptionGroups: (remoteGroups) => {
+        setCloudConsumptionGroups(remoteGroups);
+      },
+      onStrategies: ({ plansA, plansB, planC }) => {
+        setCloudPlansA(plansA);
+        setCloudPlansB(plansB);
+        setCloudPlanC(planC);
+      },
+    });
+
+    return () => unsubscribe();
+  }, [firebaseUid]);
+
+  // Perfis efetivos no modo atual
+  const profiles = useMemo<FamilyProfile[]>(() => {
+    if (!isFirebaseMode) return localProfiles;
+    if (cloudProfiles.length > 0) return cloudProfiles;
+    if (currentUser) {
+      return [
+        {
+          id: currentUser.profileId,
+          name: currentUser.displayName,
+          membersCount: 2,
+          referenceRegion: 'Brasil',
+          currency: 'BRL',
+          isDemo: false,
+          createdAt: currentUser.createdAt,
+          updatedAt: currentUser.lastLoginAt,
+        },
+      ];
+    }
+    return localProfiles;
+  }, [isFirebaseMode, cloudProfiles, currentUser, localProfiles]);
+
+  const activeProfile = useMemo<FamilyProfile>(() => {
+    if (!isFirebaseMode) return localActiveProfile;
+    const targetId = activeCloudProfileId || currentUser?.profileId;
+    return (
+      profiles.find((p) => p.id === targetId) ||
+      profiles.find((p) => p.id === currentUser?.profileId) ||
+      profiles[0]
+    );
+  }, [isFirebaseMode, localActiveProfile, activeCloudProfileId, currentUser?.profileId, profiles]);
+
+  // Itens da cesta efetivos (excluindo arquivados e filtrados pelo perfil ativo)
+  const items = useMemo<BasketItem[]>(() => {
+    if (!isFirebaseMode) return localItems;
+    return cloudItems.filter((item) => !item.isArchived && item.profileId === activeProfile.id);
+  }, [isFirebaseMode, localItems, cloudItems, activeProfile.id]);
+
+  // Histórico de renda efetivo do perfil ativo
+  const activeIncomeHistory = useMemo<IncomeRecord[]>(() => {
+    if (!isFirebaseMode) {
+      return StorageService.getIncomeHistory(activeProfile.id);
+    }
+    return cloudIncomeHistory
+      .filter((inc) => inc.profileId === activeProfile.id)
+      .sort((a, b) => a.referenceDate.localeCompare(b.referenceDate));
+  }, [isFirebaseMode, activeProfile.id, cloudIncomeHistory]);
+
+  // Categorias efetivas (mescla categorias IBGE padrão com personalizações do usuário no Firestore)
+  const cloudEffectiveGroups = useMemo<ConsumptionGroup[] | undefined>(() => {
+    if (!isFirebaseMode) return undefined;
+    const mergedDefault = DEFAULT_GROUPS.map(
+      (def) => cloudConsumptionGroups.find((c) => c.id === def.id) || def
+    );
+    const customExtras = cloudConsumptionGroups.filter(
+      (c) => !DEFAULT_GROUPS.some((def) => def.id === c.id)
+    );
+    return [...mergedDefault, ...customExtras];
+  }, [isFirebaseMode, cloudConsumptionGroups]);
+
+  // Estratégias efetivas do perfil ativo
+  const activePlansA = useMemo(
+    () => (isFirebaseMode ? cloudPlansA.filter((p) => p.profileId === activeProfile.id) : undefined),
+    [isFirebaseMode, cloudPlansA, activeProfile.id]
+  );
+
+  const activePlansB = useMemo(
+    () => (isFirebaseMode ? cloudPlansB.filter((p) => p.profileId === activeProfile.id) : undefined),
+    [isFirebaseMode, cloudPlansB, activeProfile.id]
+  );
+
+  const activePlanC = useMemo(
+    () =>
+      isFirebaseMode && cloudPlanC && cloudPlanC.profileId === activeProfile.id
+        ? cloudPlanC
+        : undefined,
+    [isFirebaseMode, cloudPlanC, activeProfile.id]
+  );
+
+  // Cálculo econômico com base nos dados ativos + taxa IBGE oficial
   const summary = useMemo(() => {
-    const incomes = StorageService.getIncomeHistory(activeProfile.id);
-    const initialIncome = incomes.length > 0 ? incomes[0].nominalIncome : isDemo ? 10000 : null;
-    const finalIncome = incomes.length > 0 ? incomes[incomes.length - 1].nominalIncome : isDemo ? 10500 : null;
-    return processBasketEconomics(items, 4.68, initialIncome, finalIncome);
-  }, [items, activeProfile.id, isDemo]);
+    const initialIncome =
+      activeIncomeHistory.length > 0 ? activeIncomeHistory[0].nominalIncome : isDemo ? 10000 : null;
+    const finalIncome =
+      activeIncomeHistory.length > 0
+        ? activeIncomeHistory[activeIncomeHistory.length - 1].nominalIncome
+        : isDemo
+        ? 10500
+        : null;
+    const officialRate12M = ibgeMetadata?.accumulated12MRate ?? 4.68;
+    return processBasketEconomics(items, officialRate12M, initialIncome, finalIncome);
+  }, [items, activeIncomeHistory, isDemo, ibgeMetadata?.accumulated12MRate]);
 
   // Handler de Sucesso de Autenticação
   const handleAuthSuccess = (user: UserAccount, isNewUser = false) => {
@@ -170,23 +290,26 @@ export default function App() {
     setIsDemo(false);
     setAuthModalError(null);
 
-    const userProfile = StorageService.getProfiles().find((p) => p.id === user.profileId) || {
-      id: user.profileId,
-      name: user.displayName,
-      membersCount: 2,
-      referenceRegion: 'Brasil',
-      currency: 'BRL',
-      isDemo: false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    StorageService.saveProfile(userProfile);
-    StorageService.setActiveProfileId(userProfile.id);
-    setActiveProfile(userProfile);
-    setProfiles(StorageService.getProfiles());
-    setItems(StorageService.getItems(userProfile.id));
-
-    syncUserAccountData(user);
+    if (user.authProvider === 'google') {
+      setFirebaseUid(user.id);
+      setActiveCloudProfileId(user.profileId);
+    } else {
+      const userProfile = StorageService.getProfiles().find((p) => p.id === user.profileId) || {
+        id: user.profileId,
+        name: user.displayName,
+        membersCount: 2,
+        referenceRegion: 'Brasil',
+        currency: 'BRL',
+        isDemo: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      StorageService.saveProfile(userProfile);
+      StorageService.setActiveProfileId(userProfile.id);
+      setLocalActiveProfile(userProfile);
+      setLocalProfiles(StorageService.getProfiles());
+      setLocalItems(StorageService.getItems(userProfile.id));
+    }
 
     if (isNewUser) {
       setIsOnboardingOpen(true);
@@ -202,7 +325,6 @@ export default function App() {
     try {
       const result = await startGoogleOAuthPopup();
       if (result.success && result.session) {
-        AuthService.setSession(result.session);
         handleAuthSuccess(result.session.user, Boolean(result.isNewUser));
       } else {
         setAuthModalMode('login');
@@ -217,196 +339,306 @@ export default function App() {
   // Handler de Logout
   const handleLogout = async () => {
     AuthService.logout();
+    setFirebaseUid(null);
     setCurrentUser(null);
     setIsDemo(false);
+    setCloudProfiles([]);
+    setCloudItems([]);
+    setCloudIncomeHistory([]);
+    setCloudPriceHistory([]);
+    setCloudConsumptionGroups([]);
+    setCloudPlansA([]);
+    setCloudPlansB([]);
+    setCloudPlanC(undefined);
     setActiveTab('visao-geral');
     await signOutFirebase();
-    try {
-      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
-    } catch {
-      // Ignora erro de rede no encerramento local
-    }
   };
 
   // Handler de Entrada no Modo Demonstração
   const handleEnterDemo = () => {
     setIsDemo(true);
-    setCurrentUser(null);
-    const demoProfile = StorageService.getProfiles().find((p) => p.isDemo) || StorageService.getProfiles()[0];
+    const demoProfile =
+      StorageService.getProfiles().find((p) => p.isDemo) || StorageService.getProfiles()[0];
     StorageService.setActiveProfileId(demoProfile.id);
-    setActiveProfile(demoProfile);
-    setItems(StorageService.getItems(demoProfile.id));
+    setLocalActiveProfile(demoProfile);
+    setLocalProfiles(StorageService.getProfiles());
+    setLocalItems(StorageService.getItems(demoProfile.id));
     setActiveTab('visao-geral');
   };
 
   // Conclusão do Onboarding
-  const handleFinishOnboarding = (newProfile: FamilyProfile) => {
+  const handleFinishOnboarding = async (newProfile: FamilyProfile, bundle?: OnboardingBundle) => {
     setIsOnboardingOpen(false);
-    setActiveProfile(newProfile);
-    setProfiles(StorageService.getProfiles());
-    const onboardingItems = StorageService.getItems(newProfile.id);
-    setItems(onboardingItems);
     setActiveTab('impacto-no-bolso');
 
-    if (currentUser && !isDemo) {
-      const headers = getAuthHeaders();
-      fetch('/api/profiles', {
-        method: 'POST',
-        headers,
-        credentials: 'include',
-        body: JSON.stringify(newProfile),
-      }).catch(() => {});
-
-      const incomes = StorageService.getIncomeHistory(newProfile.id);
-      if (incomes.length > 0) {
-        fetch('/api/income', {
-          method: 'POST',
-          headers,
-          credentials: 'include',
-          body: JSON.stringify({
-            profileId: newProfile.id,
-            initialIncome: incomes[0].nominalIncome,
-            finalIncome: incomes[incomes.length - 1].nominalIncome,
-          }),
-        }).catch(() => {});
+    if (isFirebaseMode && firebaseUid && bundle) {
+      setActiveCloudProfileId(newProfile.id);
+      try {
+        await FirestoreService.saveOnboardingBundle({
+          userId: firebaseUid,
+          profile: newProfile,
+          initialIncome: bundle.initialIncome,
+          currentIncome: bundle.currentIncome,
+          items: bundle.items,
+        });
+      } catch (err) {
+        console.error('Erro ao salvar onboarding no Firestore:', err);
       }
-
-      onboardingItems.forEach((it) => {
-        fetch('/api/basket', {
-          method: 'POST',
-          headers,
-          credentials: 'include',
-          body: JSON.stringify(it),
-        }).catch(() => {});
-      });
+    } else {
+      setLocalActiveProfile(newProfile);
+      setLocalProfiles(StorageService.getProfiles());
+      setLocalItems(StorageService.getItems(newProfile.id));
     }
   };
 
   // Salvar/Editar Item
-  const handleSaveItem = useCallback((itemData: Partial<BasketItem>) => {
-    let savedItem: BasketItem;
-    if (editingItem) {
-      const updated: BasketItem = {
-        ...editingItem,
-        ...itemData,
-        updatedAt: new Date().toISOString(),
-      };
-      savedItem = StorageService.saveItem(updated);
-      setItems(StorageService.getItems(activeProfile.id));
-      setEditingItem(null);
-    } else {
-      const newItem: BasketItem = {
-        id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-        profileId: activeProfile.id,
-        name: itemData.name || 'Novo Item',
-        description: itemData.description,
-        group: itemData.group || 'Alimentação e bebidas',
-        classification: itemData.classification || 'Essencial',
-        monthlySpend: Number(itemData.monthlySpend) || 0,
-        oldPrice: Number(itemData.oldPrice) || 0,
-        currentPrice: Number(itemData.currentPrice) || 0,
-        oldPriceDate: itemData.oldPriceDate || '2023-09-01',
-        currentPriceDate: itemData.currentPriceDate || '2024-09-01',
-        unit: itemData.unit || 'unidade',
-        notes: itemData.notes || '',
-        active: itemData.active !== false,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      savedItem = StorageService.saveItem(newItem);
-      setItems(StorageService.getItems(activeProfile.id));
-    }
+  const handleSaveItem = useCallback(
+    async (itemData: Partial<BasketItem>) => {
+      let savedItem: BasketItem;
+      const nowIso = new Date().toISOString();
 
-    if (currentUser && !isDemo) {
-      fetch('/api/basket', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        credentials: 'include',
-        body: JSON.stringify(savedItem),
-      }).catch(() => {});
-    }
-  }, [editingItem, activeProfile.id, currentUser, isDemo]);
+      if (editingItem) {
+        savedItem = {
+          ...editingItem,
+          ...itemData,
+          profileId: editingItem.profileId || activeProfile.id,
+          updatedAt: nowIso,
+        };
+        setEditingItem(null);
+      } else {
+        savedItem = {
+          id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          profileId: activeProfile.id,
+          name: itemData.name || 'Novo Item',
+          description: itemData.description,
+          group: itemData.group || 'Alimentação e bebidas',
+          classification: itemData.classification || 'Essencial',
+          monthlySpend: Number(itemData.monthlySpend) || 0,
+          oldPrice: Number(itemData.oldPrice) || 0,
+          currentPrice: Number(itemData.currentPrice) || 0,
+          oldPriceDate: itemData.oldPriceDate || '2023-09-01',
+          currentPriceDate: itemData.currentPriceDate || '2024-09-01',
+          unit: itemData.unit || 'unidade',
+          notes: itemData.notes || '',
+          active: itemData.active !== false,
+          isArchived: false,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        };
+      }
 
-  // Excluir Item
-  const handleDeleteItem = useCallback((itemId: string) => {
-    StorageService.deleteItem(itemId);
-    setItems(StorageService.getItems(activeProfile.id));
+      if (isFirebaseMode && firebaseUid) {
+        await FirestoreService.saveBasketItem(firebaseUid, savedItem, true);
+      } else {
+        StorageService.saveItem(savedItem);
+        setLocalItems(StorageService.getItems(activeProfile.id));
+      }
+    },
+    [editingItem, activeProfile.id, isFirebaseMode, firebaseUid]
+  );
 
-    if (currentUser && !isDemo) {
-      fetch(`/api/basket/${encodeURIComponent(itemId)}`, {
-        method: 'DELETE',
-        headers: getAuthHeaders(),
-        credentials: 'include',
-      }).catch(() => {});
-    }
-  }, [activeProfile.id, currentUser, isDemo]);
+  // Excluir/Arquivar Item
+  const handleDeleteItem = useCallback(
+    async (itemId: string) => {
+      if (isFirebaseMode && firebaseUid) {
+        await FirestoreService.archiveBasketItem(firebaseUid, itemId);
+      } else {
+        StorageService.deleteItem(itemId);
+        setLocalItems(StorageService.getItems(activeProfile.id));
+      }
+    },
+    [activeProfile.id, isFirebaseMode, firebaseUid]
+  );
 
   // Atualização Rápida de Preço
-  const handleUpdatePrice = useCallback((itemId: string, newPrice: number, referenceDate: string) => {
-    const item = items.find((i) => i.id === itemId);
-    if (!item) return;
+  const handleUpdatePrice = useCallback(
+    async (itemId: string, newPrice: number, referenceDate: string) => {
+      const item = items.find((i) => i.id === itemId);
+      if (!item) return;
 
-    StorageService.addPriceRecord({
-      itemId,
-      price: newPrice,
-      referenceDate,
-      unit: item.unit || 'un',
-      origin: 'Atualização Rápida no Painel',
-    });
+      const updatedItem: BasketItem = {
+        ...item,
+        currentPrice: newPrice,
+        currentPriceDate: referenceDate,
+        updatedAt: new Date().toISOString(),
+      };
 
-    const updatedItem: BasketItem = {
-      ...item,
-      currentPrice: newPrice,
-      currentPriceDate: referenceDate,
-      updatedAt: new Date().toISOString(),
-    };
-    StorageService.saveItem(updatedItem);
-    setItems(StorageService.getItems(activeProfile.id));
+      if (isFirebaseMode && firebaseUid) {
+        await FirestoreService.addPriceRecord(firebaseUid, {
+          itemId,
+          price: newPrice,
+          referenceDate,
+          unit: item.unit || 'un',
+          source: 'Atualização Rápida no Painel',
+        });
+        await FirestoreService.saveBasketItem(firebaseUid, updatedItem, false);
+      } else {
+        StorageService.addPriceRecord({
+          itemId,
+          price: newPrice,
+          referenceDate,
+          unit: item.unit || 'un',
+          origin: 'Atualização Rápida no Painel',
+        });
+        StorageService.saveItem(updatedItem);
+        setLocalItems(StorageService.getItems(activeProfile.id));
+      }
+    },
+    [items, activeProfile.id, isFirebaseMode, firebaseUid]
+  );
 
-    if (currentUser && !isDemo) {
-      fetch('/api/basket', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        credentials: 'include',
-        body: JSON.stringify(updatedItem),
-      }).catch(() => {});
-    }
-  }, [items, activeProfile.id, currentUser, isDemo]);
+  // Adicionar cotação histórica via PriceHistoryView
+  const handleAddPriceRecordFromView = useCallback(
+    async (record: {
+      itemId: string;
+      price: number;
+      referenceDate: string;
+      unit?: string;
+      origin?: string;
+    }) => {
+      if (isFirebaseMode && firebaseUid) {
+        await FirestoreService.addPriceRecord(firebaseUid, {
+          itemId: record.itemId,
+          price: record.price,
+          referenceDate: record.referenceDate,
+          unit: record.unit,
+          source: record.origin,
+        });
+      } else {
+        StorageService.addPriceRecord(record);
+        setLocalItems(StorageService.getItems(activeProfile.id));
+      }
+    },
+    [isFirebaseMode, firebaseUid, activeProfile.id]
+  );
 
   // Atualização de Renda
-  const handleUpdateIncome = useCallback((initial: number, final: number) => {
-    StorageService.saveIncome(initial, final);
-    setItems([...StorageService.getItems(activeProfile.id)]);
+  const handleUpdateIncome = useCallback(
+    async (initial: number, final: number) => {
+      if (isFirebaseMode && firebaseUid) {
+        await FirestoreService.saveIncomeRange(firebaseUid, activeProfile.id, initial, final);
+      } else {
+        StorageService.saveIncome(initial, final);
+        setLocalItems([...StorageService.getItems(activeProfile.id)]);
+      }
+    },
+    [activeProfile.id, isFirebaseMode, firebaseUid]
+  );
 
-    if (currentUser && !isDemo) {
-      fetch('/api/income', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        credentials: 'include',
-        body: JSON.stringify({
+  // Gerenciamento de Grupos de Consumo no Cloud Firestore
+  const handleSaveConsumptionGroup = useCallback(
+    async (group: ConsumptionGroup) => {
+      if (isFirebaseMode && firebaseUid) {
+        await FirestoreService.saveConsumptionGroup(firebaseUid, group);
+      } else {
+        StorageService.saveGroup(group);
+      }
+    },
+    [isFirebaseMode, firebaseUid]
+  );
+
+  const handleDeleteConsumptionGroup = useCallback(
+    async (groupId: string): Promise<{ success: boolean; message: string }> => {
+      if (!isFirebaseMode || !firebaseUid) {
+        return StorageService.deleteGroup(groupId);
+      }
+      const target = (cloudEffectiveGroups || []).find((g) => g.id === groupId);
+      if (!target) {
+        return { success: false, message: 'Categoria não encontrada.' };
+      }
+
+      const affectedItems = cloudItems.filter((item) => !item.isArchived && item.group === target.name);
+      if (affectedItems.length > 0) {
+        await Promise.all(
+          affectedItems.map((item) =>
+            FirestoreService.saveBasketItem(
+              firebaseUid,
+              { ...item, group: 'Despesas pessoais', updatedAt: new Date().toISOString() },
+              false
+            )
+          )
+        );
+      }
+
+      await FirestoreService.deleteConsumptionGroup(firebaseUid, groupId);
+      return {
+        success: true,
+        message:
+          affectedItems.length > 0
+            ? `Categoria excluída. ${affectedItems.length} itens foram transferidos para "Despesas pessoais".`
+            : 'Categoria excluída com sucesso.',
+      };
+    },
+    [isFirebaseMode, firebaseUid, cloudEffectiveGroups, cloudItems]
+  );
+
+  // Salvar Estratégias A e B no Cloud Firestore
+  const handleSavePlanA = useCallback(
+    async (plan: SubstitutePlanA) => {
+      if (isFirebaseMode && firebaseUid) {
+        await FirestoreService.saveStrategyPlanA(firebaseUid, {
+          ...plan,
           profileId: activeProfile.id,
-          initialIncome: initial,
-          finalIncome: final,
-        }),
-      }).catch(() => {});
-    }
-  }, [activeProfile.id, currentUser, isDemo]);
+        });
+      } else {
+        StorageService.savePlanA(plan);
+      }
+    },
+    [isFirebaseMode, firebaseUid, activeProfile.id]
+  );
 
-  // Alternância para Cesta Vazia
-  const handleSwitchToEmptyBasket = useCallback(() => {
-    if (confirm('Deseja iniciar uma cesta em branco? Os itens atuais serão preservados no histórico.')) {
+  const handleSavePlanB = useCallback(
+    async (plan: EfficiencyPlanB) => {
+      if (isFirebaseMode && firebaseUid) {
+        await FirestoreService.saveStrategyPlanB(firebaseUid, {
+          ...plan,
+          profileId: activeProfile.id,
+        });
+      } else {
+        StorageService.savePlanB(plan);
+      }
+    },
+    [isFirebaseMode, firebaseUid, activeProfile.id]
+  );
+
+  // Alternância para Cesta Vazia (via ConfirmModal sem window.confirm)
+  const handleRequestEmptyBasket = useCallback(() => {
+    if (firebaseUid && isDemo) {
+      setIsDemo(false);
+      setActiveTab('minha-cesta-familiar');
+      return;
+    }
+    setIsConfirmEmptyOpen(true);
+  }, [firebaseUid, isDemo]);
+
+  const handleConfirmEmptyBasket = useCallback(async () => {
+    setIsConfirmEmptyOpen(false);
+    if (isFirebaseMode && firebaseUid) {
+      await Promise.all(items.map((item) => FirestoreService.archiveBasketItem(firebaseUid, item.id)));
+      setActiveTab('minha-cesta-familiar');
+    } else {
       StorageService.clearToEmptyBasket();
-      setItems([]);
+      setLocalActiveProfile(StorageService.getProfile());
+      setLocalProfiles(StorageService.getProfiles());
+      setLocalItems([]);
       setActiveTab('minha-cesta-familiar');
     }
-  }, []);
+  }, [isFirebaseMode, firebaseUid, items]);
 
   // Alternância para Cenário Demonstrativo
   const handleSwitchToDemoBasket = useCallback(() => {
     StorageService.loadDemoBasket();
-    setItems(StorageService.getItems(activeProfile.id));
+    if (firebaseUid) {
+      setIsDemo(true);
+    }
+    const demoProfile =
+      StorageService.getProfiles().find((p) => p.isDemo) || StorageService.getProfiles()[0];
+    StorageService.setActiveProfileId(demoProfile.id);
+    setLocalActiveProfile(demoProfile);
+    setLocalProfiles(StorageService.getProfiles());
+    setLocalItems(StorageService.getItems(demoProfile.id));
     setActiveTab('visao-geral');
-  }, [activeProfile.id]);
+  }, [firebaseUid]);
 
   // Abertura do Histórico de Preços para Item Específico
   const handleViewPriceHistory = useCallback((item: BasketItem) => {
@@ -415,22 +647,39 @@ export default function App() {
   }, []);
 
   // Importação de Itens
-  const handleImportItems = useCallback((imported: BasketItem[]) => {
-    StorageService.importItems(imported);
-    const updatedList = StorageService.getItems(activeProfile.id);
-    setItems(updatedList);
+  const handleImportItems = useCallback(
+    async (imported: BasketItem[]) => {
+      if (isFirebaseMode && firebaseUid) {
+        const stamped = imported.map((it, idx) => ({
+          ...it,
+          id: sanitizeFirestoreId(it.id || `item_${Date.now()}_${idx}`, 'item'),
+          profileId: activeProfile.id,
+          isArchived: false,
+          active: it.active !== false,
+        }));
+        await Promise.all(
+          stamped.map((it) => FirestoreService.saveBasketItem(firebaseUid, it, false))
+        );
+      } else {
+        StorageService.importItems(imported);
+        setLocalItems(StorageService.getItems(activeProfile.id));
+      }
+    },
+    [activeProfile.id, isFirebaseMode, firebaseUid]
+  );
 
-    if (currentUser && !isDemo) {
-      updatedList.forEach((it) => {
-        fetch('/api/basket', {
-          method: 'POST',
-          headers: getAuthHeaders(),
-          credentials: 'include',
-          body: JSON.stringify(it),
-        }).catch(() => {});
-      });
-    }
-  }, [activeProfile.id, currentUser, isDemo]);
+  // Atualização de Perfil
+  const handleUpdateProfile = useCallback(
+    async (updatedProfile: FamilyProfile) => {
+      if (isFirebaseMode && firebaseUid) {
+        await FirestoreService.saveProfile(firebaseUid, updatedProfile);
+      } else {
+        setLocalActiveProfile(updatedProfile);
+        setLocalProfiles(StorageService.getProfiles());
+      }
+    },
+    [isFirebaseMode, firebaseUid]
+  );
 
   // SE NÃO HÁ USUÁRIO E NÃO ESTÁ EM DEMO: EXIBE A LANDING PAGE
   if (!currentUser && !isDemo) {
@@ -500,16 +749,25 @@ export default function App() {
               </span>
             </div>
             <div className="flex items-center gap-3">
-              <button
-                onClick={() => {
-                  setAuthModalMode('register');
-                  setAuthModalError(null);
-                  setIsAuthModalOpen(true);
-                }}
-                className="underline text-[#86f2e4] hover:text-[#ffffff] cursor-pointer"
-              >
-                Criar Conta Real
-              </button>
+              {firebaseUid ? (
+                <button
+                  onClick={() => setIsDemo(false)}
+                  className="underline text-[#86f2e4] hover:text-[#ffffff] cursor-pointer"
+                >
+                  Voltar à Minha Conta
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    setAuthModalMode('register');
+                    setAuthModalError(null);
+                    setIsAuthModalOpen(true);
+                  }}
+                  className="underline text-[#86f2e4] hover:text-[#ffffff] cursor-pointer"
+                >
+                  Criar Conta Real
+                </button>
+              )}
               <button
                 onClick={handleLogout}
                 className="px-2 py-0.5 rounded bg-[#213145] text-xs hover:bg-[#ffdad6] hover:text-[#ba1a1a] transition-colors cursor-pointer"
@@ -524,45 +782,23 @@ export default function App() {
           isSidebarCollapsed={isSidebarCollapsed}
           activeProfile={activeProfile}
           profiles={profiles}
+          ibgeData={ibgeMetadata}
           userAvatarUrl={currentUser?.avatarUrl}
           onSelectProfile={(profileId) => {
             const found = profiles.find((p) => p.id === profileId);
-            if (found) {
+            if (!found) return;
+            if (isFirebaseMode) {
+              setActiveCloudProfileId(profileId);
+            } else {
               StorageService.setActiveProfileId(profileId);
-              setActiveProfile(found);
-              setItems(StorageService.getItems(profileId));
-            }
-          }}
-          onCreateProfile={() => {
-            const name = prompt('Nome do novo perfil orçamentário:');
-            if (name) {
-              const newProf: FamilyProfile = {
-                id: `prof-${Date.now()}`,
-                name,
-                referenceRegion: 'Brasil',
-                currency: 'BRL',
-                membersCount: 2,
-                isDemo: false,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-              };
-              StorageService.saveProfile(newProf);
-              setActiveProfile(newProf);
-              setProfiles(StorageService.getProfiles());
-              if (currentUser && !isDemo) {
-                fetch('/api/profiles', {
-                  method: 'POST',
-                  headers: getAuthHeaders(),
-                  credentials: 'include',
-                  body: JSON.stringify(newProf),
-                }).catch(() => {});
-              }
+              setLocalActiveProfile(found);
+              setLocalItems(StorageService.getItems(profileId));
             }
           }}
           selectedTimeframe={selectedTimeframe}
           onSelectTimeframe={setSelectedTimeframe}
           onNavigateToSettings={() => setActiveTab('configuracoes')}
-          onSwitchToEmptyBasket={handleSwitchToEmptyBasket}
+          onSwitchToEmptyBasket={handleRequestEmptyBasket}
           onSwitchToDemoBasket={handleSwitchToDemoBasket}
           isDemo={isDemo}
         />
@@ -590,9 +826,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'ipca-oficial' && (
-            <OfficialIPCAView onNavigateTab={setActiveTab} />
-          )}
+          {activeTab === 'ipca-oficial' && <OfficialIPCAView onNavigateTab={setActiveTab} />}
 
           {activeTab === 'minha-cesta-familiar' && (
             <BasketView
@@ -608,16 +842,30 @@ export default function App() {
               onDeleteItem={handleDeleteItem}
               onOpenImportExport={() => setIsImportExportOpen(true)}
               onViewPriceHistory={handleViewPriceHistory}
+              onRefreshData={() => {
+                if (!isFirebaseMode) {
+                  setLocalItems(StorageService.getItems(activeProfile.id));
+                }
+              }}
               isDemo={isDemo}
+              groups={cloudEffectiveGroups}
+              onSaveGroup={isFirebaseMode ? handleSaveConsumptionGroup : undefined}
+              onDeleteGroup={isFirebaseMode ? handleDeleteConsumptionGroup : undefined}
             />
           )}
 
           {activeTab === 'precos-e-historico' && (
             <PriceHistoryView
               summary={summary}
-              onRefreshData={() => setItems(StorageService.getItems(activeProfile.id))}
+              onRefreshData={() => {
+                if (!isFirebaseMode) {
+                  setLocalItems(StorageService.getItems(activeProfile.id));
+                }
+              }}
               isDemo={isDemo}
               selectedItemForHistory={selectedItemForHistory}
+              priceRecords={isFirebaseMode ? cloudPriceHistory : undefined}
+              onAddPriceRecord={isFirebaseMode ? handleAddPriceRecordFromView : undefined}
             />
           )}
 
@@ -641,33 +889,52 @@ export default function App() {
             <SavingStrategiesView
               summary={summary}
               isDemo={isDemo}
+              activeProfileId={activeProfile.id}
+              plansA={activePlansA}
+              plansB={activePlansB}
+              planC={activePlanC}
+              onSavePlanA={isFirebaseMode ? handleSavePlanA : undefined}
+              onSavePlanB={isFirebaseMode ? handleSavePlanB : undefined}
               onNavigateTab={setActiveTab}
             />
           )}
 
-          {activeTab === 'relatorios' && (
-            <ReportsView summary={summary} isDemo={isDemo} />
-          )}
+          {activeTab === 'relatorios' && <ReportsView summary={summary} isDemo={isDemo} />}
 
           {activeTab === 'configuracoes' && (
             <SettingsView
               activeProfile={activeProfile}
               currentUser={currentUser}
-              onUpdateProfile={(updatedProfile) => {
-                setActiveProfile(updatedProfile);
-                if (currentUser && !isDemo) {
-                  fetch('/api/profiles', {
-                    method: 'POST',
-                    headers: getAuthHeaders(),
-                    credentials: 'include',
-                    body: JSON.stringify(updatedProfile),
-                  }).catch(() => {});
-                }
-              }}
-              onSwitchToEmptyBasket={handleSwitchToEmptyBasket}
+              onUpdateProfile={handleUpdateProfile}
+              onSwitchToEmptyBasket={handleRequestEmptyBasket}
               onSwitchToDemoBasket={handleSwitchToDemoBasket}
               isDemo={isDemo}
-              onRefreshData={() => setItems(StorageService.getItems(activeProfile.id))}
+              isFirebaseMode={isFirebaseMode}
+              onExportBackupData={
+                isFirebaseMode
+                  ? () => ({
+                      profile: activeProfile,
+                      profiles,
+                      groups: cloudEffectiveGroups,
+                      items,
+                      prices: cloudPriceHistory,
+                      income: activeIncomeHistory,
+                      plansA: activePlansA,
+                      plansB: activePlansB,
+                      planC: activePlanC,
+                      exportedAt: new Date().toISOString(),
+                      version: '3.1.0-firebase',
+                    })
+                  : undefined
+              }
+              onRefreshData={() => {
+                IBGEService.getMetadata()
+                  .then((meta) => setIbgeMetadata(meta))
+                  .catch(() => {});
+                if (!isFirebaseMode) {
+                  setLocalItems(StorageService.getItems(activeProfile.id));
+                }
+              }}
             />
           )}
         </main>
@@ -683,6 +950,7 @@ export default function App() {
         onSave={handleSaveItem}
         editingItem={editingItem}
         totalMonthlySpend={summary.totalMonthlySpend}
+        groups={cloudEffectiveGroups}
       />
 
       <QuickPriceModal
@@ -697,6 +965,21 @@ export default function App() {
         onClose={() => setIsImportExportOpen(false)}
         items={items}
         onImportItems={handleImportItems}
+      />
+
+      <ConfirmModal
+        isOpen={isConfirmEmptyOpen}
+        title="Iniciar Cesta em Branco"
+        message={
+          isFirebaseMode
+            ? 'Deseja arquivar os itens atuais desta cesta pessoal e recomeçar do zero?'
+            : 'Deseja iniciar uma cesta em branco? Os itens atuais serão preservados no histórico.'
+        }
+        confirmLabel="Sim, Iniciar em Branco"
+        cancelLabel="Cancelar"
+        isDestructive={true}
+        onConfirm={handleConfirmEmptyBasket}
+        onCancel={() => setIsConfirmEmptyOpen(false)}
       />
 
       <AuthModal
@@ -716,6 +999,7 @@ export default function App() {
           isOpen={isOnboardingOpen}
           userDisplayName={currentUser.displayName}
           targetProfileId={currentUser.profileId}
+          skipLocalPersistence={currentUser.authProvider === 'google'}
           onFinish={handleFinishOnboarding}
           onSkip={() => {
             setIsOnboardingOpen(false);

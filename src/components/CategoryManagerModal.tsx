@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ConsumptionGroup } from '../types';
 import { StorageService } from '../services/storage';
 
@@ -6,20 +6,37 @@ interface CategoryManagerModalProps {
   isOpen: boolean;
   onClose: () => void;
   onCategoriesUpdated: () => void;
+  groups?: ConsumptionGroup[];
+  onSaveGroup?: (group: ConsumptionGroup) => void | Promise<void>;
+  onDeleteGroup?: (
+    groupId: string
+  ) => { success: boolean; message: string } | Promise<{ success: boolean; message: string }>;
 }
 
 export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
   isOpen,
   onClose,
   onCategoriesUpdated,
+  groups: propGroups,
+  onSaveGroup,
+  onDeleteGroup,
 }) => {
-  const [groups, setGroups] = useState<ConsumptionGroup[]>(() => StorageService.getGroups());
+  const [groups, setGroups] = useState<ConsumptionGroup[]>(() => propGroups ?? StorageService.getGroups());
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [color, setColor] = useState('#006a61');
   const [icon, setIcon] = useState('category');
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (propGroups) {
+      setGroups(propGroups);
+    } else if (isOpen) {
+      setGroups(StorageService.getGroups());
+    }
+  }, [propGroups, isOpen]);
 
   if (!isOpen) return null;
 
@@ -39,46 +56,76 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
     setIcon('category');
   };
 
-  const handleSaveGroup = (e: React.FormEvent) => {
+  const handleSaveGroup = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || saving) return;
 
-    if (editingGroupId) {
-      const existing = groups.find((g) => g.id === editingGroupId);
-      if (existing) {
-        const updated: ConsumptionGroup = {
-          ...existing,
+    setSaving(true);
+    try {
+      let targetGroup: ConsumptionGroup | null = null;
+      if (editingGroupId) {
+        const existing = groups.find((g) => g.id === editingGroupId);
+        if (existing) {
+          targetGroup = {
+            ...existing,
+            name: name.trim(),
+            description: description.trim(),
+            color,
+            icon,
+          };
+        }
+      } else {
+        targetGroup = {
+          id: `grp-custom-${Date.now()}`,
           name: name.trim(),
           description: description.trim(),
           color,
           icon,
+          isCustom: true,
+          active: true,
         };
-        StorageService.saveGroup(updated);
-        setFeedback(`Categoria "${updated.name}" atualizada com sucesso!`);
       }
-    } else {
-      const newGroup: ConsumptionGroup = {
-        id: `grp-custom-${Date.now()}`,
-        name: name.trim(),
-        description: description.trim(),
-        color,
-        icon,
-        isCustom: true,
-      };
-      StorageService.saveGroup(newGroup);
-      setFeedback(`Nova categoria "${newGroup.name}" criada com sucesso!`);
-    }
 
-    setGroups(StorageService.getGroups());
-    handleCancelEdit();
-    onCategoriesUpdated();
+      if (targetGroup) {
+        if (onSaveGroup) {
+          await onSaveGroup(targetGroup);
+          if (!propGroups) {
+            setGroups(StorageService.getGroups());
+          }
+        } else {
+          StorageService.saveGroup(targetGroup);
+          setGroups(StorageService.getGroups());
+        }
+        setFeedback(
+          editingGroupId
+            ? `Categoria "${targetGroup.name}" atualizada com sucesso!`
+            : `Nova categoria "${targetGroup.name}" criada com sucesso!`
+        );
+      }
+
+      handleCancelEdit();
+      onCategoriesUpdated();
+    } catch {
+      setFeedback('Não foi possível salvar a categoria. Tente novamente.');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleDeleteGroup = (groupId: string) => {
-    const res = StorageService.deleteGroup(groupId);
-    setGroups(StorageService.getGroups());
-    setFeedback(res.message);
-    onCategoriesUpdated();
+  const handleDeleteGroup = async (groupId: string) => {
+    try {
+      if (onDeleteGroup) {
+        const res = await onDeleteGroup(groupId);
+        setFeedback(res.message);
+      } else {
+        const res = StorageService.deleteGroup(groupId);
+        setGroups(StorageService.getGroups());
+        setFeedback(res.message);
+      }
+      onCategoriesUpdated();
+    } catch {
+      setFeedback('Não foi possível excluir a categoria.');
+    }
   };
 
   return (
@@ -171,9 +218,10 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
             )}
             <button
               type="submit"
-              className="h-8 px-4 rounded-lg bg-[#000000] hover:bg-[#213145] text-white text-xs font-mono font-semibold transition-all cursor-pointer"
+              disabled={saving}
+              className="h-8 px-4 rounded-lg bg-[#000000] hover:bg-[#213145] text-white text-xs font-mono font-semibold transition-all cursor-pointer disabled:opacity-50"
             >
-              {editingGroupId ? 'Salvar Alteração' : 'Criar Categoria'}
+              {saving ? 'Salvando...' : editingGroupId ? 'Salvar Alteração' : 'Criar Categoria'}
             </button>
           </div>
         </form>

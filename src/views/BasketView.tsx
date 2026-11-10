@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { BasketItem, CalculatedItem, EconomicCalculationSummary, ConsumptionGroup, ItemClassification } from '../types';
 import { StorageService } from '../services/storage';
 import { CategoryManagerModal } from '../components/CategoryManagerModal';
@@ -13,6 +13,11 @@ interface BasketViewProps {
   onViewPriceHistory: (item: BasketItem) => void;
   onRefreshData?: () => void;
   isDemo: boolean;
+  groups?: ConsumptionGroup[];
+  onSaveGroup?: (group: ConsumptionGroup) => void | Promise<void>;
+  onDeleteGroup?: (
+    groupId: string
+  ) => { success: boolean; message: string } | Promise<{ success: boolean; message: string }>;
 }
 
 export const BasketView: React.FC<BasketViewProps> = ({
@@ -24,6 +29,9 @@ export const BasketView: React.FC<BasketViewProps> = ({
   onViewPriceHistory,
   onRefreshData = () => {},
   isDemo,
+  groups: propGroups,
+  onSaveGroup,
+  onDeleteGroup,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedGroup, setSelectedGroup] = useState<string>('ALL');
@@ -34,7 +42,15 @@ export const BasketView: React.FC<BasketViewProps> = ({
 
   // Category Manager Modal state
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
-  const [groups, setGroups] = useState<ConsumptionGroup[]>(() => StorageService.getGroups());
+  const [groups, setGroups] = useState<ConsumptionGroup[]>(() => propGroups ?? StorageService.getGroups());
+
+  useEffect(() => {
+    if (propGroups) {
+      setGroups(propGroups);
+    } else {
+      setGroups(StorageService.getGroups());
+    }
+  }, [propGroups, isDemo]);
 
   // Confirm delete modal state
   const [itemToDelete, setItemToDelete] = useState<CalculatedItem | null>(null);
@@ -84,7 +100,9 @@ export const BasketView: React.FC<BasketViewProps> = ({
   const paginatedItems = filteredItems.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   const handleCategoriesUpdated = () => {
-    setGroups(StorageService.getGroups());
+    if (!propGroups) {
+      setGroups(StorageService.getGroups());
+    }
     onRefreshData();
   };
 
@@ -503,6 +521,9 @@ export const BasketView: React.FC<BasketViewProps> = ({
         isOpen={isCategoryModalOpen}
         onClose={() => setIsCategoryModalOpen(false)}
         onCategoriesUpdated={handleCategoriesUpdated}
+        groups={propGroups}
+        onSaveGroup={onSaveGroup}
+        onDeleteGroup={onDeleteGroup}
       />
 
       {/* Confirm Item Deletion Modal */}

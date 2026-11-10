@@ -1,34 +1,137 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { EconomicCalculationSummary, SubstitutePlanA, EfficiencyPlanB, OpportunityPlanC } from '../types';
-import { StorageService } from '../services/storage';
+import { DEMO_PLANS_A, DEMO_PLANS_B, DEMO_PLAN_C, StorageService } from '../services/storage';
 
 interface SavingStrategiesViewProps {
   summary: EconomicCalculationSummary;
   isDemo: boolean;
+  activeProfileId?: string;
+  plansA?: SubstitutePlanA[];
+  plansB?: EfficiencyPlanB[];
+  planC?: OpportunityPlanC;
+  onSavePlanA?: (plan: SubstitutePlanA) => void | Promise<void>;
+  onSavePlanB?: (plan: EfficiencyPlanB) => void | Promise<void>;
   onNavigateTab?: (tab: any) => void;
+}
+
+function buildEffectivePlansA(
+  propPlansA: SubstitutePlanA[] | undefined,
+  activeProfileId: string | undefined,
+  isDemo: boolean
+): SubstitutePlanA[] {
+  if (!propPlansA) {
+    return StorageService.getPlansA();
+  }
+  const targetProfId = activeProfileId || 'default';
+  const starter = DEMO_PLANS_A.map((tpl) => {
+    const scopedId = `${tpl.id}_${targetProfId}`;
+    const saved = propPlansA.find((p) => p.id === scopedId || p.id === tpl.id);
+    if (saved) return saved;
+    return {
+      ...tpl,
+      id: scopedId,
+      profileId: targetProfId,
+      applied: isDemo,
+    };
+  });
+  const extras = propPlansA.filter(
+    (p) => !DEMO_PLANS_A.some((tpl) => p.id === `${tpl.id}_${targetProfId}` || p.id === tpl.id)
+  );
+  return [...starter, ...extras];
+}
+
+function buildEffectivePlansB(
+  propPlansB: EfficiencyPlanB[] | undefined,
+  activeProfileId: string | undefined,
+  isDemo: boolean
+): EfficiencyPlanB[] {
+  if (!propPlansB) {
+    return StorageService.getPlansB();
+  }
+  const targetProfId = activeProfileId || 'default';
+  const starter = DEMO_PLANS_B.map((tpl) => {
+    const scopedId = `${tpl.id}_${targetProfId}`;
+    const saved = propPlansB.find((p) => p.id === scopedId || p.id === tpl.id);
+    if (saved) return saved;
+    return {
+      ...tpl,
+      id: scopedId,
+      profileId: targetProfId,
+      applied: isDemo,
+    };
+  });
+  const extras = propPlansB.filter(
+    (p) => !DEMO_PLANS_B.some((tpl) => p.id === `${tpl.id}_${targetProfId}` || p.id === tpl.id)
+  );
+  return [...starter, ...extras];
 }
 
 export const SavingStrategiesView: React.FC<SavingStrategiesViewProps> = ({
   summary,
   isDemo,
+  activeProfileId,
+  plansA: propPlansA,
+  plansB: propPlansB,
+  planC: propPlanC,
+  onSavePlanA,
+  onSavePlanB,
   onNavigateTab,
 }) => {
-  const [plansA, setPlansA] = useState<SubstitutePlanA[]>(() => StorageService.getPlansA());
-  const [plansB, setPlansB] = useState<EfficiencyPlanB[]>(() => StorageService.getPlansB());
-  const [planC] = useState<OpportunityPlanC>(() => StorageService.getPlanC());
+  const [plansA, setPlansA] = useState<SubstitutePlanA[]>(() =>
+    buildEffectivePlansA(propPlansA, activeProfileId, isDemo)
+  );
+  const [plansB, setPlansB] = useState<EfficiencyPlanB[]>(() =>
+    buildEffectivePlansB(propPlansB, activeProfileId, isDemo)
+  );
+  const [planC, setPlanC] = useState<OpportunityPlanC>(
+    () => propPlanC ?? (isDemo ? DEMO_PLAN_C : StorageService.getPlanC())
+  );
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
 
-  const togglePlanA = (id: string) => {
+  useEffect(() => {
+    setPlansA(buildEffectivePlansA(propPlansA, activeProfileId, isDemo));
+  }, [propPlansA, activeProfileId, isDemo]);
+
+  useEffect(() => {
+    setPlansB(buildEffectivePlansB(propPlansB, activeProfileId, isDemo));
+  }, [propPlansB, activeProfileId, isDemo]);
+
+  useEffect(() => {
+    setPlanC(propPlanC ?? (isDemo ? DEMO_PLAN_C : StorageService.getPlanC()));
+  }, [propPlanC, isDemo]);
+
+  const togglePlanA = async (id: string) => {
     const updated = plansA.map((p) => (p.id === id ? { ...p, applied: !p.applied } : p));
     setPlansA(updated);
     const target = updated.find((p) => p.id === id);
-    if (target) StorageService.savePlanA(target);
+    if (!target) return;
+    if (onSavePlanA) {
+      await onSavePlanA(target);
+    } else {
+      StorageService.savePlanA(target);
+    }
   };
 
-  const togglePlanB = (id: string) => {
+  const togglePlanB = async (id: string) => {
     const updated = plansB.map((p) => (p.id === id ? { ...p, applied: !p.applied } : p));
     setPlansB(updated);
     const target = updated.find((p) => p.id === id);
-    if (target) StorageService.savePlanB(target);
+    if (!target) return;
+    if (onSavePlanB) {
+      await onSavePlanB(target);
+    } else {
+      StorageService.savePlanB(target);
+    }
+  };
+
+  const handleApplyAllPlans = async () => {
+    if (onSavePlanA) {
+      await Promise.all(plansA.filter((p) => p.applied).map((p) => onSavePlanA(p)));
+    }
+    if (onSavePlanB) {
+      await Promise.all(plansB.filter((p) => p.applied).map((p) => onSavePlanB(p)));
+    }
+    setActionNotice('Plano de Otimização sincronizado com sucesso para o ciclo atual.');
   };
 
   // Economia total dos planos aplicados
@@ -36,8 +139,11 @@ export const SavingStrategiesView: React.FC<SavingStrategiesViewProps> = ({
   const totalSavingsB = plansB.filter((p) => p.applied).reduce((acc, p) => acc + p.estimatedMonthlySavings, 0);
   const totalMonthlySavings = totalSavingsA + totalSavingsB;
 
-  // Impacto em alívio da inflação familiar: ~1.8 p.p.
-  const estimatedReliefPP = summary.totalMonthlySpend > 0 ? (totalMonthlySavings / summary.totalMonthlySpend) * summary.ipcaCasa12M : 1.80;
+  // Impacto em alívio da inflação familiar
+  const estimatedReliefPP =
+    summary.totalMonthlySpend > 0
+      ? (totalMonthlySavings / summary.totalMonthlySpend) * summary.ipcaCasa12M
+      : 0;
 
   return (
     <div className="flex flex-col w-full">
@@ -77,15 +183,17 @@ export const SavingStrategiesView: React.FC<SavingStrategiesViewProps> = ({
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => alert('3 simulações anteriores salvas no histórico de orçamentos.')}
-                className="h-10 px-4 rounded-lg bg-[#eff4ff] hover:bg-[#e5eeff] text-[#0b1c30] text-xs font-mono font-medium transition-colors flex items-center gap-2"
+                onClick={() =>
+                  setActionNotice('Simulações anteriores preservadas automaticamente no histórico do perfil.')
+                }
+                className="h-10 px-4 rounded-lg bg-[#eff4ff] hover:bg-[#e5eeff] text-[#0b1c30] text-xs font-mono font-medium transition-colors flex items-center gap-2 cursor-pointer"
               >
                 <span className="material-symbols-outlined text-[18px]">history</span>
                 <span>Histórico de Simulações</span>
               </button>
               <button
                 type="button"
-                onClick={() => alert('Plano de Otimização ativado com sucesso para o ciclo!')}
+                onClick={handleApplyAllPlans}
                 className="h-10 px-4 rounded-lg bg-[#000000] text-[#ffffff] hover:bg-[#213145] text-xs font-mono font-semibold transition-opacity flex items-center gap-2 shadow-sm cursor-pointer"
               >
                 <span className="material-symbols-outlined text-[18px]">bolt</span>
@@ -93,6 +201,15 @@ export const SavingStrategiesView: React.FC<SavingStrategiesViewProps> = ({
               </button>
             </div>
           </div>
+
+          {actionNotice && (
+            <div className="p-3 bg-[#86f2e4]/20 border border-[#006a61]/30 rounded-xl text-xs font-mono text-[#005049] flex items-center justify-between">
+              <span>{actionNotice}</span>
+              <button type="button" onClick={() => setActionNotice(null)} className="cursor-pointer">
+                <span className="material-symbols-outlined text-[16px]">close</span>
+              </button>
+            </div>
+          )}
 
           {/* Hero KPI Banner (Bento style) */}
           <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
@@ -319,7 +436,11 @@ export const SavingStrategiesView: React.FC<SavingStrategiesViewProps> = ({
                   <div className="flex justify-between">
                     <span className="text-[#76777d]">Meta Pactuada:</span>
                     <span className="font-semibold text-[#006a61]">
-                      {eff.targetConsumption} {eff.unit} (-{(((eff.currentConsumption - eff.targetConsumption) / eff.currentConsumption) * 100).toFixed(0)}%)
+                      {eff.targetConsumption} {eff.unit} (-
+                      {eff.currentConsumption > 0
+                        ? (((eff.currentConsumption - eff.targetConsumption) / eff.currentConsumption) * 100).toFixed(0)
+                        : '0'}
+                      %)
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -501,7 +622,7 @@ export const SavingStrategiesView: React.FC<SavingStrategiesViewProps> = ({
               Exportar Metas (PDF)
             </button>
             <button
-              onClick={() => alert('Plano de otimização salvo no perfil familiar com sucesso!')}
+              onClick={handleApplyAllPlans}
               className="h-10 px-5 rounded-lg bg-[#000000] text-[#ffffff] hover:bg-[#213145] text-xs font-mono font-semibold transition-opacity shadow-sm flex items-center gap-2 cursor-pointer"
             >
               <span>Salvar Plano de Otimização</span>

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { EconomicCalculationSummary, PocketImpactPerspective } from '../types';
 import {
   calculateEstimatedMonthlyImpact,
@@ -25,6 +25,16 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
   const [currentIncomeInput, setCurrentIncomeInput] = useState<number>(
     summary.purchasingPower.finalIncome || 10500
   );
+  const [incomeSavedMsg, setIncomeSavedMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof summary.purchasingPower.initialIncome === 'number') {
+      setInitialIncomeInput(summary.purchasingPower.initialIncome);
+    }
+    if (typeof summary.purchasingPower.finalIncome === 'number') {
+      setCurrentIncomeInput(summary.purchasingPower.finalIncome);
+    }
+  }, [summary.purchasingPower.initialIncome, summary.purchasingPower.finalIncome]);
 
   // Gasto mensal de referência (editável com slider/input ou atrelado à cesta)
   const defaultSpend = summary.totalMonthlySpend > 0 ? summary.totalMonthlySpend : 3000;
@@ -73,12 +83,20 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
   const handleSaveIncome = () => {
     if (onUpdateIncome) {
       onUpdateIncome(initialIncomeInput, currentIncomeInput);
-      alert('Rendas salvas e parâmetros recalculados com sucesso!');
+      setIncomeSavedMsg('Rendas salvas e parâmetros recalculados com sucesso!');
     }
   };
 
   return (
     <div className="flex flex-col w-full px-6 lg:px-12 py-8 max-w-[1440px] mx-auto gap-8">
+      {incomeSavedMsg && (
+        <div className="p-3 bg-[#86f2e4]/20 border border-[#006a61]/30 rounded-xl text-xs font-mono text-[#005049] flex items-center justify-between">
+          <span>{incomeSavedMsg}</span>
+          <button type="button" onClick={() => setIncomeSavedMsg(null)} className="cursor-pointer">
+            <span className="material-symbols-outlined text-[16px]">close</span>
+          </button>
+        </div>
+      )}
       {/* Sub-Header Ribbon */}
       <div className="p-3 bg-[#eff4ff] rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border border-[#e5eeff]">
         <div className="flex items-center gap-2">

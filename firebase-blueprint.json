@@ -1,0 +1,220 @@
+{
+  "entities": {
+    "UserAccountPublic": {
+      "title": "Conta Pública de Usuário",
+      "description": "Metadados não sensíveis da conta do usuário autenticado no IPCA-Casa.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "avatarUrl": { "type": "string", "maxLength": 1000 },
+        "authProvider": { "type": "string", "enum": ["google", "local"] },
+        "defaultProfileId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "displayName", "authProvider", "defaultProfileId", "createdAt", "updatedAt"]
+    },
+    "UserPrivateAccount": {
+      "title": "Dados Privados de Conta (PII)",
+      "description": "Informações de identificação pessoal isoladas (e-mail) acessíveis exclusivamente pelo titular.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "email": { "type": "string", "format": "email", "minLength": 3, "maxLength": 255 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "email", "createdAt", "updatedAt"]
+    },
+    "FamilyProfile": {
+      "title": "Perfil Familiar",
+      "description": "Configuração de orçamento familiar, região de referência IBGE e número de integrantes.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "membersCount": { "type": "integer" },
+        "referenceRegion": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "currency": { "type": "string", "minLength": 1, "maxLength": 10 },
+        "isDemo": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "name", "membersCount", "referenceRegion", "currency", "isDemo", "createdAt", "updatedAt"]
+    },
+    "BasketItem": {
+      "title": "Item da Cesta Familiar",
+      "description": "Produto ou serviço monitorado na cesta pessoal para cálculo ponderado do IPCA-Casa.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "profileId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 500 },
+        "group": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "classification": { "type": "string", "enum": ["Essencial", "Supérfluo", "Não classificado"] },
+        "monthlySpend": { "type": "number" },
+        "oldPrice": { "type": "number" },
+        "currentPrice": { "type": "number" },
+        "oldPriceDate": { "type": "string", "maxLength": 32 },
+        "currentPriceDate": { "type": "string", "maxLength": 32 },
+        "unit": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "active": { "type": "boolean" },
+        "isArchived": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "userId",
+        "profileId",
+        "name",
+        "group",
+        "classification",
+        "monthlySpend",
+        "oldPrice",
+        "currentPrice",
+        "oldPriceDate",
+        "currentPriceDate",
+        "unit",
+        "active",
+        "isArchived",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PriceRecord": {
+      "title": "Registro de Preço",
+      "description": "Leitura histórica de preço unitário associada a um item da cesta.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "itemId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "price": { "type": "number" },
+        "referenceDate": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "unit": { "type": "string", "maxLength": 40 },
+        "source": { "type": "string", "maxLength": 255 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "itemId", "price", "referenceDate", "createdAt", "updatedAt"]
+    },
+    "IncomeRecord": {
+      "title": "Registro de Renda Familiar",
+      "description": "Informação de renda mensal nominal para cálculo do poder de compra e impacto no bolso.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "profileId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "referenceDate": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "nominalIncome": { "type": "number" },
+        "source": { "type": "string", "maxLength": 255 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "profileId", "referenceDate", "nominalIncome", "createdAt", "updatedAt"]
+    },
+    "ConsumptionGroup": {
+      "title": "Grupo de Consumo",
+      "description": "Categoria personalizada ou padrão IBGE de despesas do usuário.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 300 },
+        "color": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "icon": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "nationalWeightIBGE": { "type": "number" },
+        "isCustom": { "type": "boolean" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "name", "description", "color", "icon", "createdAt", "updatedAt"]
+    },
+    "SavingStrategy": {
+      "title": "Estratégia de Economia Doméstica",
+      "description": "Planos A (Substituição), B (Eficiência) ou C (Custo de Oportunidade) salvos pelo usuário.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "profileId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "planType": { "type": "string", "enum": ["PLAN_A", "PLAN_B", "PLAN_C"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 600 },
+        "applied": { "type": "boolean" },
+        "monthlySavings": { "type": "number" },
+        "originalItemId": { "type": "string", "maxLength": 128 },
+        "originalItemName": { "type": "string", "maxLength": 200 },
+        "originalPrice": { "type": "number" },
+        "substituteName": { "type": "string", "maxLength": 200 },
+        "substitutePrice": { "type": "number" },
+        "qualitativeTradeoff": { "type": "string", "maxLength": 600 },
+        "resourceName": { "type": "string", "maxLength": 200 },
+        "unit": { "type": "string", "maxLength": 40 },
+        "tariffPerUnit": { "type": "number" },
+        "currentConsumption": { "type": "number" },
+        "targetConsumption": { "type": "number" },
+        "currentSpend": { "type": "number" },
+        "progressPercent": { "type": "number" },
+        "notes": { "type": "string", "maxLength": 600 },
+        "monthlyInvestment": { "type": "number" },
+        "nominalAnnualRate": { "type": "number" },
+        "expectedAnnualInflation": { "type": "number" },
+        "realAnnualYield": { "type": "number" },
+        "projection12Months": { "type": "number" },
+        "projection24Months": { "type": "number" },
+        "projection36Months": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "profileId", "planType", "title", "applied", "monthlySavings", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserAccountPublic" },
+      "description": "Documento raiz público (sem PII) do usuário autenticado."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateAccount" },
+      "description": "Subcoleção isolada para PII (e-mail) do usuário."
+    },
+    "/users/{userId}/profiles/{profileId}": {
+      "schema": { "$ref": "#/entities/FamilyProfile" },
+      "description": "Perfis familiares cadastrados pelo usuário."
+    },
+    "/users/{userId}/basketItems/{itemId}": {
+      "schema": { "$ref": "#/entities/BasketItem" },
+      "description": "Itens da cesta familiar pertencentes ao usuário."
+    },
+    "/users/{userId}/priceHistory/{priceId}": {
+      "schema": { "$ref": "#/entities/PriceRecord" },
+      "description": "Histórico temporal de cotações dos itens do usuário."
+    },
+    "/users/{userId}/incomeHistory/{incomeId}": {
+      "schema": { "$ref": "#/entities/IncomeRecord" },
+      "description": "Histórico de renda mensal do usuário para cálculo de poder de compra."
+    },
+    "/users/{userId}/consumptionGroups/{groupId}": {
+      "schema": { "$ref": "#/entities/ConsumptionGroup" },
+      "description": "Categorias/grupos de consumo configurados pelo usuário."
+    },
+    "/users/{userId}/strategies/{strategyId}": {
+      "schema": { "$ref": "#/entities/SavingStrategy" },
+      "description": "Estratégias de economia doméstica (Planos A, B e C) do usuário."
+    }
+  }
+}
