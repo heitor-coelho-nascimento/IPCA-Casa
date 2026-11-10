@@ -1,0 +1,398 @@
+import React, { useState } from 'react';
+import { FamilyProfile, BasketItem } from '../types';
+import { DEMO_BASKET_ITEMS, StorageService } from '../services/storage';
+
+interface OnboardingModalProps {
+  isOpen: boolean;
+  userDisplayName: string;
+  targetProfileId?: string;
+  onFinish: (profile: FamilyProfile) => void;
+  onSkip: () => void;
+}
+
+export const OnboardingModal: React.FC<OnboardingModalProps> = ({
+  isOpen,
+  userDisplayName,
+  targetProfileId,
+  onFinish,
+  onSkip,
+}) => {
+  const [step, setStep] = useState<number>(1);
+
+  // Step 1: Perfil
+  const [profileName, setProfileName] = useState(`Orçamento de ${userDisplayName}`);
+  const [membersCount, setMembersCount] = useState(3);
+
+  // Step 2: Renda
+  const [initialIncome, setInitialIncome] = useState<number>(6000);
+  const [currentIncome, setCurrentIncome] = useState<number>(6500);
+
+  // Step 3: Gastos principais rápidos
+  const [groceriesSpend, setGroceriesSpend] = useState<number>(1800);
+  const [housingSpend, setHousingSpend] = useState<number>(2000);
+  const [transportSpend, setTransportSpend] = useState<number>(800);
+
+  // Step 4: Região de referência para o IBGE
+  const [region, setRegion] = useState('Brasil');
+
+  // Step 5: Escolha da Cesta
+  const [basketChoice, setBasketChoice] = useState<'empty' | 'copy-demo'>('copy-demo');
+
+  if (!isOpen) return null;
+
+  const handleComplete = () => {
+    // 1. Salva perfil do usuário
+    const profileId = targetProfileId || `prof_user_${Date.now()}`;
+    const newProfile: FamilyProfile = {
+      id: profileId,
+      name: profileName || `Orçamento de ${userDisplayName}`,
+      membersCount,
+      referenceRegion: region,
+      currency: 'BRL',
+      isDemo: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    StorageService.saveProfile(newProfile);
+    StorageService.setActiveProfileId(profileId);
+
+    // 2. Salva histórico de renda inicial
+    StorageService.saveIncome(initialIncome, currentIncome);
+
+    // 3. Configura itens da cesta no perfil do usuário
+    if (basketChoice === 'copy-demo') {
+      const clonedDemoItems: BasketItem[] = DEMO_BASKET_ITEMS.map((item, idx) => ({
+        ...item,
+        id: `item-usr-${Date.now()}-${idx}`,
+        profileId,
+      }));
+      StorageService.importItems(clonedDemoItems);
+    } else {
+      // Inicia com os 3 itens informados no onboarding
+      const itemsToAdd: BasketItem[] = [
+        {
+          id: `item-ob-1-${Date.now()}`,
+          profileId,
+          name: 'Supermercado & Alimentação Básica',
+          group: 'Alimentação e bebidas',
+          classification: 'Essencial',
+          monthlySpend: groceriesSpend,
+          oldPrice: 100,
+          currentPrice: 108,
+          oldPriceDate: '2023-09-01',
+          currentPriceDate: '2024-09-01',
+          unit: 'mensal',
+          active: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: `item-ob-2-${Date.now()}`,
+          profileId,
+          name: 'Habitação (Aluguel / Condomínio / Luz / Água)',
+          group: 'Habitação',
+          classification: 'Essencial',
+          monthlySpend: housingSpend,
+          oldPrice: 100,
+          currentPrice: 106,
+          oldPriceDate: '2023-09-01',
+          currentPriceDate: '2024-09-01',
+          unit: 'mensal',
+          active: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: `item-ob-3-${Date.now()}`,
+          profileId,
+          name: 'Transporte (Combustível / Transporte Público)',
+          group: 'Transportes',
+          classification: 'Essencial',
+          monthlySpend: transportSpend,
+          oldPrice: 100,
+          currentPrice: 105,
+          oldPriceDate: '2023-09-01',
+          currentPriceDate: '2024-09-01',
+          unit: 'mensal',
+          active: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ];
+      StorageService.importItems(itemsToAdd);
+    }
+
+    onFinish(newProfile);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-[#213145]/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-[#ffffff] rounded-2xl max-w-lg w-full shadow-2xl p-6 flex flex-col gap-6 border border-[#eff4ff]">
+        {/* Progress Bar & Header */}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between text-xs font-mono text-[#76777d]">
+            <span>Passo {step} de 5</span>
+            <button
+              onClick={onSkip}
+              className="text-[#45464d] hover:text-[#0b1c30] underline cursor-pointer"
+            >
+              Pular e explorar agora
+            </button>
+          </div>
+          <div className="w-full bg-[#eff4ff] h-1.5 rounded-full overflow-hidden">
+            <div
+              className="bg-[#000000] h-full transition-all duration-300"
+              style={{ width: `${(step / 5) * 100}%` }}
+            />
+          </div>
+        </div>
+
+        {/* STEP 1: Perfil Familiar */}
+        {step === 1 && (
+          <div className="flex flex-col gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-[#0b1c30]">1. Identificação do seu Orçamento</h2>
+              <p className="text-xs text-[#45464d] mt-1">
+                Dê um nome ao seu plano de controle familiar e informe quantas pessoas compõem a residência.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono text-[#45464d]">Nome do Perfil Familiar:</label>
+              <input
+                type="text"
+                value={profileName}
+                onChange={(e) => setProfileName(e.target.value)}
+                className="h-10 px-3.5 rounded-lg border border-[#c6c6cd] text-xs font-semibold text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono text-[#45464d]">Quantidade de Moradores / Integrantes:</label>
+              <input
+                type="number"
+                min="1"
+                max="20"
+                value={membersCount}
+                onChange={(e) => setMembersCount(parseInt(e.target.value, 10) || 1)}
+                className="h-10 px-3.5 rounded-lg border border-[#c6c6cd] text-xs font-mono text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* STEP 2: Renda Mensal */}
+        {step === 2 && (
+          <div className="flex flex-col gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-[#0b1c30]">2. Renda Familiar e Salário</h2>
+              <p className="text-xs text-[#45464d] mt-1">
+                Fundamental para calcular o impacto em Reais e a variação real do seu poder de compra.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono text-[#45464d]">Renda Mensal no Início do Período (R$):</label>
+              <input
+                type="number"
+                step="100"
+                value={initialIncome}
+                onChange={(e) => setInitialIncome(parseFloat(e.target.value) || 0)}
+                className="h-10 px-3.5 rounded-lg border border-[#c6c6cd] text-xs font-mono text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
+              />
+              <span className="text-[11px] text-[#76777d]">Salário líquido ou bruto de referência (ex: há 1 ano)</span>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono text-[#45464d]">Renda Mensal Atual (R$):</label>
+              <input
+                type="number"
+                step="100"
+                value={currentIncome}
+                onChange={(e) => setCurrentIncome(parseFloat(e.target.value) || 0)}
+                className="h-10 px-3.5 rounded-lg border border-[#c6c6cd] text-xs font-mono text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
+              />
+              <span className="text-[11px] text-[#76777d]">Salário atual para comparar reajuste vs inflação</span>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 3: Principais Gastos */}
+        {step === 3 && (
+          <div className="flex flex-col gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-[#0b1c30]">3. Principais Gastos Domésticos</h2>
+              <p className="text-xs text-[#45464d] mt-1">
+                Estime os valores aproximados das 3 categorias mais pesadas no orçamento.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono text-[#45464d]">Alimentação & Supermercado (R$/mês):</label>
+              <input
+                type="number"
+                step="50"
+                value={groceriesSpend}
+                onChange={(e) => setGroceriesSpend(parseFloat(e.target.value) || 0)}
+                className="h-10 px-3.5 rounded-lg border border-[#c6c6cd] text-xs font-mono text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono text-[#45464d]">Habitação (Aluguel, Luz, Água, Condomínio) (R$/mês):</label>
+              <input
+                type="number"
+                step="50"
+                value={housingSpend}
+                onChange={(e) => setHousingSpend(parseFloat(e.target.value) || 0)}
+                className="h-10 px-3.5 rounded-lg border border-[#c6c6cd] text-xs font-mono text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono text-[#45464d]">Transporte (Combustível, Transporte Público) (R$/mês):</label>
+              <input
+                type="number"
+                step="50"
+                value={transportSpend}
+                onChange={(e) => setTransportSpend(parseFloat(e.target.value) || 0)}
+                className="h-10 px-3.5 rounded-lg border border-[#c6c6cd] text-xs font-mono text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* STEP 4: Região de Comparação */}
+        {step === 4 && (
+          <div className="flex flex-col gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-[#0b1c30]">4. Localidade para Comparação</h2>
+              <p className="text-xs text-[#45464d] mt-1">
+                Permite contrastar a inflação da sua casa com os índices oficiais da sua região metropolitana.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono text-[#45464d]">Sua Região / Capital:</label>
+              <select
+                value={region}
+                onChange={(e) => setRegion(e.target.value)}
+                className="h-10 px-3 rounded-lg border border-[#c6c6cd] text-xs font-semibold text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
+              >
+                <option value="Brasil">Brasil (Média Nacional)</option>
+                <option value="São Paulo - SP">São Paulo - SP</option>
+                <option value="Rio de Janeiro - RJ">Rio de Janeiro - RJ</option>
+                <option value="Belo Horizonte - MG">Belo Horizonte - MG</option>
+                <option value="Porto Alegre - RS">Porto Alegre - RS</option>
+                <option value="Curitiba - PR">Curitiba - PR</option>
+                <option value="Salvador - BA">Salvador - BA</option>
+                <option value="Recife - PE">Recife - PE</option>
+                <option value="Fortaleza - CE">Fortaleza - CE</option>
+                <option value="Brasília - DF">Brasília - DF</option>
+                <option value="Goiânia - GO">Goiânia - GO</option>
+                <option value="Belém - PA">Belém - PA</option>
+              </select>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 5: Escolha da Cesta */}
+        {step === 5 && (
+          <div className="flex flex-col gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-[#0b1c30]">5. Como prefere iniciar sua cesta?</h2>
+              <p className="text-xs text-[#45464d] mt-1">
+                Você pode começar com itens de exemplo para ver análises imediatas ou começar do zero.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <div
+                onClick={() => setBasketChoice('copy-demo')}
+                className={`p-3.5 rounded-xl border-2 transition-all cursor-pointer flex items-center justify-between ${
+                  basketChoice === 'copy-demo'
+                    ? 'border-[#000000] bg-[#eff4ff]/60'
+                    : 'border-[#eff4ff] hover:border-[#c6c6cd]'
+                }`}
+              >
+                <div>
+                  <span className="text-xs font-bold text-[#0b1c30] block">
+                    Copiar Cesta de Exemplo (Recomendado)
+                  </span>
+                  <span className="text-[11px] text-[#76777d]">
+                    Inclui 42 produtos/serviços comuns que você poderá editar, excluir e personalizar livremente.
+                  </span>
+                </div>
+                {basketChoice === 'copy-demo' && (
+                  <span className="material-symbols-outlined text-[#006a61] text-[20px]">check_circle</span>
+                )}
+              </div>
+
+              <div
+                onClick={() => setBasketChoice('empty')}
+                className={`p-3.5 rounded-xl border-2 transition-all cursor-pointer flex items-center justify-between ${
+                  basketChoice === 'empty'
+                    ? 'border-[#000000] bg-[#eff4ff]/60'
+                    : 'border-[#eff4ff] hover:border-[#c6c6cd]'
+                }`}
+              >
+                <div>
+                  <span className="text-xs font-bold text-[#0b1c30] block">
+                    Iniciar com Cesta em Branco
+                  </span>
+                  <span className="text-[11px] text-[#76777d]">
+                    Cadastre do zero apenas os itens informados nos passos anteriores.
+                  </span>
+                </div>
+                {basketChoice === 'empty' && (
+                  <span className="material-symbols-outlined text-[#006a61] text-[20px]">check_circle</span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Action Buttons */}
+        <div className="flex items-center justify-between pt-4 border-t border-[#eff4ff]">
+          {step > 1 ? (
+            <button
+              type="button"
+              onClick={() => setStep(step - 1)}
+              className="h-9 px-4 rounded-lg bg-[#eff4ff] text-[#0b1c30] text-xs font-semibold hover:bg-[#e5eeff] transition-colors cursor-pointer"
+            >
+              Voltar
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onSkip}
+              className="text-xs text-[#76777d] hover:text-[#0b1c30] cursor-pointer"
+            >
+              Pular Tudo
+            </button>
+          )}
+
+          {step < 5 ? (
+            <button
+              type="button"
+              onClick={() => setStep(step + 1)}
+              className="h-10 px-5 rounded-lg bg-[#000000] text-[#ffffff] text-xs font-mono font-semibold hover:bg-[#213145] transition-all cursor-pointer shadow-sm flex items-center gap-1.5"
+            >
+              <span>Avançar</span>
+              <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleComplete}
+              className="h-10 px-6 rounded-lg bg-[#006a61] text-[#ffffff] text-xs font-mono font-semibold hover:bg-[#004e47] transition-all cursor-pointer shadow-sm flex items-center gap-1.5"
+            >
+              <span>Concluir e Ver Análise</span>
+              <span className="material-symbols-outlined text-[16px]">check</span>
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};

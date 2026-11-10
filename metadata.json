@@ -1,0 +1,6 @@
+{
+  "name": "IPCA-Casa - Calculadora da Inflação Familiar",
+  "description": "Sistema para cálculo da inflação pessoal ponderada (Índice de Laspeyres), poder de compra real e estratégias de economia doméstica com integração oficial ao IBGE.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
