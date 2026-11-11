@@ -1,14 +1,27 @@
 import React, { useEffect, useState } from 'react';
 import { FamilyProfile, UserAccount } from '../types';
 import { StorageService } from '../services/storage';
-import { IBGEService } from '../services/ibge';
+import { IBGESeriesMetadata, IBGEService } from '../services/ibge';
 import { trackExportData } from '../services/analytics';
+import { ConfirmModal } from '../components/ConfirmModal';
+import { formatIsoDateBR, getTodayIsoDate } from '../utils/dates';
 
 interface SettingsViewProps {
   activeProfile: FamilyProfile;
-  onUpdateProfile: (profile: FamilyProfile) => void;
+  profiles?: FamilyProfile[];
+  ibgeData?: IBGESeriesMetadata | null;
+  onUpdateProfile: (profile: FamilyProfile) => void | Promise<void>;
+  onSelectProfile?: (profileId: string) => void;
+  onCreateProfile?: (params: {
+    name: string;
+    membersCount: number;
+    referenceRegion: string;
+  }) => void | Promise<void>;
+  onDeleteProfile?: (profileId: string) => void | Promise<void>;
+  onWipeAllUserData?: () => void | Promise<void>;
   onSwitchToEmptyBasket: () => void;
   onSwitchToDemoBasket: () => void;
+  onNotify?: (type: 'success' | 'error' | 'info', message: string) => void;
   isDemo: boolean;
   onRefreshData: () => void;
   currentUser?: UserAccount | null;
@@ -16,11 +29,39 @@ interface SettingsViewProps {
   onExportBackupData?: () => unknown;
 }
 
+const REGION_OPTIONS = [
+  { value: 'Brasil', label: 'Brasil (Nacional)' },
+  { value: 'São Paulo - SP', label: 'São Paulo - SP' },
+  { value: 'Rio de Janeiro - RJ', label: 'Rio de Janeiro - RJ' },
+  { value: 'Belo Horizonte - MG', label: 'Belo Horizonte - MG' },
+  { value: 'Porto Alegre - RS', label: 'Porto Alegre - RS' },
+  { value: 'Curitiba - PR', label: 'Curitiba - PR' },
+  { value: 'Salvador - BA', label: 'Salvador - BA' },
+  { value: 'Recife - PE', label: 'Recife - PE' },
+  { value: 'Fortaleza - CE', label: 'Fortaleza - CE' },
+  { value: 'Brasília - DF', label: 'Brasília - DF' },
+  { value: 'Goiânia - GO', label: 'Goiânia - GO' },
+  { value: 'Belém - PA', label: 'Belém - PA' },
+];
+
+function formatSignedRate(val: number | undefined | null): string {
+  if (val === null || val === undefined || !Number.isFinite(val)) return '—';
+  const sign = val > 0 ? '+' : val < 0 ? '-' : '';
+  return `${sign}${Math.abs(val).toFixed(2).replace('.', ',')}%`;
+}
+
 export const SettingsView: React.FC<SettingsViewProps> = ({
   activeProfile,
+  profiles = [],
+  ibgeData = null,
   onUpdateProfile,
+  onSelectProfile,
+  onCreateProfile,
+  onDeleteProfile,
+  onWipeAllUserData,
   onSwitchToEmptyBasket,
   onSwitchToDemoBasket,
+  onNotify,
   isDemo,
   onRefreshData,
   currentUser = null,
@@ -30,33 +71,110 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [profileName, setProfileName] = useState(activeProfile.name);
   const [region, setRegion] = useState(activeProfile.referenceRegion);
   const [membersCount, setMembersCount] = useState(activeProfile.membersCount);
-  const [profileFeedback, setProfileFeedback] = useState<string | null>(null);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [profileFeedback, setProfileFeedback] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
+
+  // Novo perfil familiar
+  const [showCreateProfile, setShowCreateProfile] = useState(false);
+  const [newProfileName, setNewProfileName] = useState('');
+  const [newProfileMembers, setNewProfileMembers] = useState(2);
+  const [newProfileRegion, setNewProfileRegion] = useState('Brasil');
+  const [isCreatingProfile, setIsCreatingProfile] = useState(false);
+
+  // Confirmação para excluir perfil ou limpar dados (LGPD)
+  const [profilePendingDelete, setProfilePendingDelete] = useState<FamilyProfile | null>(null);
+  const [isWipeConfirmOpen, setIsWipeConfirmOpen] = useState(false);
+  const [isWiping, setIsWiping] = useState(false);
 
   // IBGE SIDRA sync state
   const [isSyncingIBGE, setIsSyncingIBGE] = useState(false);
-  const [lastSyncDate, setLastSyncDate] = useState<string>('Sincronizado automaticamente');
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setProfileName(activeProfile.name);
     setRegion(activeProfile.referenceRegion);
     setMembersCount(activeProfile.membersCount);
+    setProfileFeedback(null);
   }, [activeProfile.id, activeProfile.name, activeProfile.referenceRegion, activeProfile.membersCount]);
 
-  const handleSaveProfile = (e: React.FormEvent) => {
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
+    setProfileFeedback(null);
+    const trimmedName = profileName.trim();
+    if (trimmedName.length < 2) {
+      setProfileFeedback({ type: 'error', text: 'O nome do perfil precisa ter pelo menos 2 caracteres.' });
+      return;
+    }
+
     const updated: FamilyProfile = {
       ...activeProfile,
-      name: profileName,
+      name: trimmedName,
       referenceRegion: region,
-      membersCount,
+      membersCount: Math.max(1, Math.min(50, Math.round(membersCount) || 1)),
       updatedAt: new Date().toISOString(),
     };
-    if (!isFirebaseMode) {
-      StorageService.saveProfile(updated);
+
+    setIsSavingProfile(true);
+    try {
+      await onUpdateProfile(updated);
+      setProfileFeedback({
+        type: 'success',
+        text: 'Configurações do perfil familiar salvas com sucesso!',
+      });
+    } catch {
+      setProfileFeedback({
+        type: 'error',
+        text: 'Não foi possível salvar as alterações do perfil.',
+      });
+    } finally {
+      setIsSavingProfile(false);
     }
-    onUpdateProfile(updated);
-    setProfileFeedback('Configurações do perfil familiar salvas com sucesso!');
+  };
+
+  const handleCreateNewProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onCreateProfile) return;
+    if (newProfileName.trim().length < 2) {
+      onNotify?.('error', 'Informe um nome com ao menos 2 caracteres para o novo perfil.');
+      return;
+    }
+    setIsCreatingProfile(true);
+    try {
+      await onCreateProfile({
+        name: newProfileName.trim(),
+        membersCount: newProfileMembers,
+        referenceRegion: newProfileRegion,
+      });
+      setNewProfileName('');
+      setNewProfileMembers(2);
+      setNewProfileRegion('Brasil');
+      setShowCreateProfile(false);
+    } catch {
+      onNotify?.('error', 'Não foi possível criar o novo perfil familiar.');
+    } finally {
+      setIsCreatingProfile(false);
+    }
+  };
+
+  const handleConfirmDeleteProfile = async () => {
+    if (!profilePendingDelete || !onDeleteProfile) return;
+    const target = profilePendingDelete;
+    setProfilePendingDelete(null);
+    await onDeleteProfile(target.id);
+  };
+
+  const handleConfirmWipeAll = async () => {
+    if (!onWipeAllUserData) return;
+    setIsWipeConfirmOpen(false);
+    setIsWiping(true);
+    try {
+      await onWipeAllUserData();
+    } finally {
+      setIsWiping(false);
+    }
   };
 
   const handleForceSyncIBGE = async () => {
@@ -64,13 +182,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setSyncMessage(null);
     try {
       const metadata = await IBGEService.refresh();
-      setLastSyncDate(new Date().toLocaleTimeString('pt-BR'));
-      setSyncMessage(
-        `Sincronização concluída! Dados atualizados para ${metadata.latestMonthLabel} (IPCA Mensal: +${metadata.latestMonthlyRate.toFixed(2)}%, 12 Meses: +${metadata.accumulated12MRate.toFixed(2)}%).`
-      );
+      const statusText =
+        metadata.sourceMode === 'live'
+          ? `Sincronização SIDRA concluída! Série atualizada até ${metadata.latestMonthLabel} (Mensal: ${formatSignedRate(
+              metadata.latestMonthlyRate
+            )}, 12M: ${formatSignedRate(metadata.accumulated12MRate)}).`
+          : metadata.sourceMode === 'cached_live'
+          ? `SIDRA instável no momento. Mantendo último dado real em cache (${metadata.latestMonthLabel}).`
+          : 'SIDRA indisponível no momento. Exibindo série de referência offline auditada.';
+      setSyncMessage(statusText);
       onRefreshData();
     } catch {
-      setSyncMessage('Falha na conexão direta com a API SIDRA do IBGE. Cache de contingência mantido.');
+      setSyncMessage('Falha na conexão direta com a API SIDRA do IBGE. Cache mantido.');
     } finally {
       setIsSyncingIBGE(false);
     }
@@ -81,25 +204,48 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       ? onExportBackupData()
       : {
           profile: StorageService.getProfile(),
-          items: StorageService.getItems(),
+          profiles: StorageService.getProfiles(),
+          items: StorageService.getAllStoredItems(),
           prices: StorageService.getAllPrices(),
-          income: StorageService.getIncomeHistory(),
+          income: StorageService.getAllStoredIncome(),
           plansA: StorageService.getPlansA(),
           plansB: StorageService.getPlansB(),
           planC: StorageService.getPlanC(),
           exportedAt: new Date().toISOString(),
-          version: '3.0.0',
+          version: '3.2.0',
         };
 
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(backup, null, 2));
+    const dataStr =
+      'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(backup, null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute('download', `ipca_casa_backup_${new Date().toISOString().split('T')[0]}.json`);
+    downloadAnchor.setAttribute('download', `ipca_casa_backup_${getTodayIsoDate()}.json`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
     trackExportData('backup_json');
+    onNotify?.('success', 'Arquivo de backup JSON gerado para download.');
   };
+
+  const visibleProfiles = profiles.length > 0 ? profiles : [activeProfile];
+  const ibgeBadgeConfig =
+    ibgeData?.sourceMode === 'live'
+      ? {
+          bg: 'bg-[#86f2e4]/30 text-[#006a61]',
+          dot: 'bg-[#006a61]',
+          label: 'SIDRA Tempo Real',
+        }
+      : ibgeData?.sourceMode === 'cached_live'
+      ? {
+          bg: 'bg-[#fef3c7] text-[#92400e]',
+          dot: 'bg-[#d97706]',
+          label: 'Cache Recente',
+        }
+      : {
+          bg: 'bg-[#eff4ff] text-[#45464d]',
+          dot: 'bg-[#76777d]',
+          label: ibgeData ? 'Ref. Offline' : 'Aguardando',
+        };
 
   return (
     <div className="flex flex-col w-full px-6 lg:px-12 py-8 max-w-[1440px] mx-auto gap-8">
@@ -111,9 +257,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             Central de Parâmetros, Perfil & Integrações
           </span>
         </div>
-        <div className="flex items-center gap-4 text-xs font-mono text-[#45464d]">
+        <div className="flex items-center gap-2 text-xs font-mono text-[#45464d]">
           <span className="material-symbols-outlined text-[16px] text-[#006a61]">settings</span>
-          <span>Versão: 3.0-funcional</span>
+          <span>
+            {isFirebaseMode
+              ? 'Sincronização Cloud Firestore Ativa'
+              : isDemo
+              ? 'Ambiente de Demonstração Local'
+              : 'Persistência Local no Navegador'}
+          </span>
         </div>
       </div>
 
@@ -126,12 +278,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           Configurações do Perfil
         </h1>
         <p className="text-xs text-[#45464d] mt-1 max-w-2xl">
-          Gerencie os dados cadastrais do seu domicílio, alterne entre a cesta de demonstração e a sua cesta pessoal, e acompanhe o sincronismo com o IBGE.
+          Gerencie seus perfis familiares, alterne entre a cesta de demonstração e sua cesta real, e acompanhe a sincronização oficial com o IBGE.
         </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left Column: Basket Scenario Mode & Profile */}
+        {/* Left Column: Basket Scenario Mode, Multi-Profile & Edit Profile */}
         <div className="lg:col-span-6 flex flex-col gap-6">
           {/* Card: Inicialização da Cesta Familiar */}
           <div className="bg-[#ffffff] rounded-2xl p-6 shadow-sm border border-[#eff4ff] flex flex-col gap-4">
@@ -144,7 +296,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   Modo da Cesta de Consumo
                 </h3>
                 <p className="text-xs text-[#45464d]">
-                  Escolha entre explorar a cesta demonstrativa de exemplo ou iniciar com sua cesta personalizada.
+                  Escolha entre explorar a cesta demonstrativa de exemplo ou utilizar sua cesta personalizada.
                 </p>
               </div>
             </div>
@@ -166,7 +318,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </span>
                   </div>
                   <p className="text-xs text-[#45464d] mt-1">
-                    Cesta pré-configurada com 42 itens monitorados (alimentação, energia, combustíveis, saúde, etc.). Ideal para testar gráficos, simulações e relatórios.
+                    Cesta pré-configurada de exemplo com itens variados de alimentação, moradia, energia, transportes e saúde para explorar cálculos e relatórios.
                   </p>
                   <span className="text-[11px] font-mono text-[#76777d] mt-1">
                     * Valores didáticos de demonstração — não representam dados de usuários reais.
@@ -207,7 +359,133 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
 
-          {/* Card: Perfil Familiar */}
+          {/* Card: Perfis Familiares Cadastrados (Multi-perfil) */}
+          {visibleProfiles.length > 0 && (onSelectProfile || onCreateProfile || onDeleteProfile) && (
+            <div className="bg-[#ffffff] rounded-2xl p-6 shadow-sm border border-[#eff4ff] flex flex-col gap-4">
+              <div className="flex items-center justify-between gap-2 pb-3 border-b border-[#eff4ff]">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-[#eff4ff] flex items-center justify-center text-[#0b1c30]">
+                    <span className="material-symbols-outlined text-[20px]">group</span>
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-[#0b1c30]">Perfis Domésticos</h3>
+                    <p className="text-xs text-[#45464d]">
+                      Alterne ou gerencie múltiplos orçamentos na mesma conta.
+                    </p>
+                  </div>
+                </div>
+                {onCreateProfile && !isDemo && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateProfile((v) => !v)}
+                    className="h-8 px-3 rounded-lg bg-[#000000] hover:bg-[#213145] text-[#ffffff] font-mono text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">
+                      {showCreateProfile ? 'close' : 'add'}
+                    </span>
+                    <span>{showCreateProfile ? 'Cancelar' : 'Novo Perfil'}</span>
+                  </button>
+                )}
+              </div>
+
+              {showCreateProfile && onCreateProfile && (
+                <form
+                  onSubmit={handleCreateNewProfile}
+                  className="p-3.5 rounded-xl bg-[#eff4ff] border border-[#d3e4fe] flex flex-col gap-3"
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <input
+                      type="text"
+                      required
+                      value={newProfileName}
+                      onChange={(e) => setNewProfileName(e.target.value)}
+                      placeholder="Nome do perfil..."
+                      className="h-9 px-3 rounded-lg bg-[#ffffff] border border-[#c6c6cd] text-xs text-[#0b1c30] focus:outline-none sm:col-span-2"
+                    />
+                    <input
+                      type="number"
+                      min="1"
+                      max="50"
+                      value={newProfileMembers}
+                      onChange={(e) => setNewProfileMembers(parseInt(e.target.value, 10) || 1)}
+                      className="h-9 px-3 rounded-lg bg-[#ffffff] border border-[#c6c6cd] font-mono text-xs text-[#0b1c30] focus:outline-none"
+                      title="Número de integrantes"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <select
+                      value={newProfileRegion}
+                      onChange={(e) => setNewProfileRegion(e.target.value)}
+                      className="h-9 px-3 rounded-lg bg-[#ffffff] border border-[#c6c6cd] text-xs text-[#0b1c30] flex-1 focus:outline-none"
+                    >
+                      {REGION_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="submit"
+                      disabled={isCreatingProfile}
+                      className="h-9 px-4 rounded-lg bg-[#006a61] text-[#ffffff] font-mono text-xs font-semibold cursor-pointer disabled:opacity-60"
+                    >
+                      {isCreatingProfile ? 'Criando...' : 'Criar Perfil'}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              <div className="flex flex-col gap-2">
+                {visibleProfiles.map((prof) => {
+                  const isActive = prof.id === activeProfile.id;
+                  const canDelete =
+                    Boolean(onDeleteProfile) && visibleProfiles.length > 1 && !prof.isDemo;
+                  return (
+                    <div
+                      key={prof.id}
+                      className={`p-3 rounded-xl border flex items-center justify-between gap-3 transition-colors ${
+                        isActive
+                          ? 'border-[#000000] bg-[#eff4ff]/50'
+                          : 'border-[#eff4ff] bg-[#ffffff] hover:border-[#c6c6cd]'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => onSelectProfile?.(prof.id)}
+                        className="flex-1 text-left cursor-pointer min-w-0"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-[#0b1c30] truncate">{prof.name}</span>
+                          {isActive && (
+                            <span className="px-2 py-0.5 rounded bg-[#006a61] text-[#ffffff] font-mono text-[10px] font-semibold">
+                              Ativo
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[11px] font-mono text-[#76777d]">
+                          {prof.membersCount} {prof.membersCount === 1 ? 'integrante' : 'integrantes'} •{' '}
+                          {prof.referenceRegion}
+                        </span>
+                      </button>
+
+                      {canDelete && (
+                        <button
+                          type="button"
+                          onClick={() => setProfilePendingDelete(prof)}
+                          className="w-8 h-8 rounded-lg bg-[#ffdad6]/40 hover:bg-[#ffdad6] text-[#ba1a1a] inline-flex items-center justify-center shrink-0 cursor-pointer"
+                          title="Excluir perfil"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">delete</span>
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Card: Editar Perfil Familiar Ativo */}
           <div className="bg-[#ffffff] rounded-2xl p-6 shadow-sm border border-[#eff4ff] flex flex-col gap-4">
             <div className="flex items-center gap-3 pb-3 border-b border-[#eff4ff]">
               <div className="w-9 h-9 rounded-xl bg-[#eff4ff] flex items-center justify-center text-[#497cff]">
@@ -247,18 +525,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     onChange={(e) => setRegion(e.target.value)}
                     className="h-10 px-3 rounded-lg border border-[#c6c6cd] text-xs text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
                   >
-                    <option value="Brasil">Brasil (Nacional)</option>
-                    <option value="São Paulo - SP">São Paulo - SP</option>
-                    <option value="Rio de Janeiro - RJ">Rio de Janeiro - RJ</option>
-                    <option value="Belo Horizonte - MG">Belo Horizonte - MG</option>
-                    <option value="Porto Alegre - RS">Porto Alegre - RS</option>
-                    <option value="Curitiba - PR">Curitiba - PR</option>
-                    <option value="Salvador - BA">Salvador - BA</option>
-                    <option value="Recife - PE">Recife - PE</option>
-                    <option value="Fortaleza - CE">Fortaleza - CE</option>
-                    <option value="Brasília - DF">Brasília - DF</option>
-                    <option value="Goiânia - GO">Goiânia - GO</option>
-                    <option value="Belém - PA">Belém - PA</option>
+                    {REGION_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -269,7 +540,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <input
                     type="number"
                     min="1"
-                    max="20"
+                    max="50"
                     value={membersCount}
                     onChange={(e) => setMembersCount(parseInt(e.target.value, 10) || 1)}
                     className="h-10 px-3.5 rounded-lg border border-[#c6c6cd] text-xs font-mono text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
@@ -278,8 +549,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
 
               {profileFeedback && (
-                <div className="p-3 bg-[#86f2e4]/20 border border-[#006a61]/30 rounded-xl text-xs font-mono text-[#005049]">
-                  {profileFeedback}
+                <div
+                  className={`p-3 rounded-xl text-xs font-mono border ${
+                    profileFeedback.type === 'error'
+                      ? 'bg-[#ffdad6]/50 border-[#ba1a1a]/30 text-[#ba1a1a]'
+                      : 'bg-[#86f2e4]/20 border-[#006a61]/30 text-[#005049]'
+                  }`}
+                >
+                  {profileFeedback.text}
                 </div>
               )}
 
@@ -289,16 +566,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </span>
                 <button
                   type="submit"
-                  className="h-10 px-5 rounded-lg bg-[#000000] text-[#ffffff] hover:bg-[#213145] text-xs font-mono font-semibold transition-all shadow-sm cursor-pointer"
+                  disabled={isSavingProfile}
+                  className="h-10 px-5 rounded-lg bg-[#000000] text-[#ffffff] hover:bg-[#213145] disabled:opacity-60 text-xs font-mono font-semibold transition-all shadow-sm cursor-pointer"
                 >
-                  Salvar Perfil
+                  {isSavingProfile ? 'Salvando...' : 'Salvar Perfil'}
                 </button>
               </div>
             </form>
           </div>
         </div>
 
-        {/* Right Column: IBGE Integration & Backup */}
+        {/* Right Column: IBGE Integration, Backup & LGPD Danger Zone */}
         <div className="lg:col-span-6 flex flex-col gap-6">
           {/* Card: Integração SIDRA / IBGE */}
           <div className="bg-[#ffffff] rounded-2xl p-6 shadow-sm border border-[#eff4ff] flex flex-col gap-4">
@@ -312,30 +590,55 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     Integração Oficial com SIDRA / IBGE
                   </h3>
                   <p className="text-xs text-[#45464d]">
-                    Séries históricas e taxas oficiais de inflação em tempo real.
+                    Séries históricas e taxas oficiais de inflação publicadas pelo IBGE.
                   </p>
                 </div>
               </div>
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#86f2e4]/30 text-[#006a61] font-mono text-[11px] font-bold">
-                <span className="w-2 h-2 rounded-full bg-[#006a61]" />
-                Conectado
+              <span
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-mono text-[11px] font-bold shrink-0 ${ibgeBadgeConfig.bg}`}
+              >
+                <span className={`w-2 h-2 rounded-full ${ibgeBadgeConfig.dot}`} />
+                {ibgeBadgeConfig.label}
               </span>
             </div>
 
             <div className="flex flex-col gap-2 text-xs text-[#45464d]">
               <div className="flex items-center justify-between py-1.5 border-b border-[#eff4ff]">
                 <span className="text-[#76777d]">Fonte Oficial:</span>
-                <span className="font-semibold text-[#0b1c30]">IBGE - Sistema SIDRA (Tabelas 1737 e 7060)</span>
+                <span className="font-semibold text-[#0b1c30]">
+                  IBGE - Sistema SIDRA (Tabelas {ibgeData?.tableCode || '1737'} e 7060)
+                </span>
               </div>
               <div className="flex items-center justify-between py-1.5 border-b border-[#eff4ff]">
-                <span className="text-[#76777d]">Variáveis Consultadas:</span>
-                <span className="font-mono text-[#0b1c30]">63 (Mensal), 69 (Ano), 2265 (12M), 66 (Pesos)</span>
+                <span className="text-[#76777d]">Período Mais Recente:</span>
+                <span className="font-mono text-[#0b1c30]">
+                  {ibgeData?.latestMonthLabel || '—'}{' '}
+                  {ibgeData
+                    ? `(Mês: ${formatSignedRate(ibgeData.latestMonthlyRate)} | 12M: ${formatSignedRate(
+                        ibgeData.accumulated12MRate
+                      )})`
+                    : ''}
+                </span>
               </div>
               <div className="flex items-center justify-between py-1.5 border-b border-[#eff4ff]">
-                <span className="text-[#76777d]">Última Sincronização:</span>
-                <span className="font-mono text-[#0b1c30]">{lastSyncDate}</span>
+                <span className="text-[#76777d]">Última Consulta:</span>
+                <span className="font-mono text-[#0b1c30]">
+                  {ibgeData?.consultedAt
+                    ? formatIsoDateBR(ibgeData.consultedAt)
+                    : 'Sincronização automática'}
+                </span>
               </div>
             </div>
+
+            {ibgeData && ibgeData.sourceMode !== 'live' && (
+              <div className="p-3 bg-[#fef3c7]/60 rounded-lg text-xs font-mono text-[#92400e] border border-[#f59e0b]/30">
+                {ibgeData.sourceMode === 'cached_live'
+                  ? `Exibindo último retorno válido em cache${
+                      ibgeData.cachedFromAt ? ` (${formatIsoDateBR(ibgeData.cachedFromAt)})` : ''
+                    } enquanto a API SIDRA se estabiliza.`
+                  : 'API SIDRA indisponível temporariamente. Utilizando base de referência offline auditada.'}
+              </div>
+            )}
 
             {syncMessage && (
               <div className="p-3 bg-[#eff4ff] rounded-lg text-xs font-mono text-[#0b1c30] border border-[#e5eeff]">
@@ -345,13 +648,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
             <div className="flex items-center justify-between pt-2 border-t border-[#eff4ff]">
               <span className="text-xs text-[#76777d]">
-                Atualizações mensais oficiais automáticas
+                Cache automático com expiração horária
               </span>
               <button
                 type="button"
                 onClick={handleForceSyncIBGE}
                 disabled={isSyncingIBGE}
-                className="h-9 px-4 rounded-lg bg-[#eff4ff] hover:bg-[#e5eeff] text-[#0b1c30] font-mono text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer"
+                className="h-9 px-4 rounded-lg bg-[#eff4ff] hover:bg-[#e5eeff] text-[#0b1c30] font-mono text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
               >
                 <span className={`material-symbols-outlined text-[16px] ${isSyncingIBGE ? 'animate-spin' : ''}`}>
                   sync
@@ -406,7 +709,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         ? isFirebaseMode
                           ? 'Conta Google sincronizada (Firebase + Firestore)'
                           : 'Conta conectada via Google'
-                        : 'Conta com E-mail e Senha (Local)'}
+                        : 'Conta com E-mail e Senha'}
                     </div>
                     <div className="text-[11px] font-mono text-[#45464d] truncate">
                       {currentUser.email}
@@ -431,8 +734,78 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </button>
             </div>
           </div>
+
+          {/* Card: Exclusão LGPD / Limpeza Completa */}
+          {onWipeAllUserData && (
+            <div className="bg-[#ffffff] rounded-2xl p-6 shadow-sm border border-[#ffdad6] flex flex-col gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-[#ffdad6]/50 flex items-center justify-center text-[#ba1a1a] shrink-0">
+                  <span className="material-symbols-outlined text-[20px]">delete_forever</span>
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-[#0b1c30]">
+                    {isFirebaseMode
+                      ? 'Zona de Privacidade (Exclusão LGPD)'
+                      : 'Reiniciar Dados Locais de Demonstração'}
+                  </h3>
+                  <p className="text-xs text-[#45464d]">
+                    {isFirebaseMode
+                      ? 'Apaga definitivamente todos os itens, preços, rendas, estratégias e perfis salvos na nuvem.'
+                      : 'Restaura o estado inicial padrão do ambiente de demonstração no navegador.'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex justify-end pt-2 border-t border-[#eff4ff]">
+                <button
+                  type="button"
+                  disabled={isWiping}
+                  onClick={() => setIsWipeConfirmOpen(true)}
+                  className="h-9 px-4 rounded-lg bg-[#ffdad6]/60 hover:bg-[#ffdad6] text-[#ba1a1a] font-mono text-xs font-semibold transition-colors cursor-pointer disabled:opacity-60"
+                >
+                  {isWiping
+                    ? 'Processando...'
+                    : isFirebaseMode
+                    ? 'Apagar Todos os Meus Dados'
+                    : 'Restaurar Padrão Inicial'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Confirmação de Exclusão de Perfil */}
+      <ConfirmModal
+        isOpen={Boolean(profilePendingDelete)}
+        title="Excluir Perfil Familiar"
+        message={
+          profilePendingDelete
+            ? `Tem certeza que deseja excluir o perfil "${profilePendingDelete.name}" e todos os itens, rendas e estratégias vinculados a ele?`
+            : ''
+        }
+        confirmLabel="Excluir Perfil"
+        cancelLabel="Cancelar"
+        isDestructive={true}
+        onConfirm={handleConfirmDeleteProfile}
+        onCancel={() => setProfilePendingDelete(null)}
+      />
+
+      {/* Confirmação de Exclusão Total LGPD */}
+      <ConfirmModal
+        isOpen={isWipeConfirmOpen}
+        title={isFirebaseMode ? 'Apagar Todos os Dados da Conta' : 'Restaurar Padrão Inicial'}
+        message={
+          isFirebaseMode
+            ? 'Esta ação removerá permanentemente todos os seus itens, históricos de preços, registros de renda e estratégias do Firestore. Deseja prosseguir?'
+            : 'Deseja restaurar os dados locais de demonstração para o estado inicial?'
+        }
+        confirmLabel={isFirebaseMode ? 'Sim, Apagar Tudo' : 'Restaurar'}
+        cancelLabel="Cancelar"
+        isDestructive={true}
+        onConfirm={handleConfirmWipeAll}
+        onCancel={() => setIsWipeConfirmOpen(false)}
+      />
     </div>
   );
 };
+

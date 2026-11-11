@@ -1,8 +1,9 @@
-import React, { Suspense, lazy, useState, useEffect, useMemo, useCallback } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import type { NavTab } from './components/Sidebar';
 import { PublicLayout } from './components/PublicLayout';
 import { SeoHeadManager } from './components/SeoHeadManager';
 import { AnalyticsConsentBanner } from './components/AnalyticsConsentBanner';
+import { ToastContainer } from './components/Toast';
 import { LandingPageView } from './views/LandingPageView';
 import type { OnboardingBundle } from './components/OnboardingModal';
 import { isFirebaseConfigured, sanitizeFirestoreId } from './lib/firebaseConfig';
@@ -15,14 +16,16 @@ import {
   OpportunityPlanC,
   PriceRecord,
   SubstitutePlanA,
+  ToastNotification,
   UserAccount,
 } from './types';
 import { DEFAULT_GROUPS, StorageService } from './services/storage';
-import { AuthService } from './services/auth';
+import { AuthService, LegacyLocalBundle, LegacyMigrationService } from './services/auth';
 import { processBasketEconomics } from './services/economics';
 import { IBGESeriesMetadata, IBGEService } from './services/ibge';
 import { PUBLIC_ROUTES, normalizeRoutePath } from './config/seo';
 import { trackLogin, trackSignUp, trackViewDashboard } from './services/analytics';
+import { getMonthsAgoIsoDate, getTodayIsoDate } from './utils/dates';
 
 // Code-splitting por rota e modal (Lazy loading)
 const HowItWorksPublicPage = lazy(() =>
@@ -94,6 +97,9 @@ const ImportExportModal = lazy(() =>
 const ConfirmModal = lazy(() =>
   import('./components/ConfirmModal').then((m) => ({ default: m.ConfirmModal }))
 );
+const LegacyMigrationModal = lazy(() =>
+  import('./components/LegacyMigrationModal').then((m) => ({ default: m.LegacyMigrationModal }))
+);
 
 const VALID_TABS: NavTab[] = [
   'visao-geral',
@@ -129,15 +135,6 @@ function parseTabFromPath(path: string): NavTab | null {
   return null;
 }
 
-function loadInitialLocalUser(): UserAccount | null {
-  const localUser = AuthService.getCurrentUser();
-  if (!localUser) return null;
-  if (localUser.authProvider === 'google') {
-    return null;
-  }
-  return localUser;
-}
-
 const PageChunkFallback: React.FC<{ label?: string }> = ({
   label = 'Carregando conteúdo...',
 }) => (
@@ -152,27 +149,49 @@ const PageChunkFallback: React.FC<{ label?: string }> = ({
 export default function App() {
   const initialPathname =
     typeof window !== 'undefined' ? normalizeRoutePath(window.location.pathname) : '/';
-  const initialUser = useMemo(() => loadInitialLocalUser(), []);
   const initialTabFromUrl = parseTabFromPath(initialPathname);
+  const firebaseAvailable = isFirebaseConfigured();
 
-  // Autenticação & Sessão (Firebase Auth + fallback local neste navegador)
-  const [currentUser, setCurrentUser] = useState<UserAccount | null>(initialUser);
+  // Autenticação & Sessão (exclusivamente Firebase Authentication para contas reais)
+  const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
   const [firebaseUid, setFirebaseUid] = useState<string | null>(null);
-  const [isDemo, setIsDemo] = useState<boolean>(() => !initialUser && initialPathname === '/demo');
+  const [isAuthInitializing, setIsAuthInitializing] = useState<boolean>(firebaseAvailable);
+  const [pendingVerificationEmail, setPendingVerificationEmail] = useState<string | null>(null);
+  const [isDemo, setIsDemo] = useState<boolean>(() => initialPathname === '/demo');
+
+  // Migração Segura de Dados Locais Legados
+  const [pendingLegacyBundle, setPendingLegacyBundle] = useState<LegacyLocalBundle | null>(null);
+  const [isMigrationModalOpen, setIsMigrationModalOpen] = useState(false);
+  const [isConfirmDiscardLegacyOpen, setIsConfirmDiscardLegacyOpen] = useState(false);
+  const scannedLegacyUidRef = useRef<string | null>(null);
+
+  // Notificações Toast Globais
+  const [toasts, setToasts] = useState<ToastNotification[]>([]);
+  const addToast = useCallback((type: ToastNotification['type'], message: string) => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setToasts((prev) => [...prev, { id, type, message, timestamp: Date.now() }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4500);
+  }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
 
   // Roteamento SPA amigável
   const [routePath, setRoutePath] = useState<string>(initialPathname);
 
   // Modais de Autenticação, Onboarding e Confirmação
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(
-    !initialUser &&
-      (initialPathname === '/login' ||
-        initialPathname === '/cadastro' ||
-        initialPathname === '/recuperar-senha' ||
-        initialPathname === '/painel' ||
-        initialPathname.startsWith('/painel/'))
+    initialPathname === '/login' ||
+      initialPathname === '/cadastro' ||
+      initialPathname === '/recuperar-senha' ||
+      (!firebaseAvailable && Boolean(initialTabFromUrl))
   );
-  const [authModalMode, setAuthModalMode] = useState<'login' | 'register' | 'recover' | 'terms'>(
+  const [authModalMode, setAuthModalMode] = useState<
+    'login' | 'register' | 'recover' | 'verify-email' | 'terms'
+  >(
     initialPathname === '/cadastro'
       ? 'register'
       : initialPathname === '/recuperar-senha'
@@ -184,28 +203,28 @@ export default function App() {
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isConfirmEmptyOpen, setIsConfirmEmptyOpen] = useState(false);
 
-  // Navegação do Painel
+  // Navegação do Painel & Busca Global
   const [activeTab, setActiveTab] = useState<NavTab>(initialTabFromUrl || 'visao-geral');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [globalSearchTerm, setGlobalSearchTerm] = useState('');
 
   // Metadados oficiais do IBGE carregados somente quando necessário
   const [ibgeMetadata, setIbgeMetadata] = useState<IBGESeriesMetadata | null>(null);
 
-  // Estados Locais carregados sob demanda (evita leitura/gravação de cesta demo antes do login na landing)
-  const [localStateHydrated, setLocalStateHydrated] = useState<boolean>(() =>
-    Boolean(initialUser || initialPathname === '/demo')
-  );
+  // Estados Locais carregados sob demanda (exclusivo do modo demonstração)
+  const [localStateHydrated, setLocalStateHydrated] = useState<boolean>(() => initialPathname === '/demo');
+  const [localRevision, setLocalRevision] = useState(0);
   const [localActiveProfile, setLocalActiveProfile] = useState<FamilyProfile>(() =>
-    initialUser || initialPathname === '/demo' ? StorageService.getProfile() : SHELL_FALLBACK_PROFILE
+    initialPathname === '/demo' ? StorageService.getProfile() : SHELL_FALLBACK_PROFILE
   );
   const [localProfiles, setLocalProfiles] = useState<FamilyProfile[]>(() =>
-    initialUser || initialPathname === '/demo' ? StorageService.getProfiles() : [SHELL_FALLBACK_PROFILE]
+    initialPathname === '/demo' ? StorageService.getProfiles() : [SHELL_FALLBACK_PROFILE]
   );
   const [localItems, setLocalItems] = useState<BasketItem[]>(() =>
-    initialUser || initialPathname === '/demo' ? StorageService.getItems() : []
+    initialPathname === '/demo' ? StorageService.getItems() : []
   );
 
-  // Estados Cloud Firestore (Sincronizados em Tempo Real para contas Google)
+  // Estados Cloud Firestore (Sincronizados em Tempo Real para Google e E-mail/Senha verificado)
   const [activeCloudProfileId, setActiveCloudProfileId] = useState<string>('');
   const [cloudProfiles, setCloudProfiles] = useState<FamilyProfile[]>([]);
   const [cloudItems, setCloudItems] = useState<BasketItem[]>([]);
@@ -214,7 +233,7 @@ export default function App() {
   const [cloudConsumptionGroups, setCloudConsumptionGroups] = useState<ConsumptionGroup[]>([]);
   const [cloudPlansA, setCloudPlansA] = useState<SubstitutePlanA[]>([]);
   const [cloudPlansB, setCloudPlansB] = useState<EfficiencyPlanB[]>([]);
-  const [cloudPlanC, setCloudPlanC] = useState<OpportunityPlanC | undefined>(undefined);
+  const [cloudPlansC, setCloudPlansC] = useState<OpportunityPlanC[]>([]);
 
   // Período selecionado
   const [selectedTimeframe, setSelectedTimeframe] = useState<'12M' | 'YTD' | '1M'>('12M');
@@ -227,9 +246,7 @@ export default function App() {
   const [selectedItemForHistory, setSelectedItemForHistory] = useState<BasketItem | null>(null);
 
   const isAuthenticatedDashboard = Boolean(currentUser || isDemo);
-  const isFirebaseMode = Boolean(
-    firebaseUid && currentUser?.authProvider === 'google' && !isDemo && isFirebaseConfigured()
-  );
+  const isFirebaseMode = Boolean(firebaseUid && currentUser && !isDemo && isFirebaseConfigured());
 
   const navigateUrl = useCallback((nextPath: string, replace = false) => {
     const clean = normalizeRoutePath(nextPath);
@@ -263,14 +280,40 @@ export default function App() {
     }
   }, []);
 
+  const bumpLocalRevision = useCallback(() => {
+    setLocalRevision((rev) => rev + 1);
+  }, []);
+
   const hydrateLocalState = useCallback((targetProfileId?: string) => {
     if (targetProfileId) {
       StorageService.setActiveProfileId(targetProfileId);
     }
-    setLocalActiveProfile(StorageService.getProfile());
+    const nextActive = StorageService.getProfile();
+    setLocalActiveProfile(nextActive);
     setLocalProfiles(StorageService.getProfiles());
-    setLocalItems(StorageService.getItems(targetProfileId));
+    setLocalItems(StorageService.getItems(nextActive.id));
     setLocalStateHydrated(true);
+    setLocalRevision((rev) => rev + 1);
+  }, []);
+
+  const runLegacyScanForUser = useCallback((uid: string) => {
+    if (scannedLegacyUidRef.current === uid) return;
+    scannedLegacyUidRef.current = uid;
+
+    if (LegacyMigrationService.isDismissedForUser(uid)) {
+      if (LegacyMigrationService.hasLegacyCredentials()) {
+        LegacyMigrationService.clearLegacyCredentialArtifactsOnly();
+      }
+      return;
+    }
+
+    const bundle = LegacyMigrationService.scanLegacyLocalData();
+    if (bundle.hasFinancialData) {
+      setPendingLegacyBundle(bundle);
+      setIsMigrationModalOpen(true);
+    } else if (bundle.hasLegacyCredentials) {
+      LegacyMigrationService.clearLegacyCredentialArtifactsOnly();
+    }
   }, []);
 
   // Sincronização do botão voltar/avançar do navegador
@@ -290,8 +333,8 @@ export default function App() {
         const parsedTab = parseTabFromPath(next);
         if (parsedTab) {
           setActiveTab(parsedTab);
-          if (!currentUser && !isDemo) {
-            setAuthModalMode('login');
+          if (!currentUser && !isDemo && !isAuthInitializing) {
+            setAuthModalMode(pendingVerificationEmail ? 'verify-email' : 'login');
             setIsAuthModalOpen(true);
           }
         }
@@ -300,11 +343,14 @@ export default function App() {
 
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [currentUser, isDemo, hydrateLocalState]);
+  }, [currentUser, isDemo, isAuthInitializing, pendingVerificationEmail, hydrateLocalState]);
 
-  // Assinatura de sessão do Firebase Auth sob demanda (não bloqueia primeira pintura nem baixa Firestore em visitantes públicos)
+  // Assinatura oficial de sessão do Firebase Authentication (Google + E-mail/Senha verificado)
   useEffect(() => {
-    if (!isFirebaseConfigured()) return;
+    if (!isFirebaseConfigured()) {
+      setIsAuthInitializing(false);
+      return;
+    }
     let active = true;
     let unsubAuth: (() => void) | undefined;
 
@@ -314,7 +360,8 @@ export default function App() {
         unsubAuth = subscribeFirebaseAuthState(async (firebaseUser) => {
           if (!active) return;
 
-          if (!firebaseUser || !firebaseUser.email || firebaseUser.emailVerified === false) {
+          if (!firebaseUser || !firebaseUser.email) {
+            scannedLegacyUidRef.current = null;
             setFirebaseUid(null);
             setCloudProfiles([]);
             setCloudItems([]);
@@ -323,8 +370,37 @@ export default function App() {
             setCloudConsumptionGroups([]);
             setCloudPlansA([]);
             setCloudPlansB([]);
-            setCloudPlanC(undefined);
-            setCurrentUser((prev) => (prev?.authProvider === 'google' ? null : prev));
+            setCloudPlansC([]);
+            setCurrentUser(null);
+            setPendingVerificationEmail(null);
+            setIsAuthInitializing(false);
+            if (parseTabFromPath(window.location.pathname)) {
+              setAuthModalMode('login');
+              setIsAuthModalOpen(true);
+            }
+            return;
+          }
+
+          if (firebaseUser.emailVerified === false) {
+            setFirebaseUid(null);
+            setCloudProfiles([]);
+            setCloudItems([]);
+            setCloudIncomeHistory([]);
+            setCloudPriceHistory([]);
+            setCloudConsumptionGroups([]);
+            setCloudPlansA([]);
+            setCloudPlansB([]);
+            setCloudPlansC([]);
+            setCurrentUser(null);
+            setPendingVerificationEmail(firebaseUser.email);
+            setIsAuthInitializing(false);
+            if (parseTabFromPath(window.location.pathname)) {
+              setAuthModalMode('verify-email');
+              setAuthModalError(
+                'Confirme seu endereço de e-mail através do link enviado pelo Firebase antes de acessar o painel.'
+              );
+              setIsAuthModalOpen(true);
+            }
             return;
           }
 
@@ -339,30 +415,30 @@ export default function App() {
             if (!active) return;
             setFirebaseUid(user.id);
             setIsDemo(false);
-            setCurrentUser((prev) => {
-              if (prev && prev.id === user.id && prev.authProvider === 'google') {
-                return { ...prev, ...user };
-              }
-              return user;
-            });
+            setPendingVerificationEmail(null);
+            setCurrentUser(user);
             setActiveCloudProfileId((prevId) => prevId || user.profileId);
+            setIsAuthInitializing(false);
+            setIsAuthModalOpen(false);
+            runLegacyScanForUser(user.id);
           } catch (err) {
             console.error('Erro ao inicializar sessão no Cloud Firestore:', err);
+            setIsAuthInitializing(false);
           }
         });
       })
       .catch((err) => {
         console.warn('Falha ao carregar módulo de autenticação Firebase:', err);
+        if (active) setIsAuthInitializing(false);
       });
 
     return () => {
       active = false;
       unsubAuth?.();
     };
-  }, []);
+  }, [runLegacyScanForUser]);
 
   // Sincronização em segundo plano do IBGE executada SOMENTE no painel autenticado/demo
-  // (A página pública /ipca-oficial consulta diretamente via OfficialIPCAView quando acessada)
   useEffect(() => {
     if (!isAuthenticatedDashboard || ibgeMetadata) return;
     let active = true;
@@ -413,10 +489,10 @@ export default function App() {
           onConsumptionGroups: (remoteGroups) => {
             setCloudConsumptionGroups(remoteGroups);
           },
-          onStrategies: ({ plansA, plansB, planC }) => {
+          onStrategies: ({ plansA, plansB, plansC }) => {
             setCloudPlansA(plansA);
             setCloudPlansB(plansB);
-            setCloudPlanC(planC);
+            setCloudPlansC(plansC);
           },
         });
       })
@@ -472,21 +548,22 @@ export default function App() {
 
   // Histórico de renda efetivo do perfil ativo (só carrega quando logado/demo)
   const activeIncomeHistory = useMemo<IncomeRecord[]>(() => {
-    if (!isAuthenticatedDashboard || !localStateHydrated) {
-      if (isFirebaseMode) {
-        return cloudIncomeHistory
-          .filter((inc) => inc.profileId === activeProfile.id)
-          .sort((a, b) => a.referenceDate.localeCompare(b.referenceDate));
-      }
-      return [];
+    if (!isAuthenticatedDashboard) return [];
+    if (isFirebaseMode) {
+      return cloudIncomeHistory
+        .filter((inc) => inc.profileId === activeProfile.id)
+        .sort((a, b) => a.referenceDate.localeCompare(b.referenceDate));
     }
-    if (!isFirebaseMode) {
-      return StorageService.getIncomeHistory(activeProfile.id);
-    }
-    return cloudIncomeHistory
-      .filter((inc) => inc.profileId === activeProfile.id)
-      .sort((a, b) => a.referenceDate.localeCompare(b.referenceDate));
-  }, [isAuthenticatedDashboard, localStateHydrated, isFirebaseMode, activeProfile.id, cloudIncomeHistory]);
+    if (!localStateHydrated) return [];
+    return StorageService.getIncomeHistory(activeProfile.id);
+  }, [
+    isAuthenticatedDashboard,
+    localStateHydrated,
+    isFirebaseMode,
+    activeProfile.id,
+    cloudIncomeHistory,
+    localRevision,
+  ]);
 
   // Categorias efetivas
   const cloudEffectiveGroups = useMemo<ConsumptionGroup[] | undefined>(() => {
@@ -501,38 +578,70 @@ export default function App() {
   }, [isFirebaseMode, cloudConsumptionGroups]);
 
   // Estratégias efetivas do perfil ativo
-  const activePlansA = useMemo(
-    () => (isFirebaseMode ? cloudPlansA.filter((p) => p.profileId === activeProfile.id) : undefined),
-    [isFirebaseMode, cloudPlansA, activeProfile.id]
-  );
+  const activePlansA = useMemo<SubstitutePlanA[]>(() => {
+    if (!isAuthenticatedDashboard) return [];
+    if (isFirebaseMode) {
+      return cloudPlansA.filter((p) => p.profileId === activeProfile.id);
+    }
+    if (!localStateHydrated) return [];
+    return StorageService.getPlansA(activeProfile.id);
+  }, [isAuthenticatedDashboard, isFirebaseMode, cloudPlansA, activeProfile.id, localStateHydrated, localRevision]);
 
-  const activePlansB = useMemo(
-    () => (isFirebaseMode ? cloudPlansB.filter((p) => p.profileId === activeProfile.id) : undefined),
-    [isFirebaseMode, cloudPlansB, activeProfile.id]
-  );
+  const activePlansB = useMemo<EfficiencyPlanB[]>(() => {
+    if (!isAuthenticatedDashboard) return [];
+    if (isFirebaseMode) {
+      return cloudPlansB.filter((p) => p.profileId === activeProfile.id);
+    }
+    if (!localStateHydrated) return [];
+    return StorageService.getPlansB(activeProfile.id);
+  }, [isAuthenticatedDashboard, isFirebaseMode, cloudPlansB, activeProfile.id, localStateHydrated, localRevision]);
 
-  const activePlanC = useMemo(
-    () =>
-      isFirebaseMode && cloudPlanC && cloudPlanC.profileId === activeProfile.id
-        ? cloudPlanC
-        : undefined,
-    [isFirebaseMode, cloudPlanC, activeProfile.id]
-  );
+  const activePlanC = useMemo<OpportunityPlanC | undefined>(() => {
+    if (!isAuthenticatedDashboard) return undefined;
+    if (isFirebaseMode) {
+      return cloudPlansC.find((p) => p.profileId === activeProfile.id);
+    }
+    if (!localStateHydrated) return undefined;
+    return StorageService.getPlanC(activeProfile.id) ?? undefined;
+  }, [isAuthenticatedDashboard, isFirebaseMode, cloudPlansC, activeProfile.id, localStateHydrated, localRevision]);
 
-  // Cálculo econômico executado apenas no painel autenticado/demo
+  // Cálculo econômico executado apenas no painel autenticado/demo (zero valores fabricados)
   const summary = useMemo(() => {
     if (!isAuthenticatedDashboard) return null;
     const initialIncome =
-      activeIncomeHistory.length > 0 ? activeIncomeHistory[0].nominalIncome : isDemo ? 10000 : null;
+      activeIncomeHistory.length > 0 ? activeIncomeHistory[0].nominalIncome : null;
     const finalIncome =
       activeIncomeHistory.length > 0
         ? activeIncomeHistory[activeIncomeHistory.length - 1].nominalIncome
-        : isDemo
-        ? 10500
         : null;
-    const officialRate12M = ibgeMetadata?.accumulated12MRate ?? 4.68;
-    return processBasketEconomics(items, officialRate12M, initialIncome, finalIncome);
-  }, [isAuthenticatedDashboard, items, activeIncomeHistory, isDemo, ibgeMetadata?.accumulated12MRate]);
+    const dateInitial =
+      activeIncomeHistory.length > 0
+        ? activeIncomeHistory[0].referenceDate
+        : getMonthsAgoIsoDate(12);
+    const dateFinal =
+      activeIncomeHistory.length > 0
+        ? activeIncomeHistory[activeIncomeHistory.length - 1].referenceDate
+        : getTodayIsoDate();
+    const officialRate12M =
+      ibgeMetadata && Number.isFinite(ibgeMetadata.accumulated12MRate)
+        ? ibgeMetadata.accumulated12MRate
+        : 0;
+    return processBasketEconomics(
+      items,
+      officialRate12M,
+      initialIncome,
+      finalIncome,
+      dateInitial,
+      dateFinal,
+      selectedTimeframe
+    );
+  }, [
+    isAuthenticatedDashboard,
+    items,
+    activeIncomeHistory,
+    ibgeMetadata,
+    selectedTimeframe,
+  ]);
 
   // Navegação de abas dentro do painel
   const handleSelectDashboardTab = useCallback(
@@ -545,36 +654,25 @@ export default function App() {
     [isDemo, navigateUrl]
   );
 
-  // Handler de Sucesso de Autenticação
+  // Handler de Sucesso de Autenticação (Google + E-mail/Senha verificado)
   const handleAuthSuccess = (user: UserAccount, isNewUser = false) => {
     setCurrentUser(user);
+    setFirebaseUid(user.id);
+    setActiveCloudProfileId(user.profileId);
+    setPendingVerificationEmail(null);
     setIsDemo(false);
     setAuthModalError(null);
     setIsAuthModalOpen(false);
+    setIsAuthInitializing(false);
 
+    const method = user.authProvider === 'google' ? 'google' : 'email_password';
     if (isNewUser) {
-      trackSignUp(user.authProvider === 'google' ? 'google' : 'local_email');
+      trackSignUp(method);
     } else {
-      trackLogin(user.authProvider === 'google' ? 'google' : 'local_email');
+      trackLogin(method);
     }
 
-    if (user.authProvider === 'google') {
-      setFirebaseUid(user.id);
-      setActiveCloudProfileId(user.profileId);
-    } else {
-      const userProfile = StorageService.getProfiles().find((p) => p.id === user.profileId) || {
-        id: user.profileId,
-        name: user.displayName,
-        membersCount: 2,
-        referenceRegion: 'Brasil',
-        currency: 'BRL',
-        isDemo: false,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      StorageService.saveProfile(userProfile);
-      hydrateLocalState(userProfile.id);
-    }
+    runLegacyScanForUser(user.id);
 
     if (isNewUser) {
       setIsOnboardingOpen(true);
@@ -604,12 +702,21 @@ export default function App() {
     }
   };
 
-  // Handler de Logout
+  // Handler de Logout completo
   const handleLogout = async () => {
-    AuthService.logout();
+    try {
+      await AuthService.logout();
+    } catch (err) {
+      console.warn('Erro ao encerrar sessão Firebase:', err);
+    }
+    scannedLegacyUidRef.current = null;
     setFirebaseUid(null);
     setCurrentUser(null);
+    setPendingVerificationEmail(null);
     setIsDemo(false);
+    setIsOnboardingOpen(false);
+    setIsMigrationModalOpen(false);
+    setPendingLegacyBundle(null);
     setCloudProfiles([]);
     setCloudItems([]);
     setCloudIncomeHistory([]);
@@ -617,13 +724,15 @@ export default function App() {
     setCloudConsumptionGroups([]);
     setCloudPlansA([]);
     setCloudPlansB([]);
-    setCloudPlanC(undefined);
+    setCloudPlansC([]);
+    setLocalItems([]);
+    setLocalProfiles([SHELL_FALLBACK_PROFILE]);
+    setLocalActiveProfile(SHELL_FALLBACK_PROFILE);
+    setLocalStateHydrated(false);
+    setActiveCloudProfileId('');
+    setGlobalSearchTerm('');
     setActiveTab('visao-geral');
     navigateUrl('/', true);
-    if (isFirebaseConfigured()) {
-      const { signOutFirebase } = await import('./lib/firebaseAuthOnly');
-      await signOutFirebase();
-    }
   };
 
   // Handler de Entrada no Modo Demonstração
@@ -639,12 +748,7 @@ export default function App() {
 
   // Conclusão do Onboarding
   const handleFinishOnboarding = async (newProfile: FamilyProfile, bundle?: OnboardingBundle) => {
-    setIsOnboardingOpen(false);
-    setActiveTab('impacto-no-bolso');
-    navigateUrl('/painel/impacto-no-bolso', true);
-
     if (isFirebaseMode && firebaseUid && bundle) {
-      setActiveCloudProfileId(newProfile.id);
       try {
         const { FirestoreService } = await import('./services/firestore');
         await FirestoreService.saveOnboardingBundle({
@@ -654,11 +758,24 @@ export default function App() {
           currentIncome: bundle.currentIncome,
           items: bundle.items,
         });
+        setActiveCloudProfileId(newProfile.id);
+        setIsOnboardingOpen(false);
+        setActiveTab('impacto-no-bolso');
+        navigateUrl('/painel/impacto-no-bolso', true);
+        addToast('success', 'Perfil inicial salvo com segurança no Cloud Firestore!');
       } catch (err) {
-        console.error('Erro ao salvar onboarding no Firestore:', err);
+        const msg =
+          err instanceof Error && err.message
+            ? err.message
+            : 'Erro ao salvar configuração inicial no Firestore.';
+        addToast('error', msg);
+        throw err;
       }
     } else {
       hydrateLocalState(newProfile.id);
+      setIsOnboardingOpen(false);
+      setActiveTab('impacto-no-bolso');
+      addToast('success', 'Perfil inicial configurado com sucesso!');
     }
   };
 
@@ -675,7 +792,6 @@ export default function App() {
           profileId: editingItem.profileId || activeProfile.id,
           updatedAt: nowIso,
         };
-        setEditingItem(null);
       } else {
         savedItem = {
           id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -687,8 +803,8 @@ export default function App() {
           monthlySpend: Number(itemData.monthlySpend) || 0,
           oldPrice: Number(itemData.oldPrice) || 0,
           currentPrice: Number(itemData.currentPrice) || 0,
-          oldPriceDate: itemData.oldPriceDate || '2023-09-01',
-          currentPriceDate: itemData.currentPriceDate || '2024-09-01',
+          oldPriceDate: itemData.oldPriceDate || getMonthsAgoIsoDate(12),
+          currentPriceDate: itemData.currentPriceDate || getTodayIsoDate(),
           unit: itemData.unit || 'unidade',
           notes: itemData.notes || '',
           active: itemData.active !== false,
@@ -698,34 +814,54 @@ export default function App() {
         };
       }
 
-      if (isFirebaseMode && firebaseUid) {
-        const { FirestoreService } = await import('./services/firestore');
-        await FirestoreService.saveBasketItem(firebaseUid, savedItem, true);
-      } else {
-        StorageService.saveItem(savedItem);
-        setLocalItems(StorageService.getItems(activeProfile.id));
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          await FirestoreService.saveBasketItem(firebaseUid, savedItem, true);
+        } else {
+          StorageService.saveItem(savedItem);
+          setLocalItems(StorageService.getItems(activeProfile.id));
+          bumpLocalRevision();
+        }
+        setEditingItem(null);
+        addToast(
+          'success',
+          editingItem
+            ? `Item "${savedItem.name}" atualizado com sucesso.`
+            : `Item "${savedItem.name}" adicionado à cesta.`
+        );
+      } catch (err) {
+        addToast('error', 'Não foi possível salvar o item da cesta.');
+        throw err;
       }
     },
-    [editingItem, activeProfile.id, isFirebaseMode, firebaseUid]
+    [editingItem, activeProfile.id, isFirebaseMode, firebaseUid, bumpLocalRevision, addToast]
   );
 
   // Excluir/Arquivar Item
   const handleDeleteItem = useCallback(
     async (itemId: string) => {
-      if (isFirebaseMode && firebaseUid) {
-        const { FirestoreService } = await import('./services/firestore');
-        await FirestoreService.archiveBasketItem(firebaseUid, itemId);
-      } else {
-        StorageService.deleteItem(itemId);
-        setLocalItems(StorageService.getItems(activeProfile.id));
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          await FirestoreService.archiveBasketItem(firebaseUid, itemId);
+        } else {
+          StorageService.deleteItem(itemId);
+          setLocalItems(StorageService.getItems(activeProfile.id));
+          bumpLocalRevision();
+        }
+        addToast('info', 'Item removido da cesta ativa.');
+      } catch (err) {
+        addToast('error', 'Não foi possível excluir o item.');
+        throw err;
       }
     },
-    [activeProfile.id, isFirebaseMode, firebaseUid]
+    [activeProfile.id, isFirebaseMode, firebaseUid, bumpLocalRevision, addToast]
   );
 
   // Atualização Rápida de Preço
   const handleUpdatePrice = useCallback(
-    async (itemId: string, newPrice: number, referenceDate: string) => {
+    async (itemId: string, newPrice: number, referenceDate: string, note?: string) => {
       const item = items.find((i) => i.id === itemId);
       if (!item) return;
 
@@ -736,29 +872,39 @@ export default function App() {
         updatedAt: new Date().toISOString(),
       };
 
-      if (isFirebaseMode && firebaseUid) {
-        const { FirestoreService } = await import('./services/firestore');
-        await FirestoreService.addPriceRecord(firebaseUid, {
-          itemId,
-          price: newPrice,
-          referenceDate,
-          unit: item.unit || 'un',
-          source: 'Atualização Rápida no Painel',
-        });
-        await FirestoreService.saveBasketItem(firebaseUid, updatedItem, false);
-      } else {
-        StorageService.addPriceRecord({
-          itemId,
-          price: newPrice,
-          referenceDate,
-          unit: item.unit || 'un',
-          origin: 'Atualização Rápida no Painel',
-        });
-        StorageService.saveItem(updatedItem);
-        setLocalItems(StorageService.getItems(activeProfile.id));
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          await FirestoreService.addPriceRecord(firebaseUid, {
+            itemId,
+            price: newPrice,
+            referenceDate,
+            unit: item.unit || 'un',
+            source: note || 'Atualização Rápida no Painel',
+          });
+          await FirestoreService.saveBasketItem(firebaseUid, updatedItem, false);
+        } else {
+          StorageService.addPriceRecord({
+            itemId,
+            price: newPrice,
+            referenceDate,
+            unit: item.unit || 'un',
+            origin: note || 'Atualização Rápida no Painel',
+          });
+          StorageService.saveItem(updatedItem);
+          setLocalItems(StorageService.getItems(activeProfile.id));
+          bumpLocalRevision();
+        }
+        addToast(
+          'success',
+          `Preço de "${item.name}" atualizado para R$ ${newPrice.toFixed(2).replace('.', ',')}.`
+        );
+      } catch (err) {
+        addToast('error', 'Erro ao salvar atualização de preço.');
+        throw err;
       }
     },
-    [items, activeProfile.id, isFirebaseMode, firebaseUid]
+    [items, activeProfile.id, isFirebaseMode, firebaseUid, bumpLocalRevision, addToast]
   );
 
   // Adicionar cotação histórica via PriceHistoryView
@@ -770,54 +916,156 @@ export default function App() {
       unit?: string;
       origin?: string;
     }) => {
-      if (isFirebaseMode && firebaseUid) {
-        const { FirestoreService } = await import('./services/firestore');
-        await FirestoreService.addPriceRecord(firebaseUid, {
-          itemId: record.itemId,
-          price: record.price,
-          referenceDate: record.referenceDate,
-          unit: record.unit,
-          source: record.origin,
-        });
-      } else {
-        StorageService.addPriceRecord(record);
-        setLocalItems(StorageService.getItems(activeProfile.id));
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          await FirestoreService.addPriceRecord(firebaseUid, {
+            itemId: record.itemId,
+            price: record.price,
+            referenceDate: record.referenceDate,
+            unit: record.unit,
+            source: record.origin,
+          });
+        } else {
+          StorageService.addPriceRecord(record);
+          setLocalItems(StorageService.getItems(activeProfile.id));
+          bumpLocalRevision();
+        }
+        addToast('success', 'Cotação histórica registrada com sucesso.');
+      } catch (err) {
+        addToast('error', 'Falha ao registrar cotação no histórico.');
+        throw err;
       }
     },
-    [isFirebaseMode, firebaseUid, activeProfile.id]
+    [isFirebaseMode, firebaseUid, activeProfile.id, bumpLocalRevision, addToast]
+  );
+
+  // Editar cotação histórica via PriceHistoryView
+  const handleUpdatePriceRecord = useCallback(
+    async (priceId: string, updated: Partial<PriceRecord>) => {
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          await FirestoreService.updatePriceRecord(firebaseUid, priceId, updated);
+          const targetRec = cloudPriceHistory.find((p) => p.id === priceId);
+          if (targetRec && updated.price !== undefined) {
+            const itemPrices = cloudPriceHistory
+              .map((p) => (p.id === priceId ? { ...p, ...updated } : p))
+              .filter((p) => p.itemId === targetRec.itemId)
+              .sort((a, b) => b.referenceDate.localeCompare(a.referenceDate));
+            if (itemPrices[0]?.id === priceId) {
+              const targetItem = cloudItems.find((i) => i.id === targetRec.itemId);
+              if (targetItem) {
+                await FirestoreService.saveBasketItem(
+                  firebaseUid,
+                  {
+                    ...targetItem,
+                    currentPrice: updated.price,
+                    currentPriceDate: updated.referenceDate || targetItem.currentPriceDate,
+                    updatedAt: new Date().toISOString(),
+                  },
+                  false
+                );
+              }
+            }
+          }
+        } else {
+          StorageService.updatePriceRecord(priceId, updated);
+          setLocalItems(StorageService.getItems(activeProfile.id));
+          bumpLocalRevision();
+        }
+        addToast('success', 'Registro de preço atualizado.');
+      } catch (err) {
+        addToast('error', 'Falha ao atualizar cotação.');
+        throw err;
+      }
+    },
+    [
+      isFirebaseMode,
+      firebaseUid,
+      cloudPriceHistory,
+      cloudItems,
+      activeProfile.id,
+      bumpLocalRevision,
+      addToast,
+    ]
+  );
+
+  // Excluir cotação histórica via PriceHistoryView
+  const handleDeletePriceRecord = useCallback(
+    async (priceId: string) => {
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          await FirestoreService.deletePriceRecord(firebaseUid, priceId);
+        } else {
+          StorageService.deletePriceRecord(priceId);
+          setLocalItems(StorageService.getItems(activeProfile.id));
+          bumpLocalRevision();
+        }
+        addToast('info', 'Registro excluído do histórico de preços.');
+      } catch (err) {
+        addToast('error', 'Não foi possível excluir a cotação.');
+        throw err;
+      }
+    },
+    [isFirebaseMode, firebaseUid, activeProfile.id, bumpLocalRevision, addToast]
   );
 
   // Atualização de Renda
   const handleUpdateIncome = useCallback(
-    async (initial: number, final: number) => {
-      if (isFirebaseMode && firebaseUid) {
-        const { FirestoreService } = await import('./services/firestore');
-        await FirestoreService.saveIncomeRange(firebaseUid, activeProfile.id, initial, final);
-      } else {
-        StorageService.saveIncome(initial, final);
-        setLocalItems([...StorageService.getItems(activeProfile.id)]);
+    async (
+      initial: number,
+      final: number,
+      dates?: { initialDate?: string; finalDate?: string }
+    ) => {
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          await FirestoreService.saveIncomeRange(firebaseUid, activeProfile.id, initial, final, dates);
+        } else {
+          StorageService.saveIncome(initial, final, {
+            profileId: activeProfile.id,
+            initialDate: dates?.initialDate,
+            finalDate: dates?.finalDate,
+          });
+          setLocalItems([...StorageService.getItems(activeProfile.id)]);
+          bumpLocalRevision();
+        }
+        addToast('success', 'Faixa de renda familiar atualizada.');
+      } catch (err) {
+        addToast('error', 'Não foi possível salvar os dados de renda.');
+        throw err;
       }
     },
-    [activeProfile.id, isFirebaseMode, firebaseUid]
+    [activeProfile.id, isFirebaseMode, firebaseUid, bumpLocalRevision, addToast]
   );
 
-  // Gerenciamento de Grupos de Consumo no Cloud Firestore
+  // Gerenciamento de Grupos de Consumo
   const handleSaveConsumptionGroup = useCallback(
     async (group: ConsumptionGroup) => {
-      if (isFirebaseMode && firebaseUid) {
-        const { FirestoreService } = await import('./services/firestore');
-        await FirestoreService.saveConsumptionGroup(firebaseUid, group);
-      } else {
-        StorageService.saveGroup(group);
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          await FirestoreService.saveConsumptionGroup(firebaseUid, group);
+        } else {
+          StorageService.saveGroup(group);
+          bumpLocalRevision();
+        }
+      } catch (err) {
+        addToast('error', 'Erro ao salvar categoria.');
+        throw err;
       }
     },
-    [isFirebaseMode, firebaseUid]
+    [isFirebaseMode, firebaseUid, bumpLocalRevision, addToast]
   );
 
   const handleDeleteConsumptionGroup = useCallback(
     async (groupId: string): Promise<{ success: boolean; message: string }> => {
       if (!isFirebaseMode || !firebaseUid) {
-        return StorageService.deleteGroup(groupId);
+        const res = StorageService.deleteGroup(groupId);
+        bumpLocalRevision();
+        return res;
       }
       const target = (cloudEffectiveGroups || []).find((g) => g.id === groupId);
       if (!target) {
@@ -847,38 +1095,132 @@ export default function App() {
             : 'Categoria excluída com sucesso.',
       };
     },
-    [isFirebaseMode, firebaseUid, cloudEffectiveGroups, cloudItems]
+    [isFirebaseMode, firebaseUid, cloudEffectiveGroups, cloudItems, bumpLocalRevision]
   );
 
-  // Salvar Estratégias A e B no Cloud Firestore
+  // CRUD completo das Estratégias A, B e C
   const handleSavePlanA = useCallback(
     async (plan: SubstitutePlanA) => {
-      if (isFirebaseMode && firebaseUid) {
-        const { FirestoreService } = await import('./services/firestore');
-        await FirestoreService.saveStrategyPlanA(firebaseUid, {
-          ...plan,
-          profileId: activeProfile.id,
-        });
-      } else {
-        StorageService.savePlanA(plan);
+      const normalized = { ...plan, profileId: activeProfile.id };
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          await FirestoreService.saveStrategyPlanA(firebaseUid, normalized);
+        } else {
+          StorageService.savePlanA(normalized);
+          bumpLocalRevision();
+        }
+        addToast('success', 'Substituição (Plano A) salva.');
+      } catch (err) {
+        addToast('error', 'Falha ao salvar substituição.');
+        throw err;
       }
     },
-    [isFirebaseMode, firebaseUid, activeProfile.id]
+    [isFirebaseMode, firebaseUid, activeProfile.id, bumpLocalRevision, addToast]
+  );
+
+  const handleDeletePlanA = useCallback(
+    async (planId: string) => {
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          await FirestoreService.deleteStrategy(firebaseUid, planId);
+        } else {
+          StorageService.deletePlanA(planId);
+          bumpLocalRevision();
+        }
+        addToast('info', 'Estratégia do Plano A removida.');
+      } catch (err) {
+        addToast('error', 'Erro ao excluir estratégia do Plano A.');
+        throw err;
+      }
+    },
+    [isFirebaseMode, firebaseUid, bumpLocalRevision, addToast]
   );
 
   const handleSavePlanB = useCallback(
     async (plan: EfficiencyPlanB) => {
-      if (isFirebaseMode && firebaseUid) {
-        const { FirestoreService } = await import('./services/firestore');
-        await FirestoreService.saveStrategyPlanB(firebaseUid, {
-          ...plan,
-          profileId: activeProfile.id,
-        });
-      } else {
-        StorageService.savePlanB(plan);
+      const normalized = { ...plan, profileId: activeProfile.id };
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          await FirestoreService.saveStrategyPlanB(firebaseUid, normalized);
+        } else {
+          StorageService.savePlanB(normalized);
+          bumpLocalRevision();
+        }
+        addToast('success', 'Meta de eficiência (Plano B) salva.');
+      } catch (err) {
+        addToast('error', 'Falha ao salvar meta do Plano B.');
+        throw err;
       }
     },
-    [isFirebaseMode, firebaseUid, activeProfile.id]
+    [isFirebaseMode, firebaseUid, activeProfile.id, bumpLocalRevision, addToast]
+  );
+
+  const handleDeletePlanB = useCallback(
+    async (planId: string) => {
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          await FirestoreService.deleteStrategy(firebaseUid, planId);
+        } else {
+          StorageService.deletePlanB(planId);
+          bumpLocalRevision();
+        }
+        addToast('info', 'Meta do Plano B removida.');
+      } catch (err) {
+        addToast('error', 'Erro ao excluir meta do Plano B.');
+        throw err;
+      }
+    },
+    [isFirebaseMode, firebaseUid, bumpLocalRevision, addToast]
+  );
+
+  const handleSavePlanC = useCallback(
+    async (plan: OpportunityPlanC) => {
+      const normalized: OpportunityPlanC = {
+        ...plan,
+        profileId: activeProfile.id,
+        id: plan.id || sanitizeFirestoreId(`opp_${activeProfile.id}`, 'opp'),
+        isSimulated: false,
+      };
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          await FirestoreService.saveStrategyPlanC(firebaseUid, normalized);
+        } else {
+          StorageService.savePlanC(normalized);
+          bumpLocalRevision();
+        }
+        addToast('success', 'Simulação de investimento (Plano C) salva.');
+      } catch (err) {
+        addToast('error', 'Falha ao salvar Plano C.');
+        throw err;
+      }
+    },
+    [isFirebaseMode, firebaseUid, activeProfile.id, bumpLocalRevision, addToast]
+  );
+
+  const handleDeletePlanC = useCallback(
+    async (strategyId?: string) => {
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          const targetId =
+            strategyId || activePlanC?.id || sanitizeFirestoreId(`opp_${activeProfile.id}`, 'opp');
+          await FirestoreService.deleteStrategy(firebaseUid, targetId);
+        } else {
+          StorageService.deletePlanC(activeProfile.id);
+          bumpLocalRevision();
+        }
+        addToast('info', 'Alocação do Plano C removida.');
+      } catch (err) {
+        addToast('error', 'Erro ao excluir Plano C.');
+        throw err;
+      }
+    },
+    [isFirebaseMode, firebaseUid, activePlanC?.id, activeProfile.id, bumpLocalRevision, addToast]
   );
 
   // Alternância para Cesta Vazia (via ConfirmModal sem window.confirm)
@@ -893,16 +1235,24 @@ export default function App() {
 
   const handleConfirmEmptyBasket = useCallback(async () => {
     setIsConfirmEmptyOpen(false);
-    if (isFirebaseMode && firebaseUid) {
-      const { FirestoreService } = await import('./services/firestore');
-      await Promise.all(items.map((item) => FirestoreService.archiveBasketItem(firebaseUid, item.id)));
-      handleSelectDashboardTab('minha-cesta-familiar');
-    } else {
-      StorageService.clearToEmptyBasket();
-      hydrateLocalState();
-      handleSelectDashboardTab('minha-cesta-familiar');
+    try {
+      if (isFirebaseMode && firebaseUid) {
+        const { FirestoreService } = await import('./services/firestore');
+        await Promise.all(
+          items.map((item) => FirestoreService.archiveBasketItem(firebaseUid, item.id))
+        );
+        handleSelectDashboardTab('minha-cesta-familiar');
+        addToast('info', 'Itens atuais arquivados. Você pode cadastrar sua cesta do zero.');
+      } else {
+        StorageService.clearToEmptyBasket();
+        hydrateLocalState();
+        handleSelectDashboardTab('minha-cesta-familiar');
+        addToast('info', 'Cesta iniciada em branco.');
+      }
+    } catch {
+      addToast('error', 'Não foi possível limpar os itens da cesta.');
     }
-  }, [isFirebaseMode, firebaseUid, items, hydrateLocalState, handleSelectDashboardTab]);
+  }, [isFirebaseMode, firebaseUid, items, hydrateLocalState, handleSelectDashboardTab, addToast]);
 
   // Alternância para Cenário Demonstrativo
   const handleSwitchToDemoBasket = useCallback(() => {
@@ -928,39 +1278,146 @@ export default function App() {
   // Importação de Itens
   const handleImportItems = useCallback(
     async (imported: BasketItem[]) => {
-      if (isFirebaseMode && firebaseUid) {
-        const { FirestoreService } = await import('./services/firestore');
-        const stamped = imported.map((it, idx) => ({
-          ...it,
-          id: sanitizeFirestoreId(it.id || `item_${Date.now()}_${idx}`, 'item'),
-          profileId: activeProfile.id,
-          isArchived: false,
-          active: it.active !== false,
-        }));
-        await Promise.all(
-          stamped.map((it) => FirestoreService.saveBasketItem(firebaseUid, it, false))
-        );
-      } else {
-        StorageService.importItems(imported);
-        setLocalItems(StorageService.getItems(activeProfile.id));
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          const stamped = imported.map((it, idx) => ({
+            ...it,
+            id: sanitizeFirestoreId(it.id || `item_${Date.now()}_${idx}`, 'item'),
+            profileId: activeProfile.id,
+            isArchived: false,
+            active: it.active !== false,
+          }));
+          await Promise.all(
+            stamped.map((it) => FirestoreService.saveBasketItem(firebaseUid, it, false))
+          );
+        } else {
+          StorageService.importItems(imported, activeProfile.id);
+          setLocalItems(StorageService.getItems(activeProfile.id));
+          bumpLocalRevision();
+        }
+      } catch (err) {
+        addToast('error', 'Não foi possível concluir a importação dos itens.');
+        throw err;
       }
     },
-    [activeProfile.id, isFirebaseMode, firebaseUid]
+    [activeProfile.id, isFirebaseMode, firebaseUid, bumpLocalRevision, addToast]
   );
 
-  // Atualização de Perfil
+  // Gerenciamento Multi-Perfil Familiar
   const handleUpdateProfile = useCallback(
     async (updatedProfile: FamilyProfile) => {
-      if (isFirebaseMode && firebaseUid) {
-        const { FirestoreService } = await import('./services/firestore');
-        await FirestoreService.saveProfile(firebaseUid, updatedProfile);
-      } else {
-        setLocalActiveProfile(updatedProfile);
-        setLocalProfiles(StorageService.getProfiles());
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          await FirestoreService.saveProfile(firebaseUid, updatedProfile);
+        } else {
+          StorageService.saveProfile(updatedProfile);
+          setLocalActiveProfile(updatedProfile);
+          setLocalProfiles(StorageService.getProfiles());
+          bumpLocalRevision();
+        }
+        addToast('success', `Perfil "${updatedProfile.name}" atualizado.`);
+      } catch (err) {
+        addToast('error', 'Erro ao atualizar perfil familiar.');
+        throw err;
       }
     },
-    [isFirebaseMode, firebaseUid]
+    [isFirebaseMode, firebaseUid, bumpLocalRevision, addToast]
   );
+
+  const handleCreateProfile = useCallback(
+    async (params: { name: string; membersCount: number; referenceRegion: string }) => {
+      const nowIso = new Date().toISOString();
+      const newProfile: FamilyProfile = {
+        id: sanitizeFirestoreId(`prof_${Date.now()}`, 'prof'),
+        name: params.name.trim() || 'Novo Perfil Familiar',
+        membersCount: Math.max(1, Math.min(50, Math.round(params.membersCount) || 2)),
+        referenceRegion: params.referenceRegion || 'Brasil',
+        currency: 'BRL',
+        isDemo: false,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          await FirestoreService.saveProfile(firebaseUid, newProfile);
+          setActiveCloudProfileId(newProfile.id);
+        } else {
+          StorageService.saveProfile(newProfile);
+          hydrateLocalState(newProfile.id);
+        }
+        addToast('success', `Perfil "${newProfile.name}" criado e ativado.`);
+      } catch (err) {
+        addToast('error', 'Não foi possível criar o novo perfil.');
+        throw err;
+      }
+    },
+    [isFirebaseMode, firebaseUid, hydrateLocalState, addToast]
+  );
+
+  const handleDeleteProfile = useCallback(
+    async (profileId: string) => {
+      if (profiles.length <= 1) {
+        addToast('error', 'Não é possível excluir o único perfil existente da conta.');
+        return;
+      }
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          await FirestoreService.deleteProfile(firebaseUid, profileId);
+          if (activeProfile.id === profileId) {
+            const nextProf = profiles.find((p) => p.id !== profileId);
+            setActiveCloudProfileId(nextProf?.id || currentUser?.profileId || '');
+          }
+          addToast('info', 'Perfil familiar e registros vinculados removidos.');
+        } else {
+          const res = StorageService.deleteProfile(profileId);
+          if (!res.success) {
+            addToast('error', res.message);
+            return;
+          }
+          hydrateLocalState();
+          addToast('info', res.message);
+        }
+      } catch (err) {
+        addToast('error', 'Erro ao excluir o perfil selecionado.');
+        throw err;
+      }
+    },
+    [
+      profiles,
+      isFirebaseMode,
+      firebaseUid,
+      activeProfile.id,
+      currentUser?.profileId,
+      hydrateLocalState,
+      addToast,
+    ]
+  );
+
+  // Limpeza completa LGPD
+  const handleWipeAllUserData = useCallback(async () => {
+    try {
+      if (isFirebaseMode && firebaseUid) {
+        const { FirestoreService } = await import('./services/firestore');
+        await FirestoreService.deleteAllUserFinancialData(firebaseUid, currentUser?.displayName);
+        setActiveCloudProfileId(
+          currentUser?.profileId || sanitizeFirestoreId(`prof_${firebaseUid}`, 'prof')
+        );
+        addToast('success', 'Todos os seus dados financeiros foram apagados do Cloud Firestore.');
+      } else {
+        StorageService.resetToDemoData();
+        hydrateLocalState('profile-demo');
+        addToast('info', 'Cenário de demonstração restaurado para o estado inicial.');
+      }
+    } catch (err) {
+      addToast('error', 'Não foi possível apagar os dados financeiros.');
+      throw err;
+    }
+  }, [isFirebaseMode, firebaseUid, currentUser?.displayName, currentUser?.profileId, hydrateLocalState, addToast]);
 
   // Rota efetiva para SeoHeadManager (garante que área logada e demo sejam sempre noindex)
   const effectiveSeoPath = useMemo(() => {
@@ -971,16 +1428,31 @@ export default function App() {
   }, [isAuthenticatedDashboard, isDemo, activeTab, routePath]);
 
   const openLoginModal = useCallback(() => {
-    setAuthModalMode('login');
+    setAuthModalMode(pendingVerificationEmail ? 'verify-email' : 'login');
     setAuthModalError(null);
     setIsAuthModalOpen(true);
-  }, []);
+  }, [pendingVerificationEmail]);
 
   const openRegisterModal = useCallback(() => {
     setAuthModalMode('register');
     setAuthModalError(null);
     setIsAuthModalOpen(true);
   }, []);
+
+  const isProtectedDashboardRoute =
+    normalizeRoutePath(routePath) === '/painel' ||
+    normalizeRoutePath(routePath).startsWith('/painel/');
+
+  // GATE DE INICIALIZAÇÃO DA SESSÃO EM ROTAS PRIVADAS (/painel*)
+  if (!currentUser && !isDemo && isAuthInitializing && isProtectedDashboardRoute) {
+    return (
+      <>
+        <SeoHeadManager currentPath="/painel/visao-geral" />
+        <PageChunkFallback label="Verificando sessão autenticada..." />
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      </>
+    );
+  }
 
   // SE NÃO HÁ USUÁRIO E NÃO ESTÁ EM DEMO: EXIBE A CAMADA PÚBLICA INDEXÁVEL
   if (!currentUser && !isDemo) {
@@ -1078,6 +1550,7 @@ export default function App() {
               isOpen={isAuthModalOpen}
               initialMode={authModalMode}
               initialError={authModalError}
+              pendingVerificationEmail={pendingVerificationEmail}
               onClose={() => {
                 setIsAuthModalOpen(false);
                 setAuthModalError(null);
@@ -1090,6 +1563,8 @@ export default function App() {
             />
           </Suspense>
         )}
+
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       </>
     );
   }
@@ -1129,6 +1604,7 @@ export default function App() {
             <div className="flex items-center gap-3">
               {firebaseUid ? (
                 <button
+                  type="button"
                   onClick={() => {
                     setIsDemo(false);
                     navigateUrl('/painel/visao-geral', true);
@@ -1139,6 +1615,7 @@ export default function App() {
                 </button>
               ) : (
                 <button
+                  type="button"
                   onClick={() => {
                     setAuthModalMode('register');
                     setAuthModalError(null);
@@ -1150,6 +1627,7 @@ export default function App() {
                 </button>
               )}
               <button
+                type="button"
                 onClick={handleLogout}
                 className="px-2 py-0.5 rounded bg-[#213145] text-xs hover:bg-[#ffdad6] hover:text-[#ba1a1a] transition-colors cursor-pointer"
               >
@@ -1165,6 +1643,19 @@ export default function App() {
             activeProfile={activeProfile}
             profiles={profiles}
             ibgeData={ibgeMetadata}
+            summary={effectiveSummary}
+            searchTerm={globalSearchTerm}
+            onSearchChange={(val) => {
+              setGlobalSearchTerm(val);
+              if (
+                val.trim() &&
+                activeTab !== 'minha-cesta-familiar' &&
+                activeTab !== 'precos-e-historico'
+              ) {
+                handleSelectDashboardTab('minha-cesta-familiar');
+              }
+            }}
+            onCreateProfile={() => handleSelectDashboardTab('configuracoes')}
             userAvatarUrl={currentUser?.avatarUrl}
             onSelectProfile={(profileId) => {
               const found = profiles.find((p) => p.id === profileId);
@@ -1190,6 +1681,7 @@ export default function App() {
             {activeTab === 'visao-geral' && (
               <OverviewView
                 summary={effectiveSummary}
+                ibgeData={ibgeMetadata}
                 onNavigateTab={handleSelectDashboardTab}
                 onOpenNewItem={() => {
                   setEditingItem(null);
@@ -1229,12 +1721,15 @@ export default function App() {
                 onRefreshData={() => {
                   if (!isFirebaseMode) {
                     setLocalItems(StorageService.getItems(activeProfile.id));
+                    bumpLocalRevision();
                   }
                 }}
                 isDemo={isDemo}
                 groups={cloudEffectiveGroups}
-                onSaveGroup={isFirebaseMode ? handleSaveConsumptionGroup : undefined}
-                onDeleteGroup={isFirebaseMode ? handleDeleteConsumptionGroup : undefined}
+                onSaveGroup={handleSaveConsumptionGroup}
+                onDeleteGroup={handleDeleteConsumptionGroup}
+                externalSearchTerm={globalSearchTerm}
+                onExternalSearchChange={setGlobalSearchTerm}
               />
             )}
 
@@ -1244,18 +1739,24 @@ export default function App() {
                 onRefreshData={() => {
                   if (!isFirebaseMode) {
                     setLocalItems(StorageService.getItems(activeProfile.id));
+                    bumpLocalRevision();
                   }
                 }}
                 isDemo={isDemo}
                 selectedItemForHistory={selectedItemForHistory}
                 priceRecords={isFirebaseMode ? cloudPriceHistory : undefined}
-                onAddPriceRecord={isFirebaseMode ? handleAddPriceRecordFromView : undefined}
+                onAddPriceRecord={handleAddPriceRecordFromView}
+                onUpdatePriceRecord={handleUpdatePriceRecord}
+                onDeletePriceRecord={handleDeletePriceRecord}
               />
             )}
 
             {activeTab === 'analise-da-inflacao' && (
               <InflationAnalysisView
                 summary={effectiveSummary}
+                ibgeData={ibgeMetadata}
+                activeTimeframe={selectedTimeframe}
+                onSelectTimeframe={setSelectedTimeframe}
                 onNavigateTab={handleSelectDashboardTab}
                 isDemo={isDemo}
               />
@@ -1277,21 +1778,45 @@ export default function App() {
                 plansA={activePlansA}
                 plansB={activePlansB}
                 planC={activePlanC}
-                onSavePlanA={isFirebaseMode ? handleSavePlanA : undefined}
-                onSavePlanB={isFirebaseMode ? handleSavePlanB : undefined}
+                onSavePlanA={handleSavePlanA}
+                onDeletePlanA={handleDeletePlanA}
+                onSavePlanB={handleSavePlanB}
+                onDeletePlanB={handleDeletePlanB}
+                onSavePlanC={handleSavePlanC}
+                onDeletePlanC={handleDeletePlanC}
                 onNavigateTab={handleSelectDashboardTab}
               />
             )}
 
-            {activeTab === 'relatorios' && <ReportsView summary={effectiveSummary} isDemo={isDemo} />}
+            {activeTab === 'relatorios' && (
+              <ReportsView
+                summary={effectiveSummary}
+                activeProfile={activeProfile}
+                ibgeData={ibgeMetadata}
+                isDemo={isDemo}
+              />
+            )}
 
             {activeTab === 'configuracoes' && (
               <SettingsView
                 activeProfile={activeProfile}
+                profiles={profiles}
                 currentUser={currentUser}
+                ibgeData={ibgeMetadata}
                 onUpdateProfile={handleUpdateProfile}
+                onSelectProfile={(profileId) => {
+                  if (isFirebaseMode) {
+                    setActiveCloudProfileId(profileId);
+                  } else {
+                    hydrateLocalState(profileId);
+                  }
+                }}
+                onCreateProfile={handleCreateProfile}
+                onDeleteProfile={handleDeleteProfile}
+                onWipeAllUserData={handleWipeAllUserData}
                 onSwitchToEmptyBasket={handleRequestEmptyBasket}
                 onSwitchToDemoBasket={handleSwitchToDemoBasket}
+                onNotify={addToast}
                 isDemo={isDemo}
                 isFirebaseMode={isFirebaseMode}
                 onExportBackupData={
@@ -1307,16 +1832,27 @@ export default function App() {
                         plansB: activePlansB,
                         planC: activePlanC,
                         exportedAt: new Date().toISOString(),
-                        version: '3.1.0-firebase',
+                        version: '3.2.0-firebase',
                       })
                     : undefined
                 }
                 onRefreshData={() => {
-                  IBGEService.getMetadata()
-                    .then((meta) => setIbgeMetadata(meta))
-                    .catch(() => {});
+                  IBGEService.getMetadata('N1[all]', true)
+                    .then((meta) => {
+                      setIbgeMetadata(meta);
+                      addToast(
+                        meta.sourceMode === 'live' ? 'success' : 'info',
+                        meta.sourceMode === 'live'
+                          ? 'Série oficial IBGE atualizada em tempo real.'
+                          : 'IBGE indisponível no momento; exibindo dados em cache.'
+                      );
+                    })
+                    .catch(() => {
+                      addToast('error', 'Falha ao consultar API SIDRA/IBGE.');
+                    });
                   if (!isFirebaseMode) {
                     setLocalItems(StorageService.getItems(activeProfile.id));
+                    bumpLocalRevision();
                   }
                 }}
               />
@@ -1359,7 +1895,9 @@ export default function App() {
             isOpen={isImportExportOpen}
             onClose={() => setIsImportExportOpen(false)}
             items={items}
+            activeProfileId={activeProfile.id}
             onImportItems={handleImportItems}
+            onNotify={addToast}
           />
         </Suspense>
       )}
@@ -1389,6 +1927,7 @@ export default function App() {
             isOpen={isAuthModalOpen}
             initialMode={authModalMode}
             initialError={authModalError}
+            pendingVerificationEmail={pendingVerificationEmail}
             onClose={() => {
               setIsAuthModalOpen(false);
               setAuthModalError(null);
@@ -1402,10 +1941,10 @@ export default function App() {
       {currentUser && isOnboardingOpen && (
         <Suspense fallback={null}>
           <OnboardingModal
-            isOpen={isOnboardingOpen}
+            isOpen={isOnboardingOpen && !isMigrationModalOpen}
             userDisplayName={currentUser.displayName}
             targetProfileId={currentUser.profileId}
-            skipLocalPersistence={currentUser.authProvider === 'google'}
+            skipLocalPersistence={isFirebaseMode}
             onFinish={handleFinishOnboarding}
             onSkip={() => {
               setIsOnboardingOpen(false);
@@ -1414,6 +1953,57 @@ export default function App() {
           />
         </Suspense>
       )}
+
+      {firebaseUid && isMigrationModalOpen && pendingLegacyBundle && (
+        <Suspense fallback={null}>
+          <LegacyMigrationModal
+            isOpen={isMigrationModalOpen}
+            bundle={pendingLegacyBundle}
+            targetUser={currentUser}
+            onConfirmMigrate={async (bundle) => {
+              const { FirestoreService } = await import('./services/firestore');
+              await FirestoreService.migrateLegacyBundle(
+                firebaseUid,
+                bundle,
+                currentUser?.profileId || activeProfile.id
+              );
+              LegacyMigrationService.clearMigratedLocalData(firebaseUid);
+              setPendingLegacyBundle(null);
+              setIsMigrationModalOpen(false);
+              setIsOnboardingOpen(false);
+              addToast('success', 'Registros locais migrados com segurança para o Cloud Firestore.');
+            }}
+            onDiscardLegacy={() => setIsConfirmDiscardLegacyOpen(true)}
+            onPostpone={() => {
+              LegacyMigrationService.markDismissedForUser(firebaseUid);
+              setIsMigrationModalOpen(false);
+            }}
+          />
+        </Suspense>
+      )}
+
+      {isConfirmDiscardLegacyOpen && firebaseUid && (
+        <Suspense fallback={null}>
+          <ConfirmModal
+            isOpen={isConfirmDiscardLegacyOpen}
+            title="Descartar Dados Locais Legados"
+            message="Essa ação removerá os dados financeiros locais antigos armazenados apenas neste navegador sem enviá-los à nuvem. Os dados já salvos na sua conta do Cloud Firestore permanecerão intactos."
+            confirmLabel="Sim, Descartar Dados Locais"
+            cancelLabel="Voltar"
+            isDestructive={true}
+            onConfirm={() => {
+              LegacyMigrationService.clearMigratedLocalData(firebaseUid);
+              setPendingLegacyBundle(null);
+              setIsMigrationModalOpen(false);
+              setIsConfirmDiscardLegacyOpen(false);
+              addToast('info', 'Dados locais legados removidos deste navegador.');
+            }}
+            onCancel={() => setIsConfirmDiscardLegacyOpen(false)}
+          />
+        </Suspense>
+      )}
+
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

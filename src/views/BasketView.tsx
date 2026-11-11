@@ -1,14 +1,15 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { BasketItem, CalculatedItem, EconomicCalculationSummary, ConsumptionGroup, ItemClassification } from '../types';
+import { BasketItem, CalculatedItem, EconomicCalculationSummary, ConsumptionGroup } from '../types';
 import { StorageService } from '../services/storage';
 import { CategoryManagerModal } from '../components/CategoryManagerModal';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { formatIsoDateBR, getTodayIsoDate } from '../utils/dates';
 
 interface BasketViewProps {
   summary: EconomicCalculationSummary;
   onOpenNewItem: () => void;
   onEditItem: (item: BasketItem) => void;
-  onDeleteItem: (itemId: string) => void;
+  onDeleteItem: (itemId: string) => void | Promise<void>;
   onOpenImportExport: () => void;
   onViewPriceHistory: (item: BasketItem) => void;
   onRefreshData?: () => void;
@@ -18,6 +19,23 @@ interface BasketViewProps {
   onDeleteGroup?: (
     groupId: string
   ) => { success: boolean; message: string } | Promise<{ success: boolean; message: string }>;
+  externalSearchTerm?: string;
+  onExternalSearchChange?: (term: string) => void;
+}
+
+function formatMoneyBR(val: number): string {
+  const safe = Number.isFinite(val) ? val : 0;
+  return safe.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatSignedPercent(val: number, digits = 2): string {
+  const safe = Number.isFinite(val) ? val : 0;
+  return `${safe > 0 ? '+' : safe < 0 ? '-' : ''}${Math.abs(safe).toFixed(digits).replace('.', ',')}%`;
+}
+
+function formatSignedPP(val: number, digits = 2): string {
+  const safe = Number.isFinite(val) ? val : 0;
+  return `${safe > 0 ? '+' : safe < 0 ? '-' : ''}${Math.abs(safe).toFixed(digits).replace('.', ',')} p.p.`;
 }
 
 export const BasketView: React.FC<BasketViewProps> = ({
@@ -32,13 +50,35 @@ export const BasketView: React.FC<BasketViewProps> = ({
   groups: propGroups,
   onSaveGroup,
   onDeleteGroup,
+  externalSearchTerm,
+  onExternalSearchChange,
 }) => {
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState(externalSearchTerm ?? '');
   const [selectedGroup, setSelectedGroup] = useState<string>('ALL');
   const [selectedClass, setSelectedClass] = useState<string>('ALL');
   const [sortBy, setSortBy] = useState<'spend-desc' | 'weight-desc' | 'inflation-desc' | 'name-asc'>('spend-desc');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 8;
+
+  useEffect(() => {
+    if (externalSearchTerm !== undefined && externalSearchTerm !== searchTerm) {
+      setSearchTerm(externalSearchTerm);
+      setCurrentPage(1);
+    }
+  }, [externalSearchTerm, searchTerm]);
+
+  const handleSearchChange = (value: string) => {
+    setSearchTerm(value);
+    setCurrentPage(1);
+    onExternalSearchChange?.(value);
+  };
+
+  const handleClearFilters = () => {
+    handleSearchChange('');
+    setSelectedGroup('ALL');
+    setSelectedClass('ALL');
+    setCurrentPage(1);
+  };
 
   // Category Manager Modal state
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
@@ -65,17 +105,19 @@ export const BasketView: React.FC<BasketViewProps> = ({
     spreadPP,
     calculatedItems,
     sumOfWeights,
+    timeframeLabel,
   } = summary;
 
   // Filtragem e ordenação
   const filteredItems = useMemo(() => {
     return calculatedItems
       .filter((item) => {
+        const q = searchTerm.trim().toLowerCase();
         const matchesSearch =
-          !searchTerm ||
-          item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          (item.description && item.description.toLowerCase().includes(searchTerm.toLowerCase())) ||
-          item.group.toLowerCase().includes(searchTerm.toLowerCase());
+          !q ||
+          item.name.toLowerCase().includes(q) ||
+          (item.description && item.description.toLowerCase().includes(q)) ||
+          item.group.toLowerCase().includes(q);
 
         const matchesGroup = selectedGroup === 'ALL' || item.group === selectedGroup;
         const matchesClass = selectedClass === 'ALL' || item.classification === selectedClass;
@@ -95,8 +137,14 @@ export const BasketView: React.FC<BasketViewProps> = ({
       });
   }, [calculatedItems, searchTerm, selectedGroup, selectedClass, sortBy]);
 
-  // Paginação
+  // Paginação segura
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / itemsPerPage));
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
   const paginatedItems = filteredItems.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   const handleCategoriesUpdated = () => {
@@ -106,10 +154,11 @@ export const BasketView: React.FC<BasketViewProps> = ({
     onRefreshData();
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (itemToDelete) {
-      onDeleteItem(itemToDelete.id);
+      const targetId = itemToDelete.id;
       setItemToDelete(null);
+      await onDeleteItem(targetId);
     }
   };
 
@@ -131,12 +180,12 @@ export const BasketView: React.FC<BasketViewProps> = ({
               <span className="text-[#45464d]">
                 {isDemo
                   ? 'Dados de demonstração — valores fictícios, não representam estatísticas oficiais.'
-                  : 'Registros reais persistidos com integridade referencial.'}
+                  : 'Sua cesta familiar está sincronizada com armazenamento seguro.'}
               </span>
             </div>
           </div>
           <div className="hidden md:flex items-center font-mono text-xs text-[#76777d]">
-            <span>Cesta Atualizada: {new Date().toLocaleDateString('pt-BR')}</span>
+            <span>Cesta Atualizada: {formatIsoDateBR(getTodayIsoDate())}</span>
           </div>
         </div>
 
@@ -179,19 +228,35 @@ export const BasketView: React.FC<BasketViewProps> = ({
           <div className="bg-[#ffffff] rounded-xl p-5 shadow-sm flex flex-col justify-between border border-[#eff4ff]">
             <div className="flex items-center justify-between">
               <span className="font-mono text-xs uppercase text-[#45464d] font-semibold">IPCA-Casa Acumulado</span>
-              <span className="material-symbols-outlined text-[#ba1a1a] text-[20px]">trending_up</span>
+              <span
+                className={`material-symbols-outlined text-[20px] ${
+                  ipcaCasa12M > 0 ? 'text-[#ba1a1a]' : ipcaCasa12M < 0 ? 'text-[#006a61]' : 'text-[#45464d]'
+                }`}
+              >
+                {ipcaCasa12M < 0 ? 'trending_down' : 'trending_up'}
+              </span>
             </div>
             <div className="mt-3 flex items-baseline gap-2">
-              <span className="text-2xl font-bold text-[#ba1a1a] tracking-tight tabular-nums font-mono">
-                +{ipcaCasa12M.toFixed(2).replace('.', ',')}%
+              <span
+                className={`text-2xl font-bold tracking-tight tabular-nums font-mono ${
+                  ipcaCasa12M > 0 ? 'text-[#ba1a1a]' : ipcaCasa12M < 0 ? 'text-[#006a61]' : 'text-[#0b1c30]'
+                }`}
+              >
+                {formatSignedPercent(ipcaCasa12M)}
               </span>
-              <span className="text-xs font-mono text-[#76777d]">12 Meses</span>
+              <span className="text-xs font-mono text-[#76777d]">{timeframeLabel}</span>
             </div>
             <div className="mt-2 flex items-center gap-1 text-xs">
-              <span className="text-[#ba1a1a] font-semibold font-mono">
-                {spreadPP > 0 ? `+${spreadPP.toFixed(2).replace('.', ',')} p.p.` : `${spreadPP.toFixed(2).replace('.', ',')} p.p.`}
+              <span
+                className={`font-semibold font-mono ${
+                  spreadPP > 0 ? 'text-[#ba1a1a]' : 'text-[#006a61]'
+                }`}
+              >
+                {formatSignedPP(spreadPP)}
               </span>
-              <span className="text-[#76777d]">vs. IPCA Geral ({ipcaIBGE12M.toFixed(2).replace('.', ',')}%)</span>
+              <span className="text-[#76777d]">
+                vs. IBGE ({formatSignedPercent(ipcaIBGE12M)})
+              </span>
             </div>
           </div>
 
@@ -221,17 +286,14 @@ export const BasketView: React.FC<BasketViewProps> = ({
               <input
                 type="text"
                 value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setCurrentPage(1);
-                }}
+                onChange={(e) => handleSearchChange(e.target.value)}
                 placeholder="Buscar por produto, marca, serviço ou categoria..."
                 className="w-full h-10 pl-10 pr-10 rounded-lg bg-[#eff4ff] text-[#0b1c30] placeholder:text-[#76777d] text-sm focus:outline-none focus:bg-[#ffffff] focus:ring-1 focus:ring-[#006a61] transition-all"
               />
               {searchTerm && (
                 <button
                   type="button"
-                  onClick={() => setSearchTerm('')}
+                  onClick={() => handleSearchChange('')}
                   className="absolute right-3 top-2.5 text-[#76777d] hover:text-[#0b1c30] cursor-pointer"
                 >
                   <span className="material-symbols-outlined text-[18px]">close</span>
@@ -355,8 +417,47 @@ export const BasketView: React.FC<BasketViewProps> = ({
               <tbody className="divide-y divide-[#eff4ff] text-[#0b1c30]">
                 {paginatedItems.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="py-12 text-center text-[#76777d]">
-                      Nenhum item encontrado com os filtros selecionados.
+                    <td colSpan={9} className="py-12 px-6 text-center text-[#76777d]">
+                      {calculatedItems.length === 0 ? (
+                        <div className="flex flex-col items-center gap-3 max-w-md mx-auto">
+                          <span className="material-symbols-outlined text-[32px] text-[#497cff]">
+                            shopping_basket
+                          </span>
+                          <span className="text-sm font-bold text-[#0b1c30]">
+                            Sua cesta familiar ainda está vazia
+                          </span>
+                          <span className="text-xs text-[#45464d]">
+                            Adicione os produtos e despesas fixas da sua casa para calcular seu IPCA-Casa pessoal.
+                          </span>
+                          <div className="flex items-center gap-2 mt-1">
+                            <button
+                              type="button"
+                              onClick={onOpenNewItem}
+                              className="h-9 px-4 rounded-lg bg-[#000000] hover:bg-[#213145] text-[#ffffff] text-xs font-mono font-semibold cursor-pointer"
+                            >
+                              Cadastrar Primeiro Item
+                            </button>
+                            <button
+                              type="button"
+                              onClick={onOpenImportExport}
+                              className="h-9 px-4 rounded-lg bg-[#eff4ff] hover:bg-[#e5eeff] text-[#0b1c30] text-xs font-mono font-semibold cursor-pointer"
+                            >
+                              Importar Planilha
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center gap-2">
+                          <span>Nenhum item encontrado com os filtros selecionados.</span>
+                          <button
+                            type="button"
+                            onClick={handleClearFilters}
+                            className="h-8 px-3 rounded-lg bg-[#eff4ff] hover:bg-[#e5eeff] text-[#0b1c30] text-xs font-mono font-semibold cursor-pointer"
+                          >
+                            Limpar Filtros
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ) : (
@@ -379,7 +480,7 @@ export const BasketView: React.FC<BasketViewProps> = ({
 
                       {/* Gasto Mensal */}
                       <td className="py-3.5 px-4 text-right font-mono font-semibold tabular-nums text-xs">
-                        R$ {item.monthlySpend.toFixed(2).replace('.', ',')}
+                        R$ {formatMoneyBR(item.monthlySpend)}
                       </td>
 
                       {/* Peso na Cesta */}
@@ -388,13 +489,23 @@ export const BasketView: React.FC<BasketViewProps> = ({
                       </td>
 
                       {/* Preço Base */}
-                      <td className="py-3.5 px-4 text-right font-mono text-xs text-[#76777d] tabular-nums">
-                        {item.oldPrice > 0 ? `R$ ${item.oldPrice.toFixed(2).replace('.', ',')}` : '—'}
+                      <td
+                        className="py-3.5 px-4 text-right font-mono text-xs text-[#76777d] tabular-nums"
+                        title={item.oldPriceDate ? `Data base: ${formatIsoDateBR(item.oldPriceDate)}` : undefined}
+                      >
+                        {item.oldPrice > 0 ? `R$ ${formatMoneyBR(item.oldPrice)}` : '—'}
                       </td>
 
                       {/* Preço Atual */}
-                      <td className="py-3.5 px-4 text-right font-mono text-xs font-semibold tabular-nums text-[#0b1c30]">
-                        {item.currentPrice > 0 ? `R$ ${item.currentPrice.toFixed(2).replace('.', ',')}` : '—'}
+                      <td
+                        className="py-3.5 px-4 text-right font-mono text-xs font-semibold tabular-nums text-[#0b1c30]"
+                        title={
+                          item.currentPriceDate
+                            ? `Última coleta: ${formatIsoDateBR(item.currentPriceDate)}`
+                            : undefined
+                        }
+                      >
+                        {item.currentPrice > 0 ? `R$ ${formatMoneyBR(item.currentPrice)}` : '—'}
                       </td>
 
                       {/* Variação */}
@@ -409,13 +520,19 @@ export const BasketView: React.FC<BasketViewProps> = ({
                                 : 'text-[#45464d] bg-[#eff4ff]'
                             }`}
                           >
-                            {item.priceChangePercent > 0 && <span className="material-symbols-outlined text-[13px]">arrow_upward</span>}
-                            {item.priceChangePercent < 0 && <span className="material-symbols-outlined text-[13px]">arrow_downward</span>}
-                            {item.priceChangePercent >= 0 ? '+' : ''}
-                            {item.priceChangePercent.toFixed(1).replace('.', ',')}%
+                            {item.priceChangePercent > 0 && (
+                              <span className="material-symbols-outlined text-[13px]">arrow_upward</span>
+                            )}
+                            {item.priceChangePercent < 0 && (
+                              <span className="material-symbols-outlined text-[13px]">arrow_downward</span>
+                            )}
+                            {formatSignedPercent(item.priceChangePercent, 1)}
                           </span>
                         ) : (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded font-mono text-[10px] text-[#76777d] bg-[#eff4ff]" title="Preço anterior não cadastrado">
+                          <span
+                            className="inline-flex items-center px-2 py-0.5 rounded font-mono text-[10px] text-[#76777d] bg-[#eff4ff]"
+                            title="Preço anterior não cadastrado"
+                          >
                             Pendente
                           </span>
                         )}

@@ -2,10 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { IBGESeriesMetadata, fetchOfficialIPCA } from '../services/ibge';
 import { IBGEHistoricalPoint } from '../types';
 import { trackViewIpca } from '../services/analytics';
+import { formatIsoDateBR } from '../utils/dates';
 
 interface OfficialIPCAViewProps {
   onNavigateTab?: (tab: any) => void;
   analyticsSurface?: 'public' | 'dashboard';
+}
+
+function formatSignedRate(val: number | null | undefined, digits = 2): string {
+  if (typeof val !== 'number' || !Number.isFinite(val)) return '—';
+  const sign = val >= 0 ? '+' : '';
+  return `${sign}${val.toFixed(digits).replace('.', ',')}%`;
 }
 
 export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
@@ -31,16 +38,27 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
         source_mode: data.isContingencyData ? 'cache' : 'live',
       });
       if (force) {
-        setFeedbackMessage(
-          data.isContingencyData
-            ? 'Consulta externa ao IBGE indisponível no momento. Exibindo dados em cache com data de referência.'
-            : 'Dados oficiais do IBGE sincronizados com sucesso diretamente via SIDRA!'
-        );
-        setTimeout(() => setFeedbackMessage(null), 4000);
+        if (data.sourceMode === 'live' && !data.isContingencyData) {
+          setFeedbackMessage(
+            data.lastErrorMessage ||
+              'Dados oficiais do IBGE sincronizados com sucesso diretamente via SIDRA!'
+          );
+        } else if (data.sourceMode === 'cached_live') {
+          setFeedbackMessage(
+            `Consulta externa ao IBGE indisponível no momento. Exibindo o último retorno real em cache (Ref. ${data.latestMonthLabel}).`
+          );
+        } else {
+          setFeedbackMessage(
+            `Consulta externa ao IBGE indisponível no momento. Exibindo dados em cache de contingência (Ref. ${data.latestMonthLabel}).`
+          );
+        }
+        setTimeout(() => setFeedbackMessage(null), 5000);
       }
     } catch (err) {
       console.error('Falha ao carregar IBGE:', err);
-      setFeedbackMessage('Não foi possível obter dados em tempo real. Exibindo dados oficiais em cache de contingência.');
+      setFeedbackMessage(
+        'Não foi possível obter dados em tempo real. Exibindo dados oficiais em cache.'
+      );
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -68,34 +86,58 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
   const filteredHistory: IBGEHistoricalPoint[] =
     timeframeFilter === '12M' ? meta.history.slice(-12) : meta.history.slice(-24);
 
+  const maxAbsRate = Math.max(
+    0.5,
+    ...filteredHistory.map((p) => (Number.isFinite(p.monthlyRate) ? Math.abs(p.monthlyRate) : 0))
+  );
+
   // Região selecionada para exibição
   const activeRegional = meta.regionals.find((r) => r.id === selectedRegion) || meta.regionals[0];
+
+  const sourceBannerText =
+    meta.sourceMode === 'live' && !meta.isContingencyData
+      ? 'Conexão em Tempo Real com API SIDRA / IBGE'
+      : meta.sourceMode === 'cached_live'
+      ? `Cache Local do Último Retorno Real (SIDRA) — Referência ${meta.latestMonthLabel}`
+      : `Dados em Cache de Contingência Offline — Referência ${meta.latestMonthLabel}`;
+
+  const sourceDotClass =
+    meta.sourceMode === 'live' && !meta.isContingencyData
+      ? 'bg-[#006a61] animate-pulse'
+      : meta.sourceMode === 'cached_live'
+      ? 'bg-[#b45309]'
+      : 'bg-[#ba1a1a]';
 
   return (
     <div className="flex flex-col w-full px-6 lg:px-12 py-8 max-w-[1440px] mx-auto gap-8">
       {/* Sub-Header Ribbon */}
       <div className="p-3 bg-[#eff4ff] rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border border-[#e5eeff]">
         <div className="flex items-center gap-2">
-          <span
-            className={`w-2 h-2 rounded-full ${
-              meta.isContingencyData ? 'bg-[#ba1a1a]' : 'bg-[#006a61] animate-pulse'
-            }`}
-          />
+          <span className={`w-2 h-2 rounded-full ${sourceDotClass}`} />
           <span className="font-mono text-xs uppercase tracking-wider text-[#45464d] font-semibold">
-            {meta.isContingencyData
-              ? `Dados em Cache de Contingência — Referência ${meta.latestMonthLabel}`
-              : 'Conexão em Tempo Real com API SIDRA / IBGE'}
+            {sourceBannerText}
           </span>
         </div>
         <div className="flex items-center gap-3 text-xs font-mono text-[#45464d]">
           <span>Ref: {meta.latestMonthLabel}</span>
           <span className="text-[#c6c6cd]">•</span>
           <span>
-            {meta.isContingencyData ? 'Cache em:' : 'Sincronizado:'}{' '}
-            {new Date(meta.consultedAt).toLocaleString('pt-BR')}
+            {meta.isContingencyData ? 'Cache desde:' : 'Sincronizado:'}{' '}
+            {meta.cachedFromAt
+              ? formatIsoDateBR(meta.cachedFromAt)
+              : new Date(meta.consultedAt).toLocaleString('pt-BR')}
           </span>
         </div>
       </div>
+
+      {meta.isContingencyData && meta.lastErrorMessage && (
+        <div className="p-3 bg-[#ffdad6]/30 border border-[#ba1a1a]/25 rounded-xl text-xs font-mono text-[#93000a] flex items-center gap-2">
+          <span className="material-symbols-outlined text-[18px] shrink-0">cloud_off</span>
+          <span>
+            API SIDRA indisponível no momento ({meta.lastErrorMessage}). Exibindo referência armazenada em cache ({meta.latestMonthLabel}).
+          </span>
+        </div>
+      )}
 
       {feedbackMessage && (
         <div className="p-3 bg-[#86f2e4]/20 border border-[#006a61]/30 rounded-xl text-xs font-mono text-[#006a61] flex items-center justify-between">
@@ -103,7 +145,7 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
             <span className="material-symbols-outlined text-[18px]">info</span>
             <span>{feedbackMessage}</span>
           </div>
-          <button onClick={() => setFeedbackMessage(null)} className="text-[#006a61] font-bold">
+          <button type="button" onClick={() => setFeedbackMessage(null)} className="text-[#006a61] font-bold cursor-pointer">
             ✕
           </button>
         </div>
@@ -153,8 +195,7 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
           </div>
           <div className="my-2">
             <div className="text-3xl font-bold font-mono tracking-tight text-[#0b1c30]">
-              {meta.latestMonthlyRate >= 0 ? '+' : ''}
-              {meta.latestMonthlyRate.toFixed(2).replace('.', ',')}%
+              {formatSignedRate(meta.latestMonthlyRate)}
             </div>
             <span className="text-xs text-[#45464d] mt-0.5">Mês de referência: {meta.latestMonthLabel}</span>
           </div>
@@ -175,9 +216,13 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
           </div>
           <div className="my-2">
             <div className="text-3xl font-bold font-mono tracking-tight text-[#006a61]">
-              +{meta.accumulatedYearRate.toFixed(2).replace('.', ',')}%
+              {formatSignedRate(meta.accumulatedYearRate)}
             </div>
-            <span className="text-xs text-[#45464d] mt-0.5">Janeiro até {meta.latestMonthLabel}</span>
+            <span className="text-xs text-[#45464d] mt-0.5">
+              {meta.accumulatedYearRate !== null
+                ? `Janeiro até ${meta.latestMonthLabel}`
+                : 'Não divulgado para o período'}
+            </span>
           </div>
           <div className="pt-2 border-t border-[#eff4ff] text-[11px] font-mono text-[#76777d]">
             Tabela 1737 • Variável 69
@@ -195,8 +240,12 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
             </span>
           </div>
           <div className="my-2">
-            <div className="text-3xl font-bold font-mono tracking-tight text-[#ba1a1a]">
-              +{meta.accumulated12MRate.toFixed(2).replace('.', ',')}%
+            <div
+              className={`text-3xl font-bold font-mono tracking-tight ${
+                meta.accumulated12MRate < 0 ? 'text-[#006a61]' : 'text-[#ba1a1a]'
+              }`}
+            >
+              {formatSignedRate(meta.accumulated12MRate)}
             </div>
             <span className="text-xs text-[#45464d] mt-0.5">Taxa de inflação oficial de 1 ano</span>
           </div>
@@ -217,11 +266,10 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
           </div>
           <div className="my-2">
             <div className="text-lg font-bold font-mono tracking-tight text-[#0b1c30] truncate">
-              {activeRegional.name}
+              {activeRegional?.name || 'Brasil (Nacional)'}
             </div>
             <span className="text-xs text-[#45464d] mt-0.5">
-              Variação local: {activeRegional.monthlyRate >= 0 ? '+' : ''}
-              {activeRegional.monthlyRate.toFixed(2).replace('.', ',')}%
+              Variação local: {formatSignedRate(activeRegional?.monthlyRate)}
             </span>
           </div>
           <div className="pt-2 border-t border-[#eff4ff] text-[11px] font-mono text-[#76777d]">
@@ -285,42 +333,49 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
         </div>
 
         {/* Visual Bar Chart */}
-        <div className="flex flex-col gap-2">
-          <div className="h-48 flex items-end gap-2 pt-6 pb-2 px-2 border-b border-[#eff4ff]">
-            {filteredHistory.map((point) => {
-              const heightPercent = Math.min(100, Math.max(10, Math.abs(point.monthlyRate) * 60));
-              const isPositive = point.monthlyRate >= 0;
-              return (
-                <div key={point.date} className="flex-1 flex flex-col items-center gap-1 group relative">
-                  {/* Tooltip */}
-                  <div className="absolute -top-10 opacity-0 group-hover:opacity-100 transition-opacity bg-[#131b2e] text-[#ffffff] font-mono text-[10px] px-2 py-1 rounded shadow-lg pointer-events-none whitespace-nowrap z-20">
-                    {point.label}: {point.monthlyRate >= 0 ? '+' : ''}
-                    {point.monthlyRate.toFixed(2).replace('.', ',')}%
-                  </div>
+        {filteredHistory.length > 0 ? (
+          <div className="flex flex-col gap-2">
+            <div className="h-48 flex items-end gap-2 pt-6 pb-2 px-2 border-b border-[#eff4ff]">
+              {filteredHistory.map((point) => {
+                const heightPercent = Math.min(
+                  100,
+                  Math.max(10, (Math.abs(point.monthlyRate) / maxAbsRate) * 100)
+                );
+                const isPositive = point.monthlyRate >= 0;
+                return (
+                  <div key={point.date} className="flex-1 flex flex-col items-center gap-1 group relative">
+                    <div className="absolute -top-10 opacity-0 group-hover:opacity-100 transition-opacity bg-[#131b2e] text-[#ffffff] font-mono text-[10px] px-2 py-1 rounded shadow-lg pointer-events-none whitespace-nowrap z-20">
+                      {point.label}: {formatSignedRate(point.monthlyRate)}
+                    </div>
 
-                  <span className="font-mono text-[9px] text-[#45464d] group-hover:text-[#0b1c30]">
-                    {point.monthlyRate.toFixed(2)}%
-                  </span>
-                  <div className="w-full h-32 flex items-end justify-center">
-                    <div
-                      className={`w-full max-w-[28px] rounded-t transition-all ${
-                        isPositive ? 'bg-[#497cff] hover:bg-[#213145]' : 'bg-[#006a61] hover:bg-[#004e47]'
-                      }`}
-                      style={{ height: `${heightPercent}%` }}
-                    />
+                    <span className="font-mono text-[9px] text-[#45464d] group-hover:text-[#0b1c30]">
+                      {point.monthlyRate.toFixed(2)}%
+                    </span>
+                    <div className="w-full h-32 flex items-end justify-center">
+                      <div
+                        className={`w-full max-w-[28px] rounded-t transition-all ${
+                          isPositive ? 'bg-[#497cff] hover:bg-[#213145]' : 'bg-[#006a61] hover:bg-[#004e47]'
+                        }`}
+                        style={{ height: `${heightPercent}%` }}
+                      />
+                    </div>
+                    <span className="font-mono text-[10px] text-[#76777d] truncate w-full text-center">
+                      {point.label.split('/')[0]}
+                    </span>
                   </div>
-                  <span className="font-mono text-[10px] text-[#76777d] truncate w-full text-center">
-                    {point.label.split('/')[0]}
-                  </span>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
+            <div className="flex items-center justify-between text-xs text-[#76777d] font-mono pt-1">
+              <span>Início: {filteredHistory[0]?.label}</span>
+              <span>Mais recente: {filteredHistory[filteredHistory.length - 1]?.label}</span>
+            </div>
           </div>
-          <div className="flex items-center justify-between text-xs text-[#76777d] font-mono pt-1">
-            <span>Início: {filteredHistory[0]?.label}</span>
-            <span>Mais recente: {filteredHistory[filteredHistory.length - 1]?.label}</span>
+        ) : (
+          <div className="p-8 text-center text-xs font-mono text-[#76777d]">
+            Série histórica mensal ainda não disponível para esta localidade.
           </div>
-        </div>
+        )}
       </div>
 
       {/* Breakdown por Grupos Oficiais (Tabela 7060) e Filtro Regional */}
@@ -336,7 +391,7 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
                 Taxas mensais, acumuladas e peso orçamentário médio na POF/IBGE (Tabela 7060).
               </p>
             </div>
-            <span className="text-xs font-mono text-[#76777d]">9 Grupos Oficiais</span>
+            <span className="text-xs font-mono text-[#76777d]">{meta.groups.length} Grupos Oficiais</span>
           </div>
 
           <div className="overflow-x-auto">
@@ -357,18 +412,21 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
                       <span>{grp.name}</span>
                     </td>
                     <td className="py-3 px-3 text-right font-mono text-[#45464d]">
-                      {grp.weightPercent ? `${grp.weightPercent.toFixed(2).replace('.', ',')}%` : '—'}
+                      {typeof grp.weightPercent === 'number' && Number.isFinite(grp.weightPercent)
+                        ? `${grp.weightPercent.toFixed(2).replace('.', ',')}%`
+                        : '—'}
                     </td>
                     <td
                       className={`py-3 px-3 text-right font-mono font-bold ${
                         grp.monthlyRate > 0 ? 'text-[#ba1a1a]' : grp.monthlyRate < 0 ? 'text-[#006a61]' : 'text-[#0b1c30]'
                       }`}
                     >
-                      {grp.monthlyRate >= 0 ? '+' : ''}
-                      {grp.monthlyRate.toFixed(2).replace('.', ',')}%
+                      {formatSignedRate(grp.monthlyRate)}
                     </td>
                     <td className="py-3 px-3 text-right font-mono text-[#45464d]">
-                      {grp.accumulated12MRate ? `+${grp.accumulated12MRate.toFixed(2).replace('.', ',')}%` : '—'}
+                      {typeof grp.accumulated12MRate === 'number' && Number.isFinite(grp.accumulated12MRate)
+                        ? formatSignedRate(grp.accumulated12MRate)
+                        : '—'}
                     </td>
                   </tr>
                 ))}

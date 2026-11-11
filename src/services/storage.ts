@@ -5,6 +5,7 @@
  */
 
 import { BasketItem, ConsumptionGroup, FamilyProfile, IncomeRecord, PriceRecord, SubstitutePlanA, EfficiencyPlanB, OpportunityPlanC } from '../types';
+import { extractIsoDatePrefix, getMonthsAgoIsoDate, getTodayIsoDate } from '../utils/dates';
 
 const STORAGE_KEYS = {
   PROFILES: 'ipca_casa_profiles_v1',
@@ -16,6 +17,10 @@ const STORAGE_KEYS = {
   PLANS_A: 'ipca_casa_plans_a_v1',
   PLANS_B: 'ipca_casa_plans_b_v1',
   PLANS_C: 'ipca_casa_plans_c_v1',
+  DEMO_SEEDED_ITEMS: 'ipca_casa_demo_seeded_items_v1',
+  DEMO_SEEDED_INCOME: 'ipca_casa_demo_seeded_income_v1',
+  DEMO_SEEDED_PLANS_A: 'ipca_casa_demo_seeded_plans_a_v1',
+  DEMO_SEEDED_PLANS_B: 'ipca_casa_demo_seeded_plans_b_v1',
 };
 
 export const DEFAULT_GROUPS: ConsumptionGroup[] = [
@@ -552,6 +557,28 @@ export const safeStorage = {
   },
 };
 
+function safeParseArray<T>(raw: string | null): T[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function safeParseObject(raw: string | null): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 // ==========================================
 // MÉTODOS DE ACESSO E PERSISTÊNCIA
 // ==========================================
@@ -564,14 +591,10 @@ export class StorageService {
     const raw = safeStorage.getItem(STORAGE_KEYS.PROFILES);
     if (!raw) {
       safeStorage.setItem(STORAGE_KEYS.PROFILES, JSON.stringify(INITIAL_PROFILES));
-      return INITIAL_PROFILES;
+      return INITIAL_PROFILES.map((p) => ({ ...p }));
     }
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_PROFILES;
-    } catch {
-      return INITIAL_PROFILES;
-    }
+    const parsed = safeParseArray<FamilyProfile>(raw);
+    return parsed.length > 0 ? parsed : INITIAL_PROFILES.map((p) => ({ ...p }));
   }
 
   static getActiveProfileId(): string {
@@ -612,20 +635,44 @@ export class StorageService {
     if (profiles.length <= 1) {
       return { success: false, message: 'Não é possível excluir o único perfil existente no sistema.' };
     }
+    if (!profiles.some((p) => p.id === profileId)) {
+      return { success: false, message: 'Perfil não encontrado.' };
+    }
+
     const filtered = profiles.filter((p) => p.id !== profileId);
     safeStorage.setItem(STORAGE_KEYS.PROFILES, JSON.stringify(filtered));
 
-    // Se o perfil excluído era o ativo, muda para o primeiro da lista
     if (this.getActiveProfileId() === profileId) {
       this.setActiveProfileId(filtered[0].id);
     }
 
-    // Limpa dados associados a esse perfil
-    const allItems = this.getAllStoredItems().filter((i) => i.profileId !== profileId);
-    safeStorage.setItem(STORAGE_KEYS.BASKET_ITEMS, JSON.stringify(allItems));
+    // Coleta TODOS os itens (inclusive arquivados) do perfil para limpeza em cascata de preços
+    const allItems = this.getAllStoredItems();
+    const deletedItemIds = new Set(
+      allItems.filter((i) => i.profileId === profileId).map((i) => i.id)
+    );
+    const remainingItems = allItems.filter((i) => i.profileId !== profileId);
+    safeStorage.setItem(STORAGE_KEYS.BASKET_ITEMS, JSON.stringify(remainingItems));
+
+    if (deletedItemIds.size > 0) {
+      const remainingPrices = this.getAllPrices().filter((p) => !deletedItemIds.has(p.itemId));
+      safeStorage.setItem(STORAGE_KEYS.PRICE_HISTORY, JSON.stringify(remainingPrices));
+    }
 
     const allIncome = this.getAllStoredIncome().filter((inc) => inc.profileId !== profileId);
     safeStorage.setItem(STORAGE_KEYS.INCOME_HISTORY, JSON.stringify(allIncome));
+
+    const allPlansA = safeParseArray<SubstitutePlanA>(
+      safeStorage.getItem(STORAGE_KEYS.PLANS_A)
+    ).filter((p) => p.profileId !== profileId);
+    safeStorage.setItem(STORAGE_KEYS.PLANS_A, JSON.stringify(allPlansA));
+
+    const allPlansB = safeParseArray<EfficiencyPlanB>(
+      safeStorage.getItem(STORAGE_KEYS.PLANS_B)
+    ).filter((p) => p.profileId !== profileId);
+    safeStorage.setItem(STORAGE_KEYS.PLANS_B, JSON.stringify(allPlansB));
+
+    this.deletePlanC(profileId);
 
     return { success: true, message: 'Perfil e registros associados excluídos com sucesso.' };
   }
@@ -637,14 +684,10 @@ export class StorageService {
     const raw = safeStorage.getItem(STORAGE_KEYS.GROUPS);
     if (!raw) {
       safeStorage.setItem(STORAGE_KEYS.GROUPS, JSON.stringify(DEFAULT_GROUPS));
-      return DEFAULT_GROUPS;
+      return DEFAULT_GROUPS.map((g) => ({ ...g }));
     }
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_GROUPS;
-    } catch {
-      return DEFAULT_GROUPS;
-    }
+    const parsed = safeParseArray<ConsumptionGroup>(raw);
+    return parsed.length > 0 ? parsed : DEFAULT_GROUPS.map((g) => ({ ...g }));
   }
 
   static saveGroup(group: ConsumptionGroup): void {
@@ -666,7 +709,6 @@ export class StorageService {
     const allItems = this.getAllStoredItems();
     const usingItems = allItems.filter((i) => i.group === target.name);
 
-    // Se houver itens na categoria, reatribui para 'Outros / Despesas pessoais'
     if (usingItems.length > 0) {
       const reallocated = allItems.map((item) =>
         item.group === target.name ? { ...item, group: 'Despesas pessoais' } : item
@@ -678,9 +720,10 @@ export class StorageService {
     safeStorage.setItem(STORAGE_KEYS.GROUPS, JSON.stringify(filtered));
     return {
       success: true,
-      message: usingItems.length > 0
-        ? `Categoria excluída. ${usingItems.length} itens foram transferidos para "Despesas pessoais".`
-        : 'Categoria excluída com sucesso.',
+      message:
+        usingItems.length > 0
+          ? `Categoria excluída. ${usingItems.length} itens foram transferidos para "Despesas pessoais".`
+          : 'Categoria excluída com sucesso.',
     };
   }
 
@@ -688,18 +731,25 @@ export class StorageService {
   // ITENS DA CESTA FAMILIAR
   // ==========================================
   static getAllStoredItems(): BasketItem[] {
-    const raw = safeStorage.getItem(STORAGE_KEYS.BASKET_ITEMS);
-    if (!raw) return DEMO_BASKET_ITEMS;
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : DEMO_BASKET_ITEMS;
-    } catch {
-      return DEMO_BASKET_ITEMS;
-    }
+    return safeParseArray<BasketItem>(safeStorage.getItem(STORAGE_KEYS.BASKET_ITEMS));
   }
 
   static getItems(profileId?: string, includeArchived = false): BasketItem[] {
     const targetProfileId = profileId || this.getActiveProfileId();
+    const raw = safeStorage.getItem(STORAGE_KEYS.BASKET_ITEMS);
+
+    if (
+      targetProfileId === DEMO_PROFILE_ID &&
+      !safeStorage.getItem(STORAGE_KEYS.DEMO_SEEDED_ITEMS)
+    ) {
+      const existingNonDemo = safeParseArray<BasketItem>(raw).filter(
+        (i) => i.profileId !== DEMO_PROFILE_ID
+      );
+      const seeded = [...existingNonDemo, ...DEMO_BASKET_ITEMS];
+      safeStorage.setItem(STORAGE_KEYS.BASKET_ITEMS, JSON.stringify(seeded));
+      safeStorage.setItem(STORAGE_KEYS.DEMO_SEEDED_ITEMS, '1');
+    }
+
     const allItems = this.getAllStoredItems();
     return allItems.filter((item) => {
       const matchesProfile = item.profileId === targetProfileId;
@@ -708,9 +758,10 @@ export class StorageService {
     });
   }
 
-  static saveItem(item: Omit<BasketItem, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): BasketItem {
-    const raw = safeStorage.getItem(STORAGE_KEYS.BASKET_ITEMS);
-    let allItems: BasketItem[] = raw ? JSON.parse(raw) : DEMO_BASKET_ITEMS;
+  static saveItem(
+    item: Omit<BasketItem, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }
+  ): BasketItem {
+    const allItems = this.getAllStoredItems();
     const now = new Date().toISOString();
 
     let savedItem: BasketItem;
@@ -736,7 +787,7 @@ export class StorageService {
     } else {
       savedItem = {
         ...item,
-        id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         createdAt: now,
         updatedAt: now,
       };
@@ -745,12 +796,12 @@ export class StorageService {
 
     safeStorage.setItem(STORAGE_KEYS.BASKET_ITEMS, JSON.stringify(allItems));
 
-    // Grava também no histórico de preços para rastreabilidade
-    if (savedItem.currentPrice > 0) {
+    // Grava também no histórico de preços para rastreabilidade com data segura
+    if (Number.isFinite(savedItem.currentPrice) && savedItem.currentPrice > 0) {
       this.recordPrice({
         itemId: savedItem.id,
         price: savedItem.currentPrice,
-        referenceDate: savedItem.currentPriceDate || now.substring(0, 10),
+        referenceDate: extractIsoDatePrefix(savedItem.currentPriceDate) || getTodayIsoDate(),
         unit: savedItem.unit,
         source: savedItem.notes || 'Atualização da Cesta',
       });
@@ -761,13 +812,17 @@ export class StorageService {
 
   static archiveItem(itemId: string): void {
     const allItems = this.getAllStoredItems();
-    const updated = allItems.map((i) => (i.id === itemId ? { ...i, isArchived: true, active: false } : i));
+    const updated = allItems.map((i) =>
+      i.id === itemId ? { ...i, isArchived: true, active: false, updatedAt: new Date().toISOString() } : i
+    );
     safeStorage.setItem(STORAGE_KEYS.BASKET_ITEMS, JSON.stringify(updated));
   }
 
   static restoreItem(itemId: string): void {
     const allItems = this.getAllStoredItems();
-    const updated = allItems.map((i) => (i.id === itemId ? { ...i, isArchived: false, active: true } : i));
+    const updated = allItems.map((i) =>
+      i.id === itemId ? { ...i, isArchived: false, active: true, updatedAt: new Date().toISOString() } : i
+    );
     safeStorage.setItem(STORAGE_KEYS.BASKET_ITEMS, JSON.stringify(updated));
   }
 
@@ -777,14 +832,16 @@ export class StorageService {
       const filtered = allItems.filter((i) => i.id !== itemId);
       safeStorage.setItem(STORAGE_KEYS.BASKET_ITEMS, JSON.stringify(filtered));
 
-      // Limpa histórico associado
-      const rawPrices = safeStorage.getItem(STORAGE_KEYS.PRICE_HISTORY);
-      if (rawPrices) {
-        const prices: PriceRecord[] = JSON.parse(rawPrices);
-        safeStorage.setItem(STORAGE_KEYS.PRICE_HISTORY, JSON.stringify(prices.filter((p) => p.itemId !== itemId)));
+      const prices = safeParseArray<PriceRecord>(
+        safeStorage.getItem(STORAGE_KEYS.PRICE_HISTORY)
+      );
+      if (prices.length > 0) {
+        safeStorage.setItem(
+          STORAGE_KEYS.PRICE_HISTORY,
+          JSON.stringify(prices.filter((p) => p.itemId !== itemId))
+        );
       }
     } else {
-      // Padrão seguro: arquivar mantendo histórico auditável
       this.archiveItem(itemId);
     }
   }
@@ -793,17 +850,11 @@ export class StorageService {
   // HISTÓRICO DE PREÇOS
   // ==========================================
   static getPriceHistory(itemId?: string): PriceRecord[] {
-    const raw = safeStorage.getItem(STORAGE_KEYS.PRICE_HISTORY);
-    let prices: PriceRecord[] = [];
-    if (raw) {
-      try {
-        prices = JSON.parse(raw);
-      } catch {
-        prices = [];
-      }
-    }
+    const prices = safeParseArray<PriceRecord>(safeStorage.getItem(STORAGE_KEYS.PRICE_HISTORY));
     if (itemId) {
-      return prices.filter((p) => p.itemId === itemId).sort((a, b) => a.referenceDate.localeCompare(b.referenceDate));
+      return prices
+        .filter((p) => p.itemId === itemId)
+        .sort((a, b) => a.referenceDate.localeCompare(b.referenceDate));
     }
     return prices;
   }
@@ -813,11 +864,10 @@ export class StorageService {
   }
 
   static recordPrice(priceData: Omit<PriceRecord, 'id' | 'createdAt'>): PriceRecord {
-    const raw = safeStorage.getItem(STORAGE_KEYS.PRICE_HISTORY);
-    const prices: PriceRecord[] = raw ? JSON.parse(raw) : [];
+    const prices = safeParseArray<PriceRecord>(safeStorage.getItem(STORAGE_KEYS.PRICE_HISTORY));
     const newRecord: PriceRecord = {
       ...priceData,
-      id: `price-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      id: `price-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       createdAt: new Date().toISOString(),
     };
     prices.push(newRecord);
@@ -842,24 +892,25 @@ export class StorageService {
   }
 
   static updatePriceRecord(id: string, updated: Partial<PriceRecord>): PriceRecord | null {
-    const raw = safeStorage.getItem(STORAGE_KEYS.PRICE_HISTORY);
-    if (!raw) return null;
-    const prices: PriceRecord[] = JSON.parse(raw);
+    const prices = safeParseArray<PriceRecord>(safeStorage.getItem(STORAGE_KEYS.PRICE_HISTORY));
     const idx = prices.findIndex((p) => p.id === id);
     if (idx < 0) return null;
 
     prices[idx] = { ...prices[idx], ...updated };
     safeStorage.setItem(STORAGE_KEYS.PRICE_HISTORY, JSON.stringify(prices));
 
-    // Se o preço alterado for o mais recente do item, atualiza também a cesta
+    // Se o preço alterado for o mais recente do item, sincroniza a cesta
     const itemId = prices[idx].itemId;
-    const itemPrices = prices.filter((p) => p.itemId === itemId).sort((a, b) => b.referenceDate.localeCompare(a.referenceDate));
+    const itemPrices = prices
+      .filter((p) => p.itemId === itemId)
+      .sort((a, b) => b.referenceDate.localeCompare(a.referenceDate));
     if (itemPrices[0]?.id === id && updated.price !== undefined) {
       const allItems = this.getAllStoredItems();
       const itemIdx = allItems.findIndex((i) => i.id === itemId);
       if (itemIdx >= 0) {
         allItems[itemIdx].currentPrice = updated.price;
         if (updated.referenceDate) allItems[itemIdx].currentPriceDate = updated.referenceDate;
+        allItems[itemIdx].updatedAt = new Date().toISOString();
         safeStorage.setItem(STORAGE_KEYS.BASKET_ITEMS, JSON.stringify(allItems));
       }
     }
@@ -868,9 +919,8 @@ export class StorageService {
   }
 
   static deletePriceRecord(id: string): void {
-    const raw = safeStorage.getItem(STORAGE_KEYS.PRICE_HISTORY);
-    if (!raw) return;
-    const prices: PriceRecord[] = JSON.parse(raw);
+    const prices = safeParseArray<PriceRecord>(safeStorage.getItem(STORAGE_KEYS.PRICE_HISTORY));
+    if (prices.length === 0) return;
     const filtered = prices.filter((p) => p.id !== id);
     safeStorage.setItem(STORAGE_KEYS.PRICE_HISTORY, JSON.stringify(filtered));
   }
@@ -879,28 +929,42 @@ export class StorageService {
   // HISTÓRICO DE RENDA FAMILIAR
   // ==========================================
   static getAllStoredIncome(): IncomeRecord[] {
-    const raw = safeStorage.getItem(STORAGE_KEYS.INCOME_HISTORY);
-    if (!raw) return [];
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
+    return safeParseArray<IncomeRecord>(safeStorage.getItem(STORAGE_KEYS.INCOME_HISTORY));
   }
 
   static getIncomeHistory(profileId?: string): IncomeRecord[] {
     const targetId = profileId || this.getActiveProfileId();
-    const raw = safeStorage.getItem(STORAGE_KEYS.INCOME_HISTORY);
 
-    // Se for o perfil de demonstração e a chave de renda ainda não existir, inicializa com o modelo
-    if (!raw && targetId === DEMO_PROFILE_ID) {
-      const initial: IncomeRecord[] = [
-        { id: 'inc-1', profileId: DEMO_PROFILE_ID, referenceDate: '2023-03-01', nominalIncome: 10000, source: 'Salário CLT', notes: 'Salário base março/2023' },
-        { id: 'inc-2', profileId: DEMO_PROFILE_ID, referenceDate: '2024-03-01', nominalIncome: 10500, source: 'Salário CLT', notes: 'Ajuste de dissídio coletivo (+5%)' },
+    if (
+      targetId === DEMO_PROFILE_ID &&
+      !safeStorage.getItem(STORAGE_KEYS.DEMO_SEEDED_INCOME)
+    ) {
+      const existingNonDemo = this.getAllStoredIncome().filter(
+        (i) => i.profileId !== DEMO_PROFILE_ID
+      );
+      const demoInitial: IncomeRecord[] = [
+        {
+          id: 'inc-1',
+          profileId: DEMO_PROFILE_ID,
+          referenceDate: '2023-03-01',
+          nominalIncome: 10000,
+          source: 'Salário CLT',
+          notes: 'Salário base março/2023',
+        },
+        {
+          id: 'inc-2',
+          profileId: DEMO_PROFILE_ID,
+          referenceDate: '2024-03-01',
+          nominalIncome: 10500,
+          source: 'Salário CLT',
+          notes: 'Ajuste de dissídio coletivo (+5%)',
+        },
       ];
-      safeStorage.setItem(STORAGE_KEYS.INCOME_HISTORY, JSON.stringify(initial));
-      return initial;
+      safeStorage.setItem(
+        STORAGE_KEYS.INCOME_HISTORY,
+        JSON.stringify([...existingNonDemo, ...demoInitial])
+      );
+      safeStorage.setItem(STORAGE_KEYS.DEMO_SEEDED_INCOME, '1');
     }
 
     const allIncome = this.getAllStoredIncome();
@@ -913,7 +977,7 @@ export class StorageService {
     const all = this.getAllStoredIncome();
     const newRecord: IncomeRecord = {
       ...record,
-      id: `inc-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      id: `inc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       createdAt: new Date().toISOString(),
     };
     all.push(newRecord);
@@ -936,16 +1000,44 @@ export class StorageService {
     safeStorage.setItem(STORAGE_KEYS.INCOME_HISTORY, JSON.stringify(filtered));
   }
 
-  static saveIncome(initialOrRecord: number | Omit<IncomeRecord, 'id'>, maybeFinal?: number): IncomeRecord | void {
+  static saveIncome(
+    initialOrRecord: number | Omit<IncomeRecord, 'id'>,
+    maybeFinal?: number,
+    options?: {
+      profileId?: string;
+      initialDate?: string;
+      finalDate?: string;
+    }
+  ): IncomeRecord | void {
     if (typeof initialOrRecord === 'number') {
-      const initial = initialOrRecord;
-      const final = maybeFinal || initial;
-      const profileId = this.getActiveProfileId();
+      const initial = Number.isFinite(initialOrRecord) ? Math.max(0, initialOrRecord) : 0;
+      const final =
+        typeof maybeFinal === 'number' && Number.isFinite(maybeFinal)
+          ? Math.max(0, maybeFinal)
+          : initial;
+      const profileId = options?.profileId || this.getActiveProfileId();
+      const initialDate =
+        extractIsoDatePrefix(options?.initialDate) || getMonthsAgoIsoDate(12);
+      const finalDate =
+        extractIsoDatePrefix(options?.finalDate) || getTodayIsoDate();
       const existing = this.getAllStoredIncome().filter((i) => i.profileId !== profileId);
+      const stamp = Date.now();
       const records: IncomeRecord[] = [
         ...existing,
-        { id: `inc-1-${Date.now()}`, profileId, referenceDate: '2023-03-01', nominalIncome: initial, notes: 'Salário base inicial' },
-        { id: `inc-2-${Date.now()}`, profileId, referenceDate: '2024-03-01', nominalIncome: final, notes: 'Salário após reajustes' },
+        {
+          id: `inc-1-${stamp}`,
+          profileId,
+          referenceDate: initialDate,
+          nominalIncome: initial,
+          notes: 'Salário base inicial',
+        },
+        {
+          id: `inc-2-${stamp + 1}`,
+          profileId,
+          referenceDate: finalDate,
+          nominalIncome: final,
+          notes: 'Salário após reajustes',
+        },
       ];
       safeStorage.setItem(STORAGE_KEYS.INCOME_HISTORY, JSON.stringify(records));
       return;
@@ -959,28 +1051,28 @@ export class StorageService {
   static getPlansA(profileId?: string): SubstitutePlanA[] {
     const targetId = profileId || this.getActiveProfileId();
     const raw = safeStorage.getItem(STORAGE_KEYS.PLANS_A);
-    if (!raw) {
-      if (targetId === DEMO_PROFILE_ID) {
-        safeStorage.setItem(STORAGE_KEYS.PLANS_A, JSON.stringify(DEMO_PLANS_A));
-        return DEMO_PLANS_A;
-      }
-      return [];
+
+    if (
+      targetId === DEMO_PROFILE_ID &&
+      !safeStorage.getItem(STORAGE_KEYS.DEMO_SEEDED_PLANS_A)
+    ) {
+      const existingNonDemo = safeParseArray<SubstitutePlanA>(raw).filter(
+        (p) => p.profileId !== DEMO_PROFILE_ID
+      );
+      safeStorage.setItem(
+        STORAGE_KEYS.PLANS_A,
+        JSON.stringify([...existingNonDemo, ...DEMO_PLANS_A])
+      );
+      safeStorage.setItem(STORAGE_KEYS.DEMO_SEEDED_PLANS_A, '1');
     }
-    try {
-      const parsed: SubstitutePlanA[] = JSON.parse(raw);
-      const scoped = parsed.filter((p) => p.profileId === targetId);
-      if (scoped.length === 0 && targetId === DEMO_PROFILE_ID) {
-        return DEMO_PLANS_A;
-      }
-      return scoped;
-    } catch {
-      return targetId === DEMO_PROFILE_ID ? DEMO_PLANS_A : [];
-    }
+
+    return safeParseArray<SubstitutePlanA>(safeStorage.getItem(STORAGE_KEYS.PLANS_A)).filter(
+      (p) => p.profileId === targetId
+    );
   }
 
   static savePlanA(plan: SubstitutePlanA): void {
-    const raw = safeStorage.getItem(STORAGE_KEYS.PLANS_A);
-    const plans: SubstitutePlanA[] = raw ? JSON.parse(raw) : DEMO_PLANS_A;
+    const plans = safeParseArray<SubstitutePlanA>(safeStorage.getItem(STORAGE_KEYS.PLANS_A));
     const idx = plans.findIndex((p) => p.id === plan.id);
     if (idx >= 0) plans[idx] = plan;
     else plans.push(plan);
@@ -988,9 +1080,8 @@ export class StorageService {
   }
 
   static deletePlanA(planId: string): void {
-    const raw = safeStorage.getItem(STORAGE_KEYS.PLANS_A);
-    if (!raw) return;
-    const plans: SubstitutePlanA[] = JSON.parse(raw);
+    const plans = safeParseArray<SubstitutePlanA>(safeStorage.getItem(STORAGE_KEYS.PLANS_A));
+    if (plans.length === 0) return;
     const filtered = plans.filter((p) => p.id !== planId);
     safeStorage.setItem(STORAGE_KEYS.PLANS_A, JSON.stringify(filtered));
   }
@@ -998,28 +1089,28 @@ export class StorageService {
   static getPlansB(profileId?: string): EfficiencyPlanB[] {
     const targetId = profileId || this.getActiveProfileId();
     const raw = safeStorage.getItem(STORAGE_KEYS.PLANS_B);
-    if (!raw) {
-      if (targetId === DEMO_PROFILE_ID) {
-        safeStorage.setItem(STORAGE_KEYS.PLANS_B, JSON.stringify(DEMO_PLANS_B));
-        return DEMO_PLANS_B;
-      }
-      return [];
+
+    if (
+      targetId === DEMO_PROFILE_ID &&
+      !safeStorage.getItem(STORAGE_KEYS.DEMO_SEEDED_PLANS_B)
+    ) {
+      const existingNonDemo = safeParseArray<EfficiencyPlanB>(raw).filter(
+        (p) => p.profileId !== DEMO_PROFILE_ID
+      );
+      safeStorage.setItem(
+        STORAGE_KEYS.PLANS_B,
+        JSON.stringify([...existingNonDemo, ...DEMO_PLANS_B])
+      );
+      safeStorage.setItem(STORAGE_KEYS.DEMO_SEEDED_PLANS_B, '1');
     }
-    try {
-      const parsed: EfficiencyPlanB[] = JSON.parse(raw);
-      const scoped = parsed.filter((p) => p.profileId === targetId);
-      if (scoped.length === 0 && targetId === DEMO_PROFILE_ID) {
-        return DEMO_PLANS_B;
-      }
-      return scoped;
-    } catch {
-      return targetId === DEMO_PROFILE_ID ? DEMO_PLANS_B : [];
-    }
+
+    return safeParseArray<EfficiencyPlanB>(safeStorage.getItem(STORAGE_KEYS.PLANS_B)).filter(
+      (p) => p.profileId === targetId
+    );
   }
 
   static savePlanB(plan: EfficiencyPlanB): void {
-    const raw = safeStorage.getItem(STORAGE_KEYS.PLANS_B);
-    const plans: EfficiencyPlanB[] = raw ? JSON.parse(raw) : DEMO_PLANS_B;
+    const plans = safeParseArray<EfficiencyPlanB>(safeStorage.getItem(STORAGE_KEYS.PLANS_B));
     const idx = plans.findIndex((p) => p.id === plan.id);
     if (idx >= 0) plans[idx] = plan;
     else plans.push(plan);
@@ -1027,62 +1118,218 @@ export class StorageService {
   }
 
   static deletePlanB(planId: string): void {
-    const raw = safeStorage.getItem(STORAGE_KEYS.PLANS_B);
-    if (!raw) return;
-    const plans: EfficiencyPlanB[] = JSON.parse(raw);
+    const plans = safeParseArray<EfficiencyPlanB>(safeStorage.getItem(STORAGE_KEYS.PLANS_B));
+    if (plans.length === 0) return;
     const filtered = plans.filter((p) => p.id !== planId);
     safeStorage.setItem(STORAGE_KEYS.PLANS_B, JSON.stringify(filtered));
   }
 
-  static getPlanC(profileId?: string): OpportunityPlanC {
-    const targetId = profileId || this.getActiveProfileId();
-    const raw = safeStorage.getItem(STORAGE_KEYS.PLANS_C);
-    if (!raw) {
-      const plan = { ...DEMO_PLAN_C, profileId: targetId };
-      return plan;
+  static getAllPlansC(): Record<string, OpportunityPlanC> {
+    const parsed = safeParseObject(safeStorage.getItem(STORAGE_KEYS.PLANS_C));
+    if (!parsed) return {};
+
+    // Migra formato legado de objeto único associando estritamente ao seu próprio profileId
+    if (
+      'profileId' in parsed &&
+      typeof parsed.profileId === 'string' &&
+      'nominalAnnualRate' in parsed
+    ) {
+      const legacy = parsed as unknown as OpportunityPlanC;
+      return { [legacy.profileId]: legacy };
     }
-    try {
-      const parsed = JSON.parse(raw);
-      return { ...parsed, profileId: targetId };
-    } catch {
-      return { ...DEMO_PLAN_C, profileId: targetId };
+
+    const result: Record<string, OpportunityPlanC> = {};
+    for (const [key, val] of Object.entries(parsed)) {
+      if (val && typeof val === 'object' && 'nominalAnnualRate' in val) {
+        const plan = val as OpportunityPlanC;
+        const pid = typeof plan.profileId === 'string' && plan.profileId ? plan.profileId : key;
+        result[pid] = { ...plan, profileId: pid };
+      }
     }
+    return result;
   }
 
-  static savePlanC(plan: OpportunityPlanC): void {
-    safeStorage.setItem(STORAGE_KEYS.PLANS_C, JSON.stringify(plan));
+  static getPlanC(profileId?: string): OpportunityPlanC | null {
+    const targetId = profileId || this.getActiveProfileId();
+    const all = this.getAllPlansC();
+    if (all[targetId]) {
+      return all[targetId];
+    }
+    if (targetId === DEMO_PROFILE_ID) {
+      return { ...DEMO_PLAN_C, profileId: DEMO_PROFILE_ID, isSimulated: true };
+    }
+    return null;
+  }
+
+  static savePlanC(plan: OpportunityPlanC): OpportunityPlanC {
+    const targetId = plan.profileId || this.getActiveProfileId();
+    const all = this.getAllPlansC();
+    const saved: OpportunityPlanC = {
+      ...plan,
+      profileId: targetId,
+      isSimulated: false,
+      updatedAt: new Date().toISOString(),
+    };
+    all[targetId] = saved;
+    safeStorage.setItem(STORAGE_KEYS.PLANS_C, JSON.stringify(all));
+    return saved;
+  }
+
+  static deletePlanC(profileId: string): void {
+    const all = this.getAllPlansC();
+    if (profileId in all) {
+      delete all[profileId];
+      safeStorage.setItem(STORAGE_KEYS.PLANS_C, JSON.stringify(all));
+    }
   }
 
   // ==========================================
   // RESET, LIMPEZA E CENÁRIOS
   // ==========================================
   static resetToDemoData(): void {
-    safeStorage.setItem(STORAGE_KEYS.PROFILES, JSON.stringify(INITIAL_PROFILES));
+    const existingProfiles = safeParseArray<FamilyProfile>(
+      safeStorage.getItem(STORAGE_KEYS.PROFILES)
+    );
+    const nonDemoProfiles = existingProfiles.filter(
+      (p) => p && p.id !== DEMO_PROFILE_ID && !p.isDemo
+    );
+    const demoProfile = INITIAL_PROFILES.find((p) => p.id === DEMO_PROFILE_ID)!;
+    const defaultRealProfile = INITIAL_PROFILES.find((p) => p.id === USER_DEFAULT_PROFILE_ID)!;
+    const nextProfiles =
+      nonDemoProfiles.length > 0
+        ? [demoProfile, ...nonDemoProfiles]
+        : [demoProfile, defaultRealProfile];
+    safeStorage.setItem(STORAGE_KEYS.PROFILES, JSON.stringify(nextProfiles));
     safeStorage.setItem(STORAGE_KEYS.ACTIVE_PROFILE, DEMO_PROFILE_ID);
-    safeStorage.setItem(STORAGE_KEYS.BASKET_ITEMS, JSON.stringify(DEMO_BASKET_ITEMS));
-    safeStorage.setItem(STORAGE_KEYS.PLANS_A, JSON.stringify(DEMO_PLANS_A));
-    safeStorage.setItem(STORAGE_KEYS.PLANS_B, JSON.stringify(DEMO_PLANS_B));
-    safeStorage.setItem(STORAGE_KEYS.PLANS_C, JSON.stringify(DEMO_PLAN_C));
-    safeStorage.setItem(STORAGE_KEYS.GROUPS, JSON.stringify(DEFAULT_GROUPS));
+
+    // Mantém itens reais intactos e redefini apenas os itens de demonstração
+    const allItems = this.getAllStoredItems();
+    const demoItemIds = new Set(
+      allItems.filter((i) => i.profileId === DEMO_PROFILE_ID).map((i) => i.id)
+    );
+    const nonDemoItems = allItems.filter((i) => i.profileId !== DEMO_PROFILE_ID);
+    safeStorage.setItem(
+      STORAGE_KEYS.BASKET_ITEMS,
+      JSON.stringify([...nonDemoItems, ...DEMO_BASKET_ITEMS])
+    );
+    safeStorage.setItem(STORAGE_KEYS.DEMO_SEEDED_ITEMS, '1');
+
+    if (demoItemIds.size > 0) {
+      const nonDemoPrices = this.getAllPrices().filter((p) => !demoItemIds.has(p.itemId));
+      safeStorage.setItem(STORAGE_KEYS.PRICE_HISTORY, JSON.stringify(nonDemoPrices));
+    }
+
+    const nonDemoIncome = this.getAllStoredIncome().filter(
+      (i) => i.profileId !== DEMO_PROFILE_ID
+    );
+    const demoIncome: IncomeRecord[] = [
+      {
+        id: 'inc-1',
+        profileId: DEMO_PROFILE_ID,
+        referenceDate: '2023-03-01',
+        nominalIncome: 10000,
+        source: 'Salário CLT',
+        notes: 'Salário base março/2023',
+      },
+      {
+        id: 'inc-2',
+        profileId: DEMO_PROFILE_ID,
+        referenceDate: '2024-03-01',
+        nominalIncome: 10500,
+        source: 'Salário CLT',
+        notes: 'Ajuste de dissídio coletivo (+5%)',
+      },
+    ];
+    safeStorage.setItem(
+      STORAGE_KEYS.INCOME_HISTORY,
+      JSON.stringify([...nonDemoIncome, ...demoIncome])
+    );
+    safeStorage.setItem(STORAGE_KEYS.DEMO_SEEDED_INCOME, '1');
+
+    const nonDemoPlansA = safeParseArray<SubstitutePlanA>(
+      safeStorage.getItem(STORAGE_KEYS.PLANS_A)
+    ).filter((p) => p.profileId !== DEMO_PROFILE_ID);
+    safeStorage.setItem(
+      STORAGE_KEYS.PLANS_A,
+      JSON.stringify([...nonDemoPlansA, ...DEMO_PLANS_A])
+    );
+    safeStorage.setItem(STORAGE_KEYS.DEMO_SEEDED_PLANS_A, '1');
+
+    const nonDemoPlansB = safeParseArray<EfficiencyPlanB>(
+      safeStorage.getItem(STORAGE_KEYS.PLANS_B)
+    ).filter((p) => p.profileId !== DEMO_PROFILE_ID);
+    safeStorage.setItem(
+      STORAGE_KEYS.PLANS_B,
+      JSON.stringify([...nonDemoPlansB, ...DEMO_PLANS_B])
+    );
+    safeStorage.setItem(STORAGE_KEYS.DEMO_SEEDED_PLANS_B, '1');
+
+    const allPlansC = this.getAllPlansC();
+    allPlansC[DEMO_PROFILE_ID] = { ...DEMO_PLAN_C, isSimulated: true };
+    safeStorage.setItem(STORAGE_KEYS.PLANS_C, JSON.stringify(allPlansC));
+
+    const existingGroups = safeParseArray<ConsumptionGroup>(
+      safeStorage.getItem(STORAGE_KEYS.GROUPS)
+    );
+    const customGroups = existingGroups.filter(
+      (g) => g.isCustom && !DEFAULT_GROUPS.some((d) => d.id === g.id)
+    );
+    safeStorage.setItem(
+      STORAGE_KEYS.GROUPS,
+      JSON.stringify([...DEFAULT_GROUPS, ...customGroups])
+    );
   }
 
   static clearToEmptyBasket(): void {
     this.setActiveProfileId(EMPTY_PROFILE_ID);
-    const existing = this.getAllStoredItems().filter((i) => i.profileId !== EMPTY_PROFILE_ID);
-    safeStorage.setItem(STORAGE_KEYS.BASKET_ITEMS, JSON.stringify(existing));
+    const allItems = this.getAllStoredItems();
+    const emptyItemIds = new Set(
+      allItems.filter((i) => i.profileId === EMPTY_PROFILE_ID).map((i) => i.id)
+    );
+    safeStorage.setItem(
+      STORAGE_KEYS.BASKET_ITEMS,
+      JSON.stringify(allItems.filter((i) => i.profileId !== EMPTY_PROFILE_ID))
+    );
+    if (emptyItemIds.size > 0) {
+      safeStorage.setItem(
+        STORAGE_KEYS.PRICE_HISTORY,
+        JSON.stringify(this.getAllPrices().filter((p) => !emptyItemIds.has(p.itemId)))
+      );
+    }
+    safeStorage.setItem(
+      STORAGE_KEYS.INCOME_HISTORY,
+      JSON.stringify(this.getAllStoredIncome().filter((i) => i.profileId !== EMPTY_PROFILE_ID))
+    );
+    safeStorage.setItem(
+      STORAGE_KEYS.PLANS_A,
+      JSON.stringify(
+        safeParseArray<SubstitutePlanA>(safeStorage.getItem(STORAGE_KEYS.PLANS_A)).filter(
+          (p) => p.profileId !== EMPTY_PROFILE_ID
+        )
+      )
+    );
+    safeStorage.setItem(
+      STORAGE_KEYS.PLANS_B,
+      JSON.stringify(
+        safeParseArray<EfficiencyPlanB>(safeStorage.getItem(STORAGE_KEYS.PLANS_B)).filter(
+          (p) => p.profileId !== EMPTY_PROFILE_ID
+        )
+      )
+    );
+    this.deletePlanC(EMPTY_PROFILE_ID);
   }
 
   static loadDemoBasket(): void {
     this.resetToDemoData();
   }
 
-  static importItems(imported: BasketItem[]): void {
-    const activeId = this.getActiveProfileId();
+  static importItems(imported: BasketItem[], targetProfileId?: string): void {
+    const activeId = targetProfileId || this.getActiveProfileId();
     const existing = this.getAllStoredItems().filter((i) => i.profileId !== activeId);
     const stamped = imported.map((it) => ({
       ...it,
       profileId: activeId,
-      id: it.id || `item-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      id: it.id || `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     }));
     safeStorage.setItem(STORAGE_KEYS.BASKET_ITEMS, JSON.stringify([...existing, ...stamped]));
   }
@@ -1091,8 +1338,9 @@ export class StorageService {
   // BACKUP GERAL & RESTAURAÇÃO
   // ==========================================
   static exportFullBackup() {
+    const allPlansC = this.getAllPlansC();
     return {
-      version: '2.4.0',
+      version: '2.5.0',
       exportedAt: new Date().toISOString(),
       activeProfileId: this.getActiveProfileId(),
       profiles: this.getProfiles(),
@@ -1100,8 +1348,9 @@ export class StorageService {
       items: this.getAllStoredItems(),
       prices: this.getAllPrices(),
       income: this.getAllStoredIncome(),
-      plansA: this.getPlansA(),
-      plansB: this.getPlansB(),
+      plansA: safeParseArray<SubstitutePlanA>(safeStorage.getItem(STORAGE_KEYS.PLANS_A)),
+      plansB: safeParseArray<EfficiencyPlanB>(safeStorage.getItem(STORAGE_KEYS.PLANS_B)),
+      plansC: allPlansC,
       planC: this.getPlanC(),
     };
   }
@@ -1120,20 +1369,34 @@ export class StorageService {
       if (Array.isArray(data.income)) safeStorage.setItem(STORAGE_KEYS.INCOME_HISTORY, JSON.stringify(data.income));
       if (Array.isArray(data.plansA)) safeStorage.setItem(STORAGE_KEYS.PLANS_A, JSON.stringify(data.plansA));
       if (Array.isArray(data.plansB)) safeStorage.setItem(STORAGE_KEYS.PLANS_B, JSON.stringify(data.plansB));
-      if (data.planC) safeStorage.setItem(STORAGE_KEYS.PLANS_C, JSON.stringify(data.planC));
+      if (data.plansC && typeof data.plansC === 'object') {
+        safeStorage.setItem(STORAGE_KEYS.PLANS_C, JSON.stringify(data.plansC));
+      } else if (data.planC && typeof data.planC === 'object') {
+        const pid = typeof data.planC.profileId === 'string' && data.planC.profileId
+          ? data.planC.profileId
+          : this.getActiveProfileId();
+        safeStorage.setItem(STORAGE_KEYS.PLANS_C, JSON.stringify({ [pid]: data.planC }));
+      }
     } else {
-      // Merge
       if (Array.isArray(data.items)) {
         this.importItems(data.items);
       }
       if (Array.isArray(data.prices)) {
         const currentPrices = this.getAllPrices();
-        const combined = [...currentPrices, ...data.prices.filter((p: any) => !currentPrices.some((cp) => cp.id === p.id))];
+        const combined = [
+          ...currentPrices,
+          ...data.prices.filter((p: any) => !currentPrices.some((cp) => cp.id === p.id)),
+        ];
         safeStorage.setItem(STORAGE_KEYS.PRICE_HISTORY, JSON.stringify(combined));
       }
       if (Array.isArray(data.groups)) {
         const currentGroups = this.getGroups();
-        const combined = [...currentGroups, ...data.groups.filter((g: any) => !currentGroups.some((cg) => cg.id === g.id || cg.name === g.name))];
+        const combined = [
+          ...currentGroups,
+          ...data.groups.filter(
+            (g: any) => !currentGroups.some((cg) => cg.id === g.id || cg.name === g.name)
+          ),
+        ];
         safeStorage.setItem(STORAGE_KEYS.GROUPS, JSON.stringify(combined));
       }
     }

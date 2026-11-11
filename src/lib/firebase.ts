@@ -63,20 +63,20 @@ export function handleFirestoreError(
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
       userId: currentUser?.uid ?? null,
-      email: currentUser?.email ?? null,
+      email: currentUser?.email ? '[REDACTED]' : null,
       emailVerified: currentUser?.emailVerified ?? null,
       isAnonymous: currentUser?.isAnonymous ?? null,
       tenantId: currentUser?.tenantId ?? null,
       providerInfo:
         currentUser?.providerData?.map((provider) => ({
           providerId: provider.providerId,
-          email: provider.email,
+          email: provider.email ? '[REDACTED]' : null,
         })) || [],
     },
     operationType,
     path,
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  console.error('Firestore Error:', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
 

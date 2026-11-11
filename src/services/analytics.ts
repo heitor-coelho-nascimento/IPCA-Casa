@@ -270,11 +270,11 @@ export function trackPageView(
   );
 }
 
-export function trackSignUp(method: 'google' | 'local_email'): boolean {
+export function trackSignUp(method: 'google' | 'email_password' | 'local_email'): boolean {
   return dispatchGaEvent('sign_up', { method });
 }
 
-export function trackLogin(method: 'google' | 'local_email' | 'demo'): boolean {
+export function trackLogin(method: 'google' | 'email_password' | 'local_email' | 'demo'): boolean {
   return dispatchGaEvent('login', { method });
 }
 

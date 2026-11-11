@@ -53,16 +53,16 @@ export const PrivacyPublicPage: React.FC<PrivacyPublicPageProps> = ({ onNavigate
 
       <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <article className="bg-[#ffffff] p-6 rounded-2xl border border-[#eff4ff] shadow-sm flex flex-col gap-3">
-          <h2 className="text-lg font-bold text-[#0b1c30]">1. Isolamento Autenticado (Firebase)</h2>
+          <h2 className="text-lg font-bold text-[#0b1c30]">1. Isolamento Autenticado (Firebase + Firestore)</h2>
           <p className="text-sm text-[#45464d] leading-relaxed">
-            Usuários autenticados com Google têm sua cesta familiar, histórico de preços e registros de renda armazenados exclusivamente no caminho privado da sua conta no Cloud Firestore, protegido por regras rigorosas de autorização por identificador de usuário (UID).
+            Usuários autenticados com Google ou E-mail e Senha com verificação obrigatória têm sua cesta familiar, histórico de preços, rendimentos e estratégias armazenados no caminho privado da sua conta no Cloud Firestore, com isolamento por UID, segregação de metadados em <code className="font-mono">private/account</code> e opção de exclusão completa dos dados (LGPD).
           </p>
         </article>
 
         <article className="bg-[#ffffff] p-6 rounded-2xl border border-[#eff4ff] shadow-sm flex flex-col gap-3">
-          <h2 className="text-lg font-bold text-[#0b1c30]">2. Uso Local e Demonstração</h2>
+          <h2 className="text-lg font-bold text-[#0b1c30]">2. Modo Demonstração e Portabilidade</h2>
           <p className="text-sm text-[#45464d] leading-relaxed">
-            As rotas de demonstração operam com valores estritamente didáticos e ilustrativos. O acesso local com e-mail e senha armazena os registros apenas no navegador atual, com exportação aberta em JSON ou CSV a qualquer momento.
+            A rota <code className="font-mono">/demo</code> opera exclusivamente no navegador com valores didáticos e ilustrativos para exploração sem cadastro. Registros pessoais reais nunca são misturados aos exemplos e podem ser exportados em CSV ou JSON estruturado a qualquer momento.
           </p>
         </article>
 

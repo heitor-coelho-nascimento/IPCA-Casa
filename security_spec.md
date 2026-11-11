@@ -9,8 +9,9 @@
    - Um `BasketItem`, `IncomeRecord` ou `SavingStrategy` não pode ser criado sem um `FamilyProfile` existente em `/users/{userId}/profiles/{profileId}`.
    - Um `PriceRecord` não pode ser criado sem um `BasketItem` existente em `/users/{userId}/basketItems/{itemId}`.
 5. **Imutabilidade & Integridade Temporal:** `id`, `userId`, `createdAt` (e chaves relacionais `profileId`/`itemId`/`planType`) são imutáveis após a criação. Todos os campos `createdAt` e `updatedAt` são validados estritamente contra `request.time`.
-6. **Limites Volumétricos e Regex de IDs:** Todos os IDs de documentos e referências devem obedecer `^[a-zA-Z0-9_-]+$` com no máximo 128 caracteres; todas as strings possuem limite explícito de tamanho (`.size()`).
+6. **Limites Volumétricos e Regex de IDs:** Todos os IDs de documentos e referências devem obedecer `^[a-zA-Z0-9_-]+$` com no máximo 128 caracteres; todas as strings possuem limite explícito de tamanho (`.size()`) e valores numéricos possuem teto finito validado contra overflow/`Infinity`.
 7. **Listagens Seguras (Query Enforcer):** Toda regra `allow list` valida `resource.data.userId == request.auth.uid` sem executar `get()`/`exists()` em consultas de lista. Listagem da coleção raiz `/users` é bloqueada (`allow list: if false`).
+8. **Provedores Oficiais & Validação de E-mail:** Apenas `authProvider` em `['google', 'password']` e formato de e-mail válido são aceitos no documento de conta; nenhum segredo ou credencial de autenticação local é persistido no navegador.
 
 ---
 

@@ -1,0 +1,868 @@
+# MEGA PROMPT — REESTRUTURAÇÃO, CORREÇÃO DE BUGS, PERSISTÊNCIA, CIBERSEGURANÇA E VALIDAÇÃO COMPLETA DO IPCA-CASA
+
+Atue como um **Engenheiro de Software Full Stack Sênior, Arquiteto de Software, Engenheiro de QA e Especialista em Cibersegurança**, com domínio de React, TypeScript, Vite, Node.js, Express, Firebase Authentication, Cloud Firestore, segurança de aplicações web, proteção de dados financeiros e LGPD.
+
+Você será responsável por realizar uma revisão técnica profunda do projeto IPCA-Casa e implementar as correções necessárias diretamente no código-fonte.
+
+O projeto já possui funcionalidades implementadas, porém foram identificados problemas relacionados à autenticação, persistência de dados, sincronização entre telas, isolamento de perfis, estratégias financeiras, segurança e testes.
+
+**Seu trabalho não é simplesmente encontrar os problemas: é corrigir suas causas, implementar as soluções adequadas e comprovar que elas funcionam.**
+
+Não quero uma lista de sugestões sem implementação. Quero que você trabalhe diretamente na estrutura existente, preservando o sistema e melhorando sua confiabilidade.
+
+---
+
+# PARTE 1 — ANÁLISE COMPLETA DA ARQUITETURA
+
+## 1.1. Faça o mapeamento do projeto
+
+Antes de alterar qualquer arquivo, analise a estrutura completa do repositório.
+
+Identifique:
+
+- Frontend e seus componentes.
+- Backend e seus endpoints.
+- Serviços de autenticação.
+- Serviços de armazenamento.
+- Integrações com Firebase.
+- Coleções e documentos do Firestore.
+- Regras de segurança.
+- Modelos e interfaces TypeScript.
+- Gerenciamento de estado.
+- Rotas e navegação.
+- Funcionalidades demonstrativas.
+- Testes existentes.
+- Variáveis de ambiente.
+- Dependências.
+- Processo de publicação.
+
+Analise especialmente os seguintes arquivos, que já foram identificados como relevantes:
+
+| Arquivo | O que deve ser investigado |
+|---|---|
+| `src/App.tsx` | Gerenciamento de estado, autenticação, atualização de renda, perfil ativo e sincronização entre telas |
+| `src/services/auth.ts` | Login, cadastro, recuperação de senha, sessões e armazenamento de credenciais |
+| `src/services/storage.ts` | Persistência local, renda, perfis, históricos, estratégias e exclusões |
+| `src/services/firestore.ts` | Leitura e gravação no Firestore, sincronização e isolamento de usuários |
+| `src/lib/firebase.ts` | Inicialização do Firebase e verificação de conexão |
+| `src/lib/firebaseConfig.ts` | Configuração e exposição de credenciais |
+| `src/types/index.ts` | Estrutura e validação dos dados |
+| `src/components/OnboardingModal.tsx` | Cadastro inicial e salvamento da renda |
+| `src/views/SavingStrategiesView.tsx` | Funcionamento e persistência dos planos financeiros |
+| `src/views/SettingsView.tsx` | Configurações, perfil, exclusão e ações administrativas |
+| `server.ts` | Endpoints, segurança, tratamento de erros e comunicação com serviços externos |
+| `firestore.rules` | Autorização, isolamento e proteção dos documentos |
+| `package.json` | Dependências, scripts e ferramentas de teste |
+| `tests/` | Cobertura e qualidade dos testes |
+
+Os caminhos acima são pontos de partida. Procure também outros arquivos que participem dos mesmos fluxos.
+
+## 1.2. Identifique a causa de cada problema
+
+Não faça correções superficiais.
+
+Por exemplo, se a renda não atualizar na tela, não resolva apenas adicionando um `setState` isolado. Descubra por que o estado derivado não é invalidado e corrija o fluxo de atualização.
+
+Se um usuário consegue visualizar dados antigos, descubra se a origem está no armazenamento local, no cache, na assinatura do Firestore ou na troca de sessão.
+
+Antes de implementar, registre os problemas encontrados e os arquivos envolvidos.
+
+---
+
+# PARTE 2 — AUTENTICAÇÃO E GERENCIAMENTO DE CONTAS
+
+## 2.1. Substituir o mecanismo de autenticação inseguro
+
+**Arquivo principal: `src/services/auth.ts`**
+
+Foi identificado que o projeto utiliza autenticação local com:
+
+- Contas armazenadas no `localStorage`.
+- Hash SHA-256 com salt estático.
+- Fallback de hash próprio.
+- Tokens criados manualmente no frontend.
+- Ausência de validação confiável da sessão pelo servidor.
+
+Esse mecanismo precisa ser substituído por autenticação real.
+
+### Como deve ficar
+
+Utilize Firebase Authentication como mecanismo oficial de identidade.
+
+Implemente:
+
+1. Cadastro por e-mail e senha.
+2. Login por e-mail e senha.
+3. Login com Google, preservando a funcionalidade existente.
+4. Logout.
+5. Persistência oficial da sessão.
+6. Verificação de autenticação.
+7. Verificação de e-mail, quando aplicável.
+8. Recuperação de senha.
+9. Tratamento de contas duplicadas.
+10. Tratamento de credenciais inválidas.
+11. Tratamento de sessões expiradas.
+12. Tratamento de erros de conexão.
+
+Não crie tokens próprios.
+
+Não armazene senhas ou hashes de senha manualmente no `localStorage`.
+
+Não permita que um usuário seja considerado autenticado apenas porque existe um objeto de sessão no navegador.
+
+### Compatibilidade com os dados existentes
+
+Antes de remover o login local, investigue se existem usuários e dados que precisam ser preservados.
+
+Se houver dados locais, crie um processo seguro de migração, com consentimento do usuário e validação da identidade da conta de destino.
+
+Não associe dados locais a uma conta Google automaticamente apenas porque o e-mail parece coincidir.
+
+Não apague os dados antigos antes de confirmar a migração.
+
+## 2.2. Corrigir recuperação de senha
+
+**Arquivos principais: `src/services/auth.ts` e o componente de autenticação utilizado por `AuthModal.tsx`.**
+
+Foi identificado que `recoverPassword(email)` informa que as instruções foram enviadas sem executar o envio real.
+
+Substitua esse comportamento pela funcionalidade oficial de redefinição de senha do Firebase Authentication.
+
+A função deve:
+
+- Validar o formato do e-mail.
+- Solicitar a recuperação real.
+- Tratar erros do Firebase.
+- Não revelar desnecessariamente se o e-mail está cadastrado.
+- Exibir uma confirmação adequada somente depois da solicitação ser aceita.
+- Não armazenar tokens de recuperação no navegador.
+
+Revise também a configuração de domínio autorizado e os modelos de e-mail necessários no Firebase Console.
+
+Se a configuração externa estiver ausente, informe o responsável em vez de simular sucesso.
+
+---
+
+# PARTE 3 — PERSISTÊNCIA E SINCRONIZAÇÃO DOS DADOS
+
+## 3.1. Corrigir atualização da renda
+
+**Arquivos principais: `src/App.tsx`, `src/services/storage.ts` e `src/services/firestore.ts`.**
+
+Foi identificado que `handleUpdateIncome` atualiza a renda local, mas o estado derivado `activeIncomeHistory` não considera adequadamente todas as alterações nas suas dependências.
+
+Isso pode deixar os indicadores e cálculos desatualizados.
+
+### O que modificar
+
+Em `src/App.tsx`:
+
+1. Revise `handleUpdateIncome`.
+2. Revise `activeIncomeHistory`.
+3. Revise o `useMemo` responsável pelos indicadores financeiros.
+4. Revise todas as dependências dos hooks.
+5. Garanta que as atualizações invalidem os dados derivados.
+6. Evite duplicação de registros.
+7. Garanta que o perfil ativo seja utilizado nas consultas.
+
+### Como deve funcionar
+
+Quando o usuário alterar a renda:
+
+- A informação deve ser salva.
+- A interface deve refletir o novo valor imediatamente após a confirmação.
+- Os indicadores devem ser recalculados.
+- Os gráficos devem ser atualizados.
+- Os cálculos dependentes da renda devem ser atualizados.
+- O histórico deve refletir a alteração.
+- Ao recarregar a página, o valor deve continuar correto.
+- Ao entrar novamente na conta, o valor deve permanecer sincronizado.
+
+A atualização precisa funcionar tanto no armazenamento local quanto no Firestore, conforme o modo de persistência adotado.
+
+Não apresente sucesso antes da confirmação da gravação.
+
+## 3.2. Corrigir as datas fixas da renda
+
+**Arquivos: `src/services/storage.ts` e `src/services/firestore.ts`.**
+
+Foram encontrados registros de renda com datas fixas:
+
+- `2023-03-01`
+- `2024-03-01`
+
+Essas datas não devem ser utilizadas como referência universal para novos usuários.
+
+### O que modificar
+
+Revise:
+
+- `StorageService.saveIncome`.
+- `FirestoreService.saveIncomeRange`.
+- A estrutura de `incomeHistory`.
+- Os campos de data utilizados nas telas e nos indicadores.
+
+### Como deve funcionar
+
+As datas precisam representar o período real ao qual a renda pertence.
+
+Utilize datas fornecidas pelo usuário ou uma referência temporal definida de forma consistente pelo produto.
+
+Se a intenção for cadastrar renda inicial e renda atual, represente os dois registros com seus respectivos períodos reais, sem inventar datas.
+
+Corrija também:
+
+```ts
+const final = maybeFinal || initial;
+```
+
+Essa lógica não pode substituir um valor legítimo igual a zero.
+
+Utilize uma verificação explícita de `null` e `undefined`, conforme o contrato da função.
+
+## 3.3. Padronizar armazenamento local e Firestore
+
+**Arquivos principais: `src/services/storage.ts`, `src/services/firestore.ts` e `src/App.tsx`.**
+
+Estabeleça um contrato consistente para leitura, gravação, atualização e exclusão.
+
+Não permita que o mesmo dado tenha comportamentos diferentes dependendo do tipo de conta.
+
+### Requisitos
+
+- Identificar corretamente a conta autenticada.
+- Isolar os dados por usuário.
+- Isolar os dados por perfil.
+- Evitar mistura entre dados locais e dados da nuvem.
+- Evitar exibir dados da conta anterior após logout.
+- Tratar falhas de sincronização.
+- Evitar duplicações.
+- Tratar ausência de documentos.
+- Evitar sobrescrever dados existentes com valores demonstrativos.
+- Manter consistência após recarregamento.
+
+Quando houver uma operação na nuvem, a aplicação deve tratar adequadamente estados de carregamento, sucesso e erro.
+
+Não considere o `localStorage` uma fonte de autorização ou uma base confiável para dados autenticados.
+
+---
+
+# PARTE 4 — PERFIS, HISTÓRICOS E ISOLAMENTO
+
+## 4.1. Corrigir exclusão de perfis
+
+**Arquivo principal: `src/services/storage.ts`.**
+
+Foi identificado que `deleteProfile` remove o perfil e alguns registros, mas não realiza a limpeza completa dos dados associados.
+
+### O que precisa ser modificado
+
+Revise a função `deleteProfile` e todos os serviços relacionados.
+
+Verifique e trate:
+
+- Perfil.
+- Itens da cesta.
+- Histórico de preços.
+- Histórico de renda.
+- Plano A.
+- Plano B.
+- Plano C.
+- Outros registros relacionados ao perfil.
+
+Não deixe referências órfãs.
+
+No Firestore, lembre-se de que excluir um documento pai não remove automaticamente os documentos das subcoleções.
+
+Implemente uma exclusão segura, considerando limites de lotes e operações em múltiplas etapas.
+
+### Critério de aceitação
+
+Depois de excluir um perfil:
+
+- Ele não deve aparecer na lista.
+- Seus dados não devem aparecer em consultas posteriores.
+- Seus históricos não devem ser associados a outro perfil.
+- Os demais perfis devem continuar funcionando.
+- Nenhum dado de outro usuário pode ser excluído.
+
+## 4.2. Corrigir o armazenamento global do Plano C
+
+**Arquivo principal: `src/services/storage.ts`.**
+
+Foi identificado que `STORAGE_KEYS.PLANS_C` armazena um único objeto global.
+
+Isso faz com que diferentes perfis possam compartilhar os mesmos valores.
+
+### O que modificar
+
+Substitua a chave global por uma estrutura que permita armazenar um Plano C independente para cada perfil.
+
+Exemplo conceitual:
+
+```ts
+{
+  "profileId1": {
+    // dados do plano
+  },
+  "profileId2": {
+    // dados do plano
+  }
+}
+```
+
+O formato definitivo deve respeitar os modelos TypeScript existentes.
+
+Revise:
+
+- `getPlanC(profileId)`.
+- `savePlanC`.
+- `resetToDemoData`.
+- O carregamento do perfil ativo.
+- A sincronização com o Firestore.
+
+Não sobrescreva a propriedade de um plano simplesmente substituindo seu `profileId` no momento da leitura.
+
+## 4.3. Implementar persistência completa do Plano C
+
+**Arquivos principais: `src/services/firestore.ts`, `src/App.tsx` e `src/views/SavingStrategiesView.tsx`.**
+
+Foi identificado que há leitura de Plano C no Firestore, mas não foi identificado um fluxo completo de gravação equivalente aos outros planos.
+
+### O que implementar
+
+- Método de gravação no Firestore.
+- Método de atualização.
+- Método de consulta.
+- Identificação do usuário.
+- Identificação do perfil.
+- Validação dos dados.
+- Atualização da interface.
+- Tratamento de erros.
+- Persistência após recarregamento.
+
+Revise o componente `SavingStrategiesView.tsx` para que os dados não sejam apenas inicializados a partir de valores estáticos.
+
+Se o Plano C for uma simulação demonstrativa, identifique isso na interface e não apresente os resultados como projeções personalizadas reais.
+
+## 4.4. Corrigir reset de dados demonstrativos
+
+**Arquivo: `src/services/storage.ts`.**
+
+A função `resetToDemoData()` precisa ser revisada.
+
+Foi identificado que ela não limpa adequadamente os históricos de renda e preços.
+
+Implemente um reset completo e seguro.
+
+O reset deve:
+
+- Limpar os dados demonstrativos antigos.
+- Recriar os dados demonstrativos esperados.
+- Limpar históricos demonstrativos anteriores.
+- Não apagar dados reais.
+- Não afetar outros usuários.
+- Não afetar perfis que não fazem parte da demonstração.
+
+Antes de executar, valide se o usuário realmente está no ambiente ou modo demonstrativo.
+
+Inclua confirmação para ações destrutivas.
+
+---
+
+# PARTE 5 — CIBERSEGURANÇA
+
+Esta parte é obrigatória. Não trate segurança como uma melhoria opcional.
+
+## 5.1. Revisar regras do Firestore
+
+**Arquivo: `firestore.rules`.**
+
+Analise todas as regras existentes.
+
+O projeto já apresenta uma estrutura de negação padrão e verificações de propriedade, mas é necessário confirmar que todas as coleções estão protegidas corretamente.
+
+Verifique:
+
+- Usuários não autenticados.
+- Usuários autenticados.
+- Propriedade dos documentos.
+- Relação entre usuário e perfil.
+- Leitura de documentos.
+- Criação de documentos.
+- Atualização de documentos.
+- Exclusão de documentos.
+- Validação de campos.
+- Tipos dos campos.
+- Campos obrigatórios.
+- Alteração indevida de identificadores.
+- Subcoleções.
+- Consultas em lote.
+
+Um usuário nunca pode acessar dados financeiros de outro usuário.
+
+A identidade deve vir do Firebase Authentication, e não de um `userId` arbitrário enviado pelo navegador.
+
+Crie testes de regras utilizando Firebase Emulator Suite, quando disponível.
+
+Não flexibilize regras apenas para eliminar erros de permissão.
+
+## 5.2. Proteger informações financeiras
+
+Revise todos os locais em que dados financeiros são utilizados.
+
+Não permita que:
+
+- Renda apareça em URLs.
+- Dados financeiros sejam enviados desnecessariamente ao Analytics.
+- Informações sensíveis sejam gravadas em logs.
+- Erros revelem dados pessoais.
+- Dados de uma conta apareçam para outra.
+- Dados privados sejam incluídos em relatórios públicos.
+- Informações financeiras sejam disponibilizadas sem autorização.
+
+Avalie a necessidade de retenção e exclusão dos dados, com atenção à LGPD.
+
+## 5.3. Proteger o backend Express
+
+**Arquivo principal: `server.ts`.**
+
+Faça uma auditoria completa de todos os endpoints.
+
+Implemente as proteções adequadas à arquitetura:
+
+- Helmet ou solução equivalente para cabeçalhos HTTP.
+- Content Security Policy.
+- HSTS em produção sob HTTPS.
+- `X-Content-Type-Options`.
+- `Referrer-Policy`.
+- Proteção contra enquadramento indevido.
+- `Permissions-Policy`.
+- Limite de tamanho das requisições.
+- Rate limiting.
+- Validação de parâmetros.
+- Tratamento centralizado de exceções.
+- CORS restrito às origens autorizadas.
+- Proteção contra abuso de recursos.
+- Não exposição de stack traces em produção.
+
+A CSP deve ser construída de acordo com os recursos realmente utilizados pelo sistema. Não crie uma política que bloqueie indevidamente Firebase, scripts necessários ou recursos legítimos.
+
+## 5.4. Corrigir o endpoint `/api/health`
+
+**Arquivo: `server.ts`.**
+
+Foi identificado que o endpoint retorna `database: firebase-firestore` sem realizar uma verificação efetiva.
+
+Corrija para que ele informe estados reais.
+
+Diferencie:
+
+- Servidor disponível.
+- Firebase configurado.
+- Firestore acessível.
+- Firestore indisponível.
+- Falha de permissão.
+- Configuração ausente.
+
+Não informe conexão confirmada quando ela não tiver sido verificada.
+
+Não exponha credenciais ou informações internas.
+
+## 5.5. Proteger o endpoint `/api/ibge`
+
+**Arquivo: `server.ts`.**
+
+Investigue o endpoint e o parâmetro `force`.
+
+Implemente:
+
+- Validação dos parâmetros.
+- Rate limiting.
+- Cache adequado.
+- Limite de chamadas externas.
+- Tratamento de falhas.
+- Prevenção contra chamadas repetidas.
+- Proteção contra abuso do parâmetro `force`.
+
+Não permita que qualquer usuário consiga gerar chamadas externas ilimitadas.
+
+## 5.6. Corrigir XSS e injeções
+
+Faça uma busca global no projeto por:
+
+- `dangerouslySetInnerHTML`.
+- `innerHTML`.
+- `eval`.
+- `new Function`.
+- Inserção de HTML externo.
+- URLs não validadas.
+- Conteúdo fornecido pelo usuário renderizado sem proteção.
+
+Corrija os pontos vulneráveis.
+
+Priorize renderização segura do React e validação dos dados recebidos.
+
+Não considere dados vindos do Firestore ou localStorage automaticamente confiáveis.
+
+## 5.7. Proteger variáveis de ambiente
+
+Revise `src/lib/firebaseConfig.ts`, `server.ts`, arquivos de configuração e todo o repositório.
+
+Procure:
+
+- Senhas.
+- Tokens.
+- Chaves privadas.
+- Segredos de API.
+- Credenciais.
+- Arquivos `.env` versionados.
+- Informações sensíveis inseridas diretamente no código.
+
+Atenção especial à `GEMINI_API_KEY`.
+
+Nenhuma chave privada deve ser enviada ao bundle do frontend.
+
+Variáveis `VITE_*` são públicas no contexto do navegador e não devem guardar segredos.
+
+Quando uma API exigir segredo, implemente a chamada pelo backend, com autenticação, validação e limites apropriados.
+
+A API key pública de configuração do Firebase não deve ser tratada automaticamente como segredo privado; a proteção depende também das regras, restrições e configuração do projeto.
+
+Se houver segredo real exposto, informe a necessidade de rotação.
+
+Não coloque credenciais reais no relatório final.
+
+## 5.8. Auditar dependências
+
+**Arquivos: `package.json` e lockfile.**
+
+Execute auditoria de dependências.
+
+Verifique:
+
+- Vulnerabilidades conhecidas.
+- Pacotes desatualizados.
+- Pacotes abandonados.
+- Dependências desnecessárias.
+- Scripts suspeitos.
+- Incompatibilidades.
+- Dependências transitivas vulneráveis.
+
+Utilize `npm audit` quando possível.
+
+Não atualize todos os pacotes indiscriminadamente. Faça alterações controladas e valide a compatibilidade.
+
+---
+
+# PARTE 6 — CORREÇÃO DE DADOS E CÁLCULOS FINANCEIROS
+
+Revise os cálculos relacionados a:
+
+- Renda.
+- Despesas.
+- Orçamento.
+- Histórico de preços.
+- Variações de preços.
+- Indicadores financeiros.
+- Planos de economia.
+- Projeções.
+- Comparações.
+
+Verifique:
+
+1. Divisão por zero.
+2. Valores negativos indevidos.
+3. `NaN`.
+4. `Infinity`.
+5. Arredondamento.
+6. Precisão monetária.
+7. Datas inválidas.
+8. Fuso horário.
+9. Valores duplicados.
+10. Dados de perfis diferentes.
+11. Dados demonstrativos misturados aos dados reais.
+12. Valores ausentes.
+
+Utilize uma representação consistente para valores monetários e evite erros de ponto flutuante nos cálculos financeiros.
+
+Valide os dados no backend ou nas regras de segurança, e não somente no frontend.
+
+---
+
+# PARTE 7 — SINCRONIZAÇÃO GLOBAL DA INTERFACE
+
+Analise todos os componentes e páginas.
+
+O objetivo é garantir que alterações em um dado sejam refletidas em todas as partes da aplicação que dependem dele.
+
+Exemplos obrigatórios:
+
+- Alterar renda atualiza todos os indicadores.
+- Alterar despesas atualiza os cálculos relacionados.
+- Alterar preços atualiza históricos e comparações.
+- Trocar perfil carrega os dados corretos.
+- Excluir perfil remove seus dados associados.
+- Alterar um plano atualiza suas projeções.
+- Fazer logout remove dados privados da tela.
+- Entrar com outra conta não mantém dados da conta anterior.
+
+Revise o gerenciamento de estado, `useEffect`, `useMemo`, assinaturas do Firestore e mecanismos de cache.
+
+Evite duplicar consultas e criar atualizações concorrentes que possam sobrescrever dados mais recentes.
+
+Implemente estados claros de:
+
+- Carregamento.
+- Sucesso.
+- Erro.
+- Sem dados.
+- Sem conexão.
+- Sincronização pendente.
+
+Não apresente informações antigas como se fossem atuais.
+
+---
+
+# PARTE 8 — TESTES AUTOMATIZADOS
+
+Amplie a estrutura de testes existente.
+
+Não basta executar o build.
+
+## 8.1. Testes unitários
+
+Crie testes para:
+
+- Serviços de autenticação.
+- Recuperação de senha.
+- Armazenamento local.
+- Gravação de renda.
+- Atualização de renda.
+- Histórico de preços.
+- Exclusão de perfis.
+- Plano A.
+- Plano B.
+- Plano C.
+- Reset de dados demonstrativos.
+- Cálculos financeiros.
+- Validações.
+
+## 8.2. Testes de integração
+
+Teste a comunicação entre:
+
+- Frontend e serviços.
+- Serviços e Firestore.
+- Autenticação e autorização.
+- Perfil ativo e consultas.
+- Persistência e atualização de estado.
+
+## 8.3. Testes de segurança
+
+Crie testes comprovando que:
+
+- Usuário A não consegue ler dados de B.
+- Usuário A não consegue editar dados de B.
+- Usuário A não consegue excluir dados de B.
+- Usuário não autenticado não acessa informações privadas.
+- Um `profileId` adulterado é rejeitado.
+- Um `userId` adulterado é rejeitado.
+- Campos proibidos são rejeitados.
+- Sessões inválidas não permitem acesso.
+- Dados financeiros não são expostos em logs.
+
+## 8.4. Testes end-to-end
+
+Se possível, utilize Playwright.
+
+Teste os fluxos:
+
+1. Cadastro.
+2. Login.
+3. Criação de perfil.
+4. Cadastro de renda.
+5. Cadastro de despesas.
+6. Alteração de renda.
+7. Atualização de indicadores.
+8. Consulta de histórico.
+9. Uso dos planos.
+10. Logout.
+11. Login novamente.
+12. Verificação de persistência.
+13. Troca de perfil.
+14. Exclusão de perfil.
+
+Não utilize apenas mocks para afirmar que a persistência real está funcionando.
+
+Separe os testes unitários, integração e end-to-end.
+
+---
+
+# PARTE 9 — EXECUÇÃO E VALIDAÇÃO
+
+Depois de implementar as correções:
+
+1. Instale as dependências.
+2. Execute a verificação TypeScript.
+3. Execute o build de produção.
+4. Execute os testes unitários.
+5. Execute os testes de integração.
+6. Execute os testes das regras do Firestore.
+7. Inicie o servidor local.
+8. Acesse a aplicação.
+9. Teste os fluxos principais.
+10. Verifique o console do navegador.
+11. Verifique os logs do servidor.
+12. Verifique as requisições de rede.
+13. Confirme a persistência após recarregamento.
+14. Confirme o isolamento entre contas.
+15. Confirme o isolamento entre perfis.
+16. Verifique erros de permissão.
+17. Verifique erros de sincronização.
+
+Se o ambiente não permitir executar alguma etapa, informe o motivo.
+
+Não declare que o sistema foi testado se apenas realizou análise estática.
+
+Não declare que uma vulnerabilidade foi resolvida sem verificar a correção.
+
+---
+
+# PARTE 10 — CONFIGURAÇÕES EXTERNAS NECESSÁRIAS
+
+Identifique tudo que depende de configuração fora do código.
+
+Verifique:
+
+- Firebase Authentication habilitado.
+- Provedores de login configurados.
+- Domínios autorizados.
+- Configuração de recuperação de senha.
+- Firestore habilitado.
+- Regras publicadas.
+- Índices necessários.
+- Variáveis de ambiente.
+- Segredos do backend.
+- Configuração de hospedagem.
+- HTTPS.
+- Domínio personalizado.
+- Configuração de APIs externas.
+- Restrições e permissões necessárias.
+
+Não invente valores de configuração.
+
+Produza um guia objetivo mostrando onde o responsável pelo projeto deve entrar, qual configuração precisa habilitar e qual valor deve preencher, sem expor segredos.
+
+---
+
+# PARTE 11 — RELATÓRIO FINAL E EVIDÊNCIAS
+
+Ao concluir, produza um relatório técnico completo.
+
+## 11.1. Problemas encontrados
+
+Para cada problema:
+
+- Nome.
+- Descrição.
+- Arquivo.
+- Linha ou função.
+- Causa.
+- Impacto.
+- Gravidade.
+- Solução implementada.
+
+## 11.2. Arquivos alterados
+
+Liste todos os arquivos modificados e explique o que foi alterado em cada um.
+
+## 11.3. Cibersegurança
+
+Informe:
+
+- Vulnerabilidades identificadas.
+- Vulnerabilidades corrigidas.
+- Proteções adicionadas.
+- Riscos que permanecem.
+- Configurações externas pendentes.
+
+## 11.4. Testes
+
+Apresente uma tabela:
+
+| Teste | Resultado | Evidência |
+|---|---|---|
+| TypeScript | APROVADO / REPROVADO / NÃO EXECUTADO | Resultado |
+| Build | APROVADO / REPROVADO / NÃO EXECUTADO | Resultado |
+| Testes unitários | APROVADO / REPROVADO / NÃO EXECUTADO | Resultado |
+| Firestore Rules | APROVADO / REPROVADO / BLOQUEADO | Resultado |
+| Login | APROVADO / REPROVADO / NÃO EXECUTADO | Resultado |
+| Persistência | APROVADO / REPROVADO / NÃO EXECUTADO | Resultado |
+| Isolamento de usuários | APROVADO / REPROVADO / NÃO EXECUTADO | Resultado |
+| Testes end-to-end | APROVADO / REPROVADO / NÃO EXECUTADO | Resultado |
+
+Não invente evidências.
+
+## 11.5. Pendências
+
+Separe as pendências em:
+
+- Correções ainda necessárias no código.
+- Configurações do Firebase.
+- Configurações da hospedagem.
+- Credenciais e serviços externos.
+- Testes bloqueados.
+- Decisões que dependem do responsável.
+
+## 11.6. Classificação final
+
+Informe uma das classificações:
+
+- NÃO APTO PARA TESTES.
+- APTO PARA TESTES INTERNOS.
+- APTO PARA HOMOLOGAÇÃO.
+- APTO PARA PRODUÇÃO.
+
+Não classifique o sistema como apto para produção enquanto houver vulnerabilidades críticas ou altas sem tratamento, falhas relevantes de isolamento ou problemas de integridade dos dados.
+
+---
+
+# REGRAS FINAIS DE EXECUÇÃO
+
+1. Trabalhe diretamente no projeto existente.
+2. Preserve o design, a identidade visual e as funcionalidades.
+3. Não apague funcionalidades para eliminar erros.
+4. Não substitua integrações reais por simulações.
+5. Não utilize dados fictícios como se fossem dados reais.
+6. Não enfraqueça as regras do Firestore.
+7. Não exponha credenciais.
+8. Não armazene senhas ou tokens manualmente no frontend.
+9. Não considere `localStorage` um mecanismo seguro de autenticação.
+10. Não considere a compilação como prova de funcionamento.
+11. Não considere a presença de um botão como prova de que sua funcionalidade existe.
+12. Não deixe erros conhecidos sem documentar.
+13. Não faça alterações destrutivas sem proteção e validação.
+14. Não esconda falhas de configuração.
+15. Faça alterações organizadas e testáveis.
+16. Mantenha compatibilidade entre os módulos.
+17. Documente decisões arquiteturais importantes.
+
+**ORDEM DE PRIORIDADE:**
+
+1. Autenticação e vulnerabilidades críticas.
+2. Isolamento e proteção dos dados dos usuários.
+3. Persistência e sincronização.
+4. Correção da renda e dos indicadores.
+5. Correção dos perfis e históricos.
+6. Implementação completa do Plano C.
+7. Correção dos resets e exclusões.
+8. Proteção do backend e das APIs.
+9. Testes automatizados.
+10. Melhorias de qualidade e experiência.
+
+**RESULTADO FINAL ESPERADO:**
+
+Uma versão do IPCA-Casa tecnicamente confiável, com autenticação real, dados financeiros protegidos, isolamento correto entre usuários e perfis, persistência consistente, cálculos confiáveis, funcionalidades completas, backend protegido e testes que comprovem o funcionamento do sistema.
+
+Não encerre o trabalho após apresentar o diagnóstico. Implemente as correções possíveis, valide cada uma e entregue o relatório final com evidências.

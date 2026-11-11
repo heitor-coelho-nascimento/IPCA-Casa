@@ -48,7 +48,7 @@ export const LANDING_FAQS: RouteFaqItem[] = [
   {
     question: 'Preciso cadastrar CPF, conta bancária ou senhas financeiras?',
     answer:
-      'Não. O IPCA-Casa nunca solicita CPF, dados bancários ou integração com open finance. Você pode testar livremente o modo demonstração, ou criar uma conta Google para armazenar apenas os itens e rendimentos que escolher acompanhar de forma isolada.',
+      'Não. O IPCA-Casa nunca solicita CPF, dados bancários ou integração com open finance. Você pode testar livremente o modo demonstração isolado, ou criar uma conta gratuita com e-mail e senha verificados ou login Google para armazenar apenas os itens e rendimentos que escolher acompanhar na nuvem.',
   },
   {
     question: 'Como interpretar o impacto da inflação sobre o salário e poder de compra?',
@@ -418,7 +418,7 @@ export function getRouteSeoMetadata(rawPath: string): RouteSeoMetadata {
     return {
       path,
       title: 'Recuperar Acesso | IPCA-Casa',
-      description: 'Recuperação de acesso local à plataforma IPCA-Casa.',
+      description: 'Recuperação oficial de senha via Firebase Authentication na plataforma IPCA-Casa.',
       isPublic: false,
       robots: 'noindex, nofollow',
       includeSearchConsoleTag: false,

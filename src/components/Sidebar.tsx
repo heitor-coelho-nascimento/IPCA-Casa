@@ -23,7 +23,7 @@ interface SidebarProps {
   onLogout?: () => void;
   userName?: string;
   userAvatar?: string;
-  authProvider?: 'local' | 'google';
+  authProvider?: 'local' | 'google' | 'password';
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -164,7 +164,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="min-w-0 flex-1">
               <div className="text-xs font-semibold text-[#0b1c30] truncate">{userName}</div>
               <div className="text-[10px] font-mono text-[#76777d] truncate">
-                {authProvider === 'google' ? 'Conta Google' : isDemo ? 'Sessão Demo' : 'Conta Local'}
+                {isDemo
+                  ? 'Sessão Demo'
+                  : authProvider === 'google'
+                  ? 'Conta Google'
+                  : 'Conta Verificada'}
               </div>
             </div>
           </div>

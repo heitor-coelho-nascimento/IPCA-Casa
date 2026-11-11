@@ -7,11 +7,42 @@ import {
   calculateObservedBasketDifference,
 } from '../services/economics';
 import { trackCalculateImpact } from '../services/analytics';
+import {
+  formatDateRangeLabel,
+  getMonthsAgoIsoDate,
+  getTodayIsoDate,
+  isValidIsoDate,
+} from '../utils/dates';
 
 interface PocketImpactViewProps {
   summary: EconomicCalculationSummary;
-  onUpdateIncome?: (initial: number, current: number) => void;
+  onUpdateIncome?: (
+    initial: number,
+    current: number,
+    dates?: { initialDate?: string; finalDate?: string }
+  ) => void | Promise<void>;
   isDemo?: boolean;
+}
+
+function formatMoneyBR(value: number): string {
+  const safe = Number.isFinite(value) ? value : 0;
+  return safe.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatSignedPercent(value: number, digits = 2): string {
+  const safe = Number.isFinite(value) ? value : 0;
+  return `${safe > 0 ? '+' : safe < 0 ? '-' : ''}${Math.abs(safe).toFixed(digits).replace('.', ',')}%`;
+}
+
+function formatSignedPP(value: number, digits = 2): string {
+  const safe = Number.isFinite(value) ? value : 0;
+  return `${safe > 0 ? '+' : safe < 0 ? '-' : ''}${Math.abs(safe).toFixed(digits).replace('.', ',')} p.p.`;
+}
+
+function formatSignedCurrencyBR(value: number): string {
+  const safe = Number.isFinite(value) ? value : 0;
+  const prefix = safe > 0 ? '+R$ ' : safe < 0 ? '-R$ ' : 'R$ ';
+  return `${prefix}${formatMoneyBR(Math.abs(safe))}`;
 }
 
 export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
@@ -19,36 +50,71 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
   onUpdateIncome,
   isDemo = false,
 }) => {
-  // Dados de renda editáveis pelo usuário
+  const hasBasketItems = summary.calculatedItems.length > 0;
+  const hasRegisteredIncome = summary.purchasingPower.hasIncomeData;
+
   const [initialIncomeInput, setInitialIncomeInput] = useState<number>(
-    summary.purchasingPower.initialIncome || 10000
+    typeof summary.purchasingPower.initialIncome === 'number'
+      ? summary.purchasingPower.initialIncome
+      : 0
   );
   const [currentIncomeInput, setCurrentIncomeInput] = useState<number>(
-    summary.purchasingPower.finalIncome || 10500
+    typeof summary.purchasingPower.finalIncome === 'number'
+      ? summary.purchasingPower.finalIncome
+      : 0
+  );
+  const [initialDateInput, setInitialDateInput] = useState<string>(
+    isValidIsoDate(summary.purchasingPower.initialDate)
+      ? summary.purchasingPower.initialDate
+      : getMonthsAgoIsoDate(12)
+  );
+  const [finalDateInput, setFinalDateInput] = useState<string>(
+    isValidIsoDate(summary.purchasingPower.finalDate)
+      ? summary.purchasingPower.finalDate
+      : getTodayIsoDate()
   );
   const [incomeSavedMsg, setIncomeSavedMsg] = useState<string | null>(null);
+  const [incomeErrorMsg, setIncomeErrorMsg] = useState<string | null>(null);
+  const [isSavingIncome, setIsSavingIncome] = useState(false);
 
   useEffect(() => {
-    if (typeof summary.purchasingPower.initialIncome === 'number') {
-      setInitialIncomeInput(summary.purchasingPower.initialIncome);
+    setInitialIncomeInput(
+      typeof summary.purchasingPower.initialIncome === 'number'
+        ? summary.purchasingPower.initialIncome
+        : 0
+    );
+    setCurrentIncomeInput(
+      typeof summary.purchasingPower.finalIncome === 'number'
+        ? summary.purchasingPower.finalIncome
+        : 0
+    );
+    if (isValidIsoDate(summary.purchasingPower.initialDate)) {
+      setInitialDateInput(summary.purchasingPower.initialDate);
     }
-    if (typeof summary.purchasingPower.finalIncome === 'number') {
-      setCurrentIncomeInput(summary.purchasingPower.finalIncome);
+    if (isValidIsoDate(summary.purchasingPower.finalDate)) {
+      setFinalDateInput(summary.purchasingPower.finalDate);
     }
-  }, [summary.purchasingPower.initialIncome, summary.purchasingPower.finalIncome]);
+  }, [
+    summary.purchasingPower.initialIncome,
+    summary.purchasingPower.finalIncome,
+    summary.purchasingPower.initialDate,
+    summary.purchasingPower.finalDate,
+  ]);
 
-  // Gasto mensal de referência (editável com slider/input ou atrelado à cesta)
-  const defaultSpend = summary.totalMonthlySpend > 0 ? summary.totalMonthlySpend : 3000;
-  const [customSpend, setCustomSpend] = useState<number>(defaultSpend);
+  const basketSpend = summary.totalMonthlySpend > 0 ? summary.totalMonthlySpend : 0;
+  const [customSpend, setCustomSpend] = useState<number>(basketSpend);
   const [useCustomSpend, setUseCustomSpend] = useState<boolean>(false);
 
-  // Perspectiva selecionada para o cálculo
+  useEffect(() => {
+    if (!useCustomSpend) {
+      setCustomSpend(basketSpend);
+    }
+  }, [basketSpend, useCustomSpend]);
+
   const [perspective, setPerspective] = useState<PocketImpactPerspective>('ipca-casa');
 
-  // Gasto efetivo considerado no cálculo
-  const referenceSpend = useCustomSpend ? customSpend : defaultSpend;
+  const referenceSpend = useCustomSpend ? Math.max(0, customSpend) : basketSpend;
 
-  // Taxa de inflação conforme a perspectiva
   const activeRatePercent = useMemo(() => {
     if (perspective === 'ipca-oficial') {
       return summary.ipcaIBGE12M;
@@ -56,37 +122,87 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
     return summary.ipcaCasa12M;
   }, [perspective, summary.ipcaIBGE12M, summary.ipcaCasa12M]);
 
-  // Cálculos centrais conforme especificação
+  const observedBasketDiff = useMemo(() => {
+    return calculateObservedBasketDifference(summary.calculatedItems);
+  }, [summary.calculatedItems]);
+
   const monthlyImpact = useMemo(() => {
+    if (perspective === 'variacao-cesta') {
+      return observedBasketDiff;
+    }
     return calculateEstimatedMonthlyImpact(referenceSpend, activeRatePercent);
-  }, [referenceSpend, activeRatePercent]);
+  }, [perspective, observedBasketDiff, referenceSpend, activeRatePercent]);
 
   const annualImpact = useMemo(() => {
+    if (perspective === 'variacao-cesta') {
+      return observedBasketDiff * 12;
+    }
     return calculateEstimatedAnnualImpact(referenceSpend, activeRatePercent);
-  }, [referenceSpend, activeRatePercent]);
+  }, [perspective, observedBasketDiff, referenceSpend, activeRatePercent]);
+
+  const hasValidSimIncome =
+    Number.isFinite(initialIncomeInput) &&
+    initialIncomeInput > 0 &&
+    Number.isFinite(currentIncomeInput) &&
+    currentIncomeInput >= 0;
 
   const incomeCalc = useMemo(() => {
     return calculateRealIncomeDifference(initialIncomeInput, currentIncomeInput, activeRatePercent);
   }, [initialIncomeInput, currentIncomeInput, activeRatePercent]);
 
-  const observedBasketDiff = useMemo(() => {
-    return calculateObservedBasketDifference(summary.calculatedItems);
-  }, [summary.calculatedItems]);
-
   const nominalIncomeChangeReais = currentIncomeInput - initialIncomeInput;
   const nominalIncomeChangePercent =
-    initialIncomeInput > 0 ? (nominalIncomeChangeReais / initialIncomeInput) * 100 : 0;
+    initialIncomeInput > 0 ? (nominalIncomeChangeReais / initialIncomeInput) * 100 : null;
 
-  // Comparativo simultâneo das 3 perspectivas (sem somar)
   const officialMonthlyImpact = calculateEstimatedMonthlyImpact(referenceSpend, summary.ipcaIBGE12M);
   const personalMonthlyImpact = calculateEstimatedMonthlyImpact(referenceSpend, summary.ipcaCasa12M);
 
-  const handleSaveIncome = () => {
-    if (onUpdateIncome) {
-      onUpdateIncome(initialIncomeInput, currentIncomeInput);
-      trackCalculateImpact(perspective, 'pocket-impact');
-      setIncomeSavedMsg('Rendas salvas e parâmetros recalculados com sucesso!');
+  const handleSaveIncome = async () => {
+    setIncomeErrorMsg(null);
+    setIncomeSavedMsg(null);
+
+    if (!Number.isFinite(initialIncomeInput) || initialIncomeInput <= 0) {
+      setIncomeErrorMsg('Informe uma renda mensal inicial válida maior que R$ 0,00.');
+      return;
     }
+    if (!Number.isFinite(currentIncomeInput) || currentIncomeInput < 0) {
+      setIncomeErrorMsg('Informe uma renda mensal atual válida (não negativa).');
+      return;
+    }
+    if (!isValidIsoDate(initialDateInput) || !isValidIsoDate(finalDateInput)) {
+      setIncomeErrorMsg('Informe datas válidas para o início e o fim do período analisado.');
+      return;
+    }
+    if (initialDateInput > finalDateInput) {
+      setIncomeErrorMsg('A data inicial não pode ser posterior à data final.');
+      return;
+    }
+
+    if (onUpdateIncome) {
+      setIsSavingIncome(true);
+      try {
+        await onUpdateIncome(initialIncomeInput, currentIncomeInput, {
+          initialDate: initialDateInput,
+          finalDate: finalDateInput,
+        });
+        trackCalculateImpact(perspective, 'pocket-impact');
+        setIncomeSavedMsg('Parâmetros de renda e datas salvos e recalculados com sucesso!');
+      } catch {
+        setIncomeErrorMsg('Não foi possível salvar os parâmetros de renda no momento.');
+      } finally {
+        setIsSavingIncome(false);
+      }
+    }
+  };
+
+  const renderMonthlyInflationDelta = (costIncreaseReais: number, suffix = '') => {
+    if (!Number.isFinite(costIncreaseReais) || costIncreaseReais === 0) {
+      return `R$ 0,00${suffix}`;
+    }
+    if (costIncreaseReais > 0) {
+      return `-R$ ${formatMoneyBR(costIncreaseReais)}${suffix}`;
+    }
+    return `+R$ ${formatMoneyBR(Math.abs(costIncreaseReais))}${suffix}`;
   };
 
   return (
@@ -95,6 +211,14 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
         <div className="p-3 bg-[#86f2e4]/20 border border-[#006a61]/30 rounded-xl text-xs font-mono text-[#005049] flex items-center justify-between">
           <span>{incomeSavedMsg}</span>
           <button type="button" onClick={() => setIncomeSavedMsg(null)} className="cursor-pointer">
+            <span className="material-symbols-outlined text-[16px]">close</span>
+          </button>
+        </div>
+      )}
+      {incomeErrorMsg && (
+        <div className="p-3 bg-[#ffdad6]/40 border border-[#ba1a1a]/30 rounded-xl text-xs font-mono text-[#ba1a1a] flex items-center justify-between">
+          <span>{incomeErrorMsg}</span>
+          <button type="button" onClick={() => setIncomeErrorMsg(null)} className="cursor-pointer">
             <span className="material-symbols-outlined text-[16px]">close</span>
           </button>
         </div>
@@ -144,7 +268,7 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
                   : 'text-[#45464d] hover:text-[#0b1c30]'
               }`}
             >
-              IPCA-Casa ({summary.ipcaCasa12M.toFixed(2)}%)
+              IPCA-Casa ({formatSignedPercent(summary.ipcaCasa12M)})
             </button>
             <button
               type="button"
@@ -158,7 +282,7 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
                   : 'text-[#45464d] hover:text-[#0b1c30]'
               }`}
             >
-              IPCA Oficial ({summary.ipcaIBGE12M.toFixed(2)}%)
+              IPCA Oficial ({formatSignedPercent(summary.ipcaIBGE12M)})
             </button>
             <button
               type="button"
@@ -194,23 +318,47 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
         <div className="bg-[#ffffff] rounded-2xl p-6 shadow-sm border border-[#eff4ff] flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="font-mono text-xs uppercase text-[#45464d] font-semibold">
-              Custo Mensal da Inflação
+              {monthlyImpact < 0 ? 'Alívio Mensal Observado' : 'Custo Mensal da Inflação'}
             </span>
-            <span className="w-8 h-8 rounded-lg bg-[#ffdad6]/40 flex items-center justify-center text-[#ba1a1a]">
-              <span className="material-symbols-outlined text-[18px]">trending_down</span>
+            <span
+              className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                monthlyImpact > 0
+                  ? 'bg-[#ffdad6]/40 text-[#ba1a1a]'
+                  : monthlyImpact < 0
+                  ? 'bg-[#86f2e4]/30 text-[#006a61]'
+                  : 'bg-[#eff4ff] text-[#45464d]'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[18px]">
+                {monthlyImpact < 0 ? 'trending_up' : 'trending_down'}
+              </span>
             </span>
           </div>
           <div className="my-3">
-            <div className="text-3xl font-bold font-mono tracking-tight text-[#ba1a1a]">
-              -R$ {monthlyImpact.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            <div
+              className={`text-3xl font-bold font-mono tracking-tight ${
+                monthlyImpact > 0
+                  ? 'text-[#ba1a1a]'
+                  : monthlyImpact < 0
+                  ? 'text-[#006a61]'
+                  : 'text-[#0b1c30]'
+              }`}
+            >
+              {renderMonthlyInflationDelta(monthlyImpact)}
               <span className="text-xs font-normal text-[#76777d]">/mês</span>
             </div>
             <p className="text-xs text-[#45464d] mt-1">
-              Gasto mensal de R$ {referenceSpend.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} sujeito a {activeRatePercent.toFixed(2)}% de inflação.
+              {perspective === 'variacao-cesta'
+                ? 'Diferença direta apurada nos preços registrados multiplicados pelas quantidades da cesta.'
+                : referenceSpend > 0
+                ? `Gasto mensal de R$ ${formatMoneyBR(referenceSpend)} sujeito a ${formatSignedPercent(activeRatePercent)} de inflação.`
+                : 'Cadastre itens ou defina um gasto personalizado para calcular o efeito em R$.'}
             </p>
           </div>
           <div className="pt-2 border-t border-[#eff4ff] text-[11px] font-mono text-[#76777d]">
-            Fórmula: Gasto × ({activeRatePercent.toFixed(2)} / 100)
+            {perspective === 'variacao-cesta'
+              ? 'Fórmula: ∑ (Preço Atual - Base) × Qtd'
+              : `Fórmula: Gasto × (${activeRatePercent.toFixed(2).replace('.', ',')} / 100)`}
           </div>
         </div>
 
@@ -218,15 +366,19 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
         <div className="bg-[#ffffff] rounded-2xl p-6 shadow-sm border border-[#eff4ff] flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="font-mono text-xs uppercase text-[#45464d] font-semibold">
-              Corrosão em 12 Meses
+              {annualImpact < 0 ? 'Alívio em 12 Meses' : 'Corrosão em 12 Meses'}
             </span>
             <span className="w-8 h-8 rounded-lg bg-[#eff4ff] flex items-center justify-center text-[#0b1c30]">
               <span className="material-symbols-outlined text-[18px]">date_range</span>
             </span>
           </div>
           <div className="my-3">
-            <div className="text-3xl font-bold font-mono tracking-tight text-[#0b1c30]">
-              -R$ {annualImpact.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            <div
+              className={`text-3xl font-bold font-mono tracking-tight ${
+                annualImpact < 0 ? 'text-[#006a61]' : 'text-[#0b1c30]'
+              }`}
+            >
+              {renderMonthlyInflationDelta(annualImpact)}
               <span className="text-xs font-normal text-[#76777d]">/ano</span>
             </div>
             <p className="text-xs text-[#45464d] mt-1">
@@ -250,14 +402,16 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
           </div>
           <div className="my-3">
             <div className="text-3xl font-bold font-mono tracking-tight text-[#006a61]">
-              R$ {incomeCalc.neededIncome.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {hasValidSimIncome ? `R$ ${formatMoneyBR(incomeCalc.neededIncome)}` : 'Não informada'}
             </div>
             <p className="text-xs text-[#45464d] mt-1">
-              Valor necessário para empatar com a alta de preços e comprar exatamente o mesmo conjunto de bens.
+              {hasValidSimIncome
+                ? 'Valor necessário para empatar com a variação de preços e preservar seu padrão de vida.'
+                : 'Informe sua renda inicial e atual abaixo para apurar o salário de equilíbrio.'}
             </p>
           </div>
           <div className="pt-2 border-t border-[#eff4ff] text-[11px] font-mono text-[#76777d]">
-            Fórmula: Renda Inicial × (1 + {activeRatePercent.toFixed(2)}%)
+            Fórmula: Renda Inicial × (1 + {activeRatePercent.toFixed(2).replace('.', ',')}%)
           </div>
         </div>
 
@@ -269,28 +423,36 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
             </span>
             <span
               className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                incomeCalc.hasLoss ? 'bg-[#ffdad6]/40 text-[#ba1a1a]' : 'bg-[#86f2e4]/30 text-[#006a61]'
+                !hasValidSimIncome
+                  ? 'bg-[#eff4ff] text-[#45464d]'
+                  : incomeCalc.hasLoss
+                  ? 'bg-[#ffdad6]/40 text-[#ba1a1a]'
+                  : 'bg-[#86f2e4]/30 text-[#006a61]'
               }`}
             >
               <span className="material-symbols-outlined text-[18px]">
-                {incomeCalc.hasLoss ? 'money_off' : 'attach_money'}
+                {!hasValidSimIncome ? 'account_balance' : incomeCalc.hasLoss ? 'money_off' : 'attach_money'}
               </span>
             </span>
           </div>
           <div className="my-3">
             <div
               className={`text-3xl font-bold font-mono tracking-tight ${
-                incomeCalc.hasLoss ? 'text-[#ba1a1a]' : 'text-[#006a61]'
+                !hasValidSimIncome
+                  ? 'text-[#0b1c30]'
+                  : incomeCalc.hasLoss
+                  ? 'text-[#ba1a1a]'
+                  : 'text-[#006a61]'
               }`}
             >
-              {incomeCalc.differenceReais >= 0 ? '+R$ ' : '-R$ '}
-              {Math.abs(incomeCalc.differenceReais).toLocaleString('pt-BR', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
+              {hasValidSimIncome ? formatSignedCurrencyBR(incomeCalc.differenceReais) : 'Aguardando'}
             </div>
             <p className="text-xs text-[#45464d] mt-1">
-              {incomeCalc.hasLoss
+              {!hasValidSimIncome
+                ? hasRegisteredIncome
+                  ? 'Preencha uma renda inicial válida para calcular a diferença.'
+                  : 'Cadastre suas rendas no painel abaixo para detectar ganho ou perda real.'
+                : incomeCalc.hasLoss
                 ? 'Sua renda atual está abaixo do necessário para preservar seu poder de compra.'
                 : 'Sua renda acompanhou a inflação com ganho real de poder aquisitivo.'}
             </p>
@@ -328,12 +490,22 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
               </label>
               <input
                 type="number"
+                min="0"
                 step="100"
                 value={initialIncomeInput}
-                onChange={(e) => setInitialIncomeInput(parseFloat(e.target.value) || 0)}
+                onChange={(e) => setInitialIncomeInput(Math.max(0, parseFloat(e.target.value) || 0))}
+                placeholder="Ex: 5000"
                 className="h-10 px-3.5 rounded-lg border border-[#c6c6cd] text-xs font-mono font-bold text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
               />
-              <span className="text-[11px] text-[#76777d]">Salário base de 12 meses atrás</span>
+              <label className="text-[11px] font-mono text-[#76777d] mt-1">
+                Data de referência inicial:
+              </label>
+              <input
+                type="date"
+                value={initialDateInput}
+                onChange={(e) => setInitialDateInput(e.target.value)}
+                className="h-9 px-3 rounded-lg border border-[#c6c6cd] text-xs font-mono text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
+              />
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -342,21 +514,32 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
               </label>
               <input
                 type="number"
+                min="0"
                 step="100"
                 value={currentIncomeInput}
-                onChange={(e) => setCurrentIncomeInput(parseFloat(e.target.value) || 0)}
+                onChange={(e) => setCurrentIncomeInput(Math.max(0, parseFloat(e.target.value) || 0))}
+                placeholder="Ex: 5500"
                 className="h-10 px-3.5 rounded-lg border border-[#c6c6cd] text-xs font-mono font-bold text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
               />
+              <label className="text-[11px] font-mono text-[#76777d] mt-1">
+                Data de referência atual:
+              </label>
+              <input
+                type="date"
+                value={finalDateInput}
+                onChange={(e) => setFinalDateInput(e.target.value)}
+                className="h-9 px-3 rounded-lg border border-[#c6c6cd] text-xs font-mono text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
+              />
               <span className="text-[11px] text-[#76777d]">
-                Reajuste observado: {nominalIncomeChangePercent >= 0 ? '+' : ''}
-                {nominalIncomeChangePercent.toFixed(2)}% ({nominalIncomeChangeReais >= 0 ? '+R$ ' : '-R$ '}
-                {Math.abs(nominalIncomeChangeReais).toFixed(2)})
+                {nominalIncomeChangePercent !== null
+                  ? `Reajuste (${formatDateRangeLabel(initialDateInput, finalDateInput)}): ${formatSignedPercent(nominalIncomeChangePercent)} (${formatSignedCurrencyBR(nominalIncomeChangeReais)})`
+                  : 'Informe a renda inicial (> R$ 0) para apurar o reajuste nominal.'}
               </span>
             </div>
           </div>
 
           <div className="flex flex-col gap-2 pt-2 border-t border-[#eff4ff]">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <label className="text-xs font-mono text-[#45464d] font-medium">
                 Gasto Mensal de Referência:
               </label>
@@ -368,11 +551,16 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
                     !useCustomSpend ? 'bg-[#131b2e] text-[#ffffff]' : 'bg-[#eff4ff] text-[#45464d]'
                   }`}
                 >
-                  Da Cesta (R$ {defaultSpend.toFixed(2)})
+                  Da Cesta (R$ {formatMoneyBR(basketSpend)})
                 </button>
                 <button
                   type="button"
-                  onClick={() => setUseCustomSpend(true)}
+                  onClick={() => {
+                    if (customSpend <= 0 && basketSpend > 0) {
+                      setCustomSpend(basketSpend);
+                    }
+                    setUseCustomSpend(true);
+                  }}
                   className={`px-2 py-0.5 rounded text-[11px] font-mono cursor-pointer transition-colors ${
                     useCustomSpend ? 'bg-[#131b2e] text-[#ffffff]' : 'bg-[#eff4ff] text-[#45464d]'
                   }`}
@@ -386,18 +574,19 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
               <div className="flex items-center gap-3 mt-1">
                 <input
                   type="range"
-                  min="1000"
+                  min="0"
                   max="30000"
                   step="250"
-                  value={customSpend}
-                  onChange={(e) => setCustomSpend(parseFloat(e.target.value) || 1000)}
+                  value={Math.min(30000, Math.max(0, customSpend))}
+                  onChange={(e) => setCustomSpend(parseFloat(e.target.value) || 0)}
                   className="flex-1 accent-[#000000] cursor-pointer"
                 />
                 <input
                   type="number"
+                  min="0"
                   step="100"
                   value={customSpend}
-                  onChange={(e) => setCustomSpend(parseFloat(e.target.value) || 0)}
+                  onChange={(e) => setCustomSpend(Math.max(0, parseFloat(e.target.value) || 0))}
                   className="w-32 h-9 px-2 rounded-lg border border-[#c6c6cd] text-xs font-mono text-right font-bold text-[#0b1c30]"
                 />
               </div>
@@ -409,9 +598,10 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
             <button
               type="button"
               onClick={handleSaveIncome}
-              className="h-9 px-4 rounded-lg bg-[#000000] text-[#ffffff] hover:bg-[#213145] text-xs font-mono font-semibold transition-all cursor-pointer shadow-sm"
+              disabled={isSavingIncome}
+              className="h-9 px-4 rounded-lg bg-[#000000] text-[#ffffff] hover:bg-[#213145] text-xs font-mono font-semibold transition-all cursor-pointer shadow-sm disabled:opacity-60"
             >
-              Salvar Parâmetros
+              {isSavingIncome ? 'Salvando...' : 'Salvar Parâmetros'}
             </button>
           </div>
         </div>
@@ -446,19 +636,23 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
             >
               <div className="flex flex-col">
                 <span className="text-xs font-bold text-[#0b1c30]">
-                  1. Pelo IPCA Oficial do IBGE (+{summary.ipcaIBGE12M.toFixed(2)}%)
+                  1. Pelo IPCA Oficial do IBGE ({formatSignedPercent(summary.ipcaIBGE12M)})
                 </span>
                 <span className="text-xs text-[#45464d] mt-0.5">
                   Média estatística do país para famílias de 1 a 40 salários mínimos.
                 </span>
               </div>
               <div className="text-right shrink-0">
-                <span className="font-mono font-bold text-sm text-[#ba1a1a] block">
-                  -R$ {officialMonthlyImpact.toFixed(2).replace('.', ',')}
+                <span
+                  className={`font-mono font-bold text-sm block ${
+                    officialMonthlyImpact < 0 ? 'text-[#006a61]' : 'text-[#ba1a1a]'
+                  }`}
+                >
+                  {renderMonthlyInflationDelta(officialMonthlyImpact)}
                   <span className="text-[10px] text-[#76777d]">/mês</span>
                 </span>
                 <span className="font-mono text-[11px] text-[#76777d]">
-                  -R$ {(officialMonthlyImpact * 12).toFixed(2).replace('.', ',')}/ano
+                  {renderMonthlyInflationDelta(officialMonthlyImpact * 12, '/ano')}
                 </span>
               </div>
             </div>
@@ -475,7 +669,7 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
               <div className="flex flex-col">
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs font-bold text-[#0b1c30]">
-                    2. Pelo IPCA-Casa (+{summary.ipcaCasa12M.toFixed(2)}%)
+                    2. Pelo IPCA-Casa ({formatSignedPercent(summary.ipcaCasa12M)})
                   </span>
                   <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-[#006a61] text-[#ffffff]">
                     Sua Cesta
@@ -486,12 +680,16 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
                 </span>
               </div>
               <div className="text-right shrink-0">
-                <span className="font-mono font-bold text-sm text-[#ba1a1a] block">
-                  -R$ {personalMonthlyImpact.toFixed(2).replace('.', ',')}
+                <span
+                  className={`font-mono font-bold text-sm block ${
+                    personalMonthlyImpact < 0 ? 'text-[#006a61]' : 'text-[#ba1a1a]'
+                  }`}
+                >
+                  {renderMonthlyInflationDelta(personalMonthlyImpact)}
                   <span className="text-[10px] text-[#76777d]">/mês</span>
                 </span>
                 <span className="font-mono text-[11px] text-[#76777d]">
-                  -R$ {(personalMonthlyImpact * 12).toFixed(2).replace('.', ',')}/ano
+                  {renderMonthlyInflationDelta(personalMonthlyImpact * 12, '/ano')}
                 </span>
               </div>
             </div>
@@ -514,13 +712,16 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
                 </span>
               </div>
               <div className="text-right shrink-0">
-                <span className="font-mono font-bold text-sm text-[#0b1c30] block">
-                  {observedBasketDiff >= 0 ? '+R$ ' : '-R$ '}
-                  {Math.abs(observedBasketDiff).toFixed(2).replace('.', ',')}
+                <span
+                  className={`font-mono font-bold text-sm block ${
+                    observedBasketDiff < 0 ? 'text-[#006a61]' : 'text-[#0b1c30]'
+                  }`}
+                >
+                  {renderMonthlyInflationDelta(observedBasketDiff)}
                   <span className="text-[10px] text-[#76777d]">/mês</span>
                 </span>
                 <span className="font-mono text-[11px] text-[#76777d]">
-                  Observado nos itens
+                  {observedBasketDiff === 0 ? 'Sem diferença direta' : 'Observado nos itens'}
                 </span>
               </div>
             </div>
@@ -544,10 +745,15 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
             <span className="text-xs font-mono text-[#76777d]">Em Reais e %</span>
           </div>
 
-          <div className="flex flex-col gap-3">
-            {summary.groupContributions.map((grp) => {
-              const groupMonthlyImpact = (grp.totalSpend * (grp.weightedContribution / (grp.weightPercent || 1)));
-              return (
+          {summary.groupContributions.length === 0 ? (
+            <div className="p-6 rounded-xl bg-[#eff4ff]/50 text-center text-xs text-[#76777d] font-mono">
+              {hasBasketItems
+                ? 'Nenhum grupo com gasto mensal ativo.'
+                : 'Cadastre itens na sua cesta familiar para decompor os gastos por categoria.'}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {summary.groupContributions.map((grp) => (
                 <div key={grp.group} className="flex flex-col gap-1.5 p-3 rounded-xl bg-[#eff4ff]/40">
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-semibold text-[#0b1c30] flex items-center gap-2">
@@ -555,8 +761,8 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
                       <span>{grp.group}</span>
                     </span>
                     <span className="font-mono font-bold text-[#0b1c30]">
-                      R$ {grp.totalSpend.toFixed(2).replace('.', ',')}{' '}
-                      <span className="text-[#76777d] font-normal">({grp.weightPercent.toFixed(1)}%)</span>
+                      R$ {formatMoneyBR(grp.totalSpend)}{' '}
+                      <span className="text-[#76777d] font-normal">({grp.weightPercent.toFixed(1).replace('.', ',')}%)</span>
                     </span>
                   </div>
 
@@ -568,15 +774,23 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
                   </div>
 
                   <div className="flex items-center justify-between text-[11px] font-mono text-[#76777d]">
-                    <span>{grp.itemCount} itens monitorados</span>
-                    <span className="text-[#ba1a1a] font-semibold">
-                      Contribuição: +{grp.weightedContribution.toFixed(2).replace('.', ',')} p.p.
+                    <span>{grp.itemCount} {grp.itemCount === 1 ? 'item monitorado' : 'itens monitorados'}</span>
+                    <span
+                      className={`font-semibold ${
+                        grp.weightedContribution < 0
+                          ? 'text-[#006a61]'
+                          : grp.weightedContribution > 0
+                          ? 'text-[#ba1a1a]'
+                          : 'text-[#45464d]'
+                      }`}
+                    >
+                      Contribuição: {formatSignedPP(grp.weightedContribution)}
                     </span>
                   </div>
                 </div>
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Top Itens com Maior Impacto em Reais (5 colunas) */}
@@ -593,36 +807,52 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
             <span className="material-symbols-outlined text-[#ba1a1a] text-[20px]">warning</span>
           </div>
 
-          <div className="flex flex-col gap-2.5 max-h-[480px] overflow-y-auto pr-1">
-            {summary.topVillains.slice(0, 6).map((item, idx) => {
-              const itemImpactReais = (item.monthlySpend * ((item.priceChangePercent ?? 0) / 100));
-              return (
-                <div
-                  key={item.id}
-                  className="p-3 rounded-xl bg-[#eff4ff]/40 border border-[#e5eeff] flex items-center justify-between gap-3"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-5 h-5 rounded-full bg-[#0b1c30] text-[#ffffff] font-mono text-[10px] font-bold flex items-center justify-center shrink-0">
-                      {idx + 1}
-                    </span>
-                    <div className="flex flex-col truncate">
-                      <span className="text-xs font-semibold text-[#0b1c30] truncate">{item.name}</span>
-                      <span className="text-[11px] text-[#76777d] font-mono">
-                        Gasto: R$ {item.monthlySpend.toFixed(2)} • Alta: +{(item.priceChangePercent ?? 0).toFixed(1)}%
+          {summary.topVillains.length === 0 ? (
+            <div className="p-6 rounded-xl bg-[#eff4ff]/50 text-center text-xs text-[#76777d] font-mono">
+              {hasBasketItems
+                ? 'Cadastre o preço anterior dos itens para identificar os vilões de preço em R$.'
+                : 'Nenhum item monitorado ainda na cesta familiar.'}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2.5 max-h-[480px] overflow-y-auto pr-1">
+              {summary.topVillains.slice(0, 6).map((item, idx) => {
+                const changePct = item.priceChangePercent ?? 0;
+                const itemImpactReais = item.monthlySpend * (changePct / 100);
+                const isRelief = item.weightedContribution < 0 || changePct < 0;
+                return (
+                  <div
+                    key={item.id}
+                    className="p-3 rounded-xl bg-[#eff4ff]/40 border border-[#e5eeff] flex items-center justify-between gap-3"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="w-5 h-5 rounded-full bg-[#0b1c30] text-[#ffffff] font-mono text-[10px] font-bold flex items-center justify-center shrink-0">
+                        {idx + 1}
+                      </span>
+                      <div className="flex flex-col truncate">
+                        <span className="text-xs font-semibold text-[#0b1c30] truncate">{item.name}</span>
+                        <span className="text-[11px] text-[#76777d] font-mono">
+                          Gasto: R$ {formatMoneyBR(item.monthlySpend)} • Var.: {formatSignedPercent(changePct, 1)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="text-right shrink-0 font-mono">
+                      <span
+                        className={`text-xs font-bold block ${
+                          isRelief ? 'text-[#006a61]' : 'text-[#ba1a1a]'
+                        }`}
+                      >
+                        {formatSignedCurrencyBR(itemImpactReais)}
+                      </span>
+                      <span className="text-[10px] text-[#76777d]">
+                        {formatSignedPP(item.weightedContribution)}
                       </span>
                     </div>
                   </div>
-
-                  <div className="text-right shrink-0 font-mono">
-                    <span className="text-xs font-bold text-[#ba1a1a] block">
-                      +R$ {itemImpactReais.toFixed(2).replace('.', ',')}
-                    </span>
-                    <span className="text-[10px] text-[#76777d]">+{item.weightedContribution.toFixed(2)} p.p.</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>

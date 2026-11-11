@@ -33,7 +33,7 @@ export async function startGoogleOAuthPopup(): Promise<GoogleLoginResult> {
     const { user, isNewUser } = await FirestoreService.ensureUserBootstrapped(firebaseUser);
     return {
       success: true,
-      session: { user, token: '' },
+      session: { user },
       isNewUser,
     };
   } catch (err) {

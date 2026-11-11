@@ -9,7 +9,7 @@
         "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
         "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
         "avatarUrl": { "type": "string", "maxLength": 1000 },
-        "authProvider": { "type": "string", "enum": ["google", "local"] },
+        "authProvider": { "type": "string", "enum": ["google", "password"] },
         "defaultProfileId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -177,6 +177,7 @@
         "projection12Months": { "type": "number" },
         "projection24Months": { "type": "number" },
         "projection36Months": { "type": "number" },
+        "useLinkedSavings": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },

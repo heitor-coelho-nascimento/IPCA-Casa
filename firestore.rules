@@ -32,7 +32,11 @@ service cloud.firestore {
     }
 
     function isNonNegativeNumber(val) {
-      return (val is int || val is float) && val >= 0;
+      return (val is int || val is float) && val >= 0 && val <= 10000000000;
+    }
+
+    function isBoundedNumber(val, minVal, maxVal) {
+      return (val is int || val is float) && val >= minVal && val <= maxVal;
     }
 
     function userExists(userId) {
@@ -61,7 +65,7 @@ service cloud.firestore {
         data.userId == userId &&
         isBoundedString(data.displayName, 1, 120) &&
         (!('avatarUrl' in data) || isBoundedString(data.avatarUrl, 0, 1000)) &&
-        data.authProvider in ['google', 'local'] &&
+        data.authProvider in ['google', 'password'] &&
         isValidId(data.defaultProfileId) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
@@ -74,6 +78,7 @@ service cloud.firestore {
         data.userId == request.auth.uid &&
         data.userId == userId &&
         isBoundedString(data.email, 3, 255) &&
+        data.email.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$') &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -201,7 +206,8 @@ service cloud.firestore {
           'qualitativeTradeoff', 'resourceName', 'unit', 'tariffPerUnit', 'currentConsumption',
           'targetConsumption', 'currentSpend', 'progressPercent', 'notes', 'monthlyInvestment',
           'nominalAnnualRate', 'expectedAnnualInflation', 'realAnnualYield',
-          'projection12Months', 'projection24Months', 'projection36Months', 'createdAt', 'updatedAt'
+          'projection12Months', 'projection24Months', 'projection36Months', 'useLinkedSavings',
+          'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.id) &&
         data.id == strategyId &&
@@ -225,15 +231,16 @@ service cloud.firestore {
         (!('currentConsumption' in data) || isNonNegativeNumber(data.currentConsumption)) &&
         (!('targetConsumption' in data) || isNonNegativeNumber(data.targetConsumption)) &&
         (!('currentSpend' in data) || isNonNegativeNumber(data.currentSpend)) &&
-        (!('progressPercent' in data) || isNonNegativeNumber(data.progressPercent)) &&
+        (!('progressPercent' in data) || isBoundedNumber(data.progressPercent, 0, 100)) &&
         (!('notes' in data) || isBoundedString(data.notes, 0, 600)) &&
         (!('monthlyInvestment' in data) || isNonNegativeNumber(data.monthlyInvestment)) &&
-        (!('nominalAnnualRate' in data) || isNonNegativeNumber(data.nominalAnnualRate)) &&
-        (!('expectedAnnualInflation' in data) || isNonNegativeNumber(data.expectedAnnualInflation)) &&
-        (!('realAnnualYield' in data) || (data.realAnnualYield is int || data.realAnnualYield is float)) &&
+        (!('nominalAnnualRate' in data) || isBoundedNumber(data.nominalAnnualRate, 0, 10000)) &&
+        (!('expectedAnnualInflation' in data) || isBoundedNumber(data.expectedAnnualInflation, 0, 10000)) &&
+        (!('realAnnualYield' in data) || isBoundedNumber(data.realAnnualYield, -100, 10000)) &&
         (!('projection12Months' in data) || isNonNegativeNumber(data.projection12Months)) &&
         (!('projection24Months' in data) || isNonNegativeNumber(data.projection24Months)) &&
         (!('projection36Months' in data) || isNonNegativeNumber(data.projection36Months)) &&
+        (!('useLinkedSavings' in data) || data.useLinkedSavings is bool) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -436,7 +443,7 @@ service cloud.firestore {
             'qualitativeTradeoff', 'resourceName', 'unit', 'tariffPerUnit', 'currentConsumption',
             'targetConsumption', 'currentSpend', 'progressPercent', 'notes', 'monthlyInvestment',
             'nominalAnnualRate', 'expectedAnnualInflation', 'realAnnualYield',
-            'projection12Months', 'projection24Months', 'projection36Months', 'updatedAt'
+            'projection12Months', 'projection24Months', 'projection36Months', 'useLinkedSavings', 'updatedAt'
           ]);
         allow delete: if isOwner(userId) && isValidId(strategyId) && userExists(userId);
       }

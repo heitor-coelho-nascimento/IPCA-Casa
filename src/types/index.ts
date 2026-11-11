@@ -158,6 +158,10 @@ export interface OpportunityPlanC {
   projection12Months: number;
   projection24Months: number;
   projection36Months: number;
+  useLinkedSavings?: boolean;
+  notes?: string;
+  isSimulated?: boolean;
+  updatedAt?: string;
 }
 
 export type TimeframeOption = '12M' | 'YTD' | '1M' | 'CUSTOM';
@@ -204,7 +208,8 @@ export interface UserAccount {
   email: string;
   displayName: string;
   avatarUrl?: string;
-  authProvider?: 'local' | 'google';
+  authProvider?: 'google' | 'password';
+  emailVerified?: boolean;
   createdAt: string;
   lastLoginAt: string;
   profileId: string;
@@ -212,7 +217,7 @@ export interface UserAccount {
 
 export interface AuthSession {
   user: UserAccount;
-  token: string;
+  token?: string;
 }
 
 // ==========================================

@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { BasketItem, ItemClassification, ConsumptionGroup } from '../types';
 import { StorageService } from '../services/storage';
+import { getMonthsAgoIsoDate, getTodayIsoDate, isValidIsoDate } from '../utils/dates';
 
 interface NewItemDrawerProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (item: Partial<BasketItem>) => void;
+  onSave: (item: Partial<BasketItem>) => void | Promise<void>;
   editingItem: BasketItem | null;
   totalMonthlySpend: number;
   groups?: ConsumptionGroup[];
@@ -26,15 +27,19 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
   const [classification, setClassification] = useState<ItemClassification>('Essencial');
   const [oldPrice, setOldPrice] = useState<number | ''>('');
   const [currentPrice, setCurrentPrice] = useState<number | ''>('');
-  const [oldPriceDate, setOldPriceDate] = useState('2023-03-01');
-  const [currentPriceDate, setCurrentPriceDate] = useState('2024-03-01');
+  const [oldPriceDate, setOldPriceDate] = useState(() => getMonthsAgoIsoDate(12));
+  const [currentPriceDate, setCurrentPriceDate] = useState(() => getTodayIsoDate());
   const [unit, setUnit] = useState('unidade');
   const [notes, setNotes] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [saving, setSaving] = useState(false);
   const [groups, setGroups] = useState<ConsumptionGroup[]>(() => propGroups ?? StorageService.getGroups());
 
   useEffect(() => {
     setGroups(propGroups ?? StorageService.getGroups());
+    const defaultOldDate = getMonthsAgoIsoDate(12);
+    const defaultCurrentDate = getTodayIsoDate();
+
     if (editingItem) {
       setName(editingItem.name);
       setDescription(editingItem.description || '');
@@ -43,8 +48,8 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
       setClassification(editingItem.classification);
       setOldPrice(editingItem.oldPrice > 0 ? editingItem.oldPrice : '');
       setCurrentPrice(editingItem.currentPrice > 0 ? editingItem.currentPrice : '');
-      setOldPriceDate(editingItem.oldPriceDate || '2023-03-01');
-      setCurrentPriceDate(editingItem.currentPriceDate || '2024-03-01');
+      setOldPriceDate(editingItem.oldPriceDate || defaultOldDate);
+      setCurrentPriceDate(editingItem.currentPriceDate || defaultCurrentDate);
       setUnit(editingItem.unit || 'unidade');
       setNotes(editingItem.notes || '');
     } else {
@@ -55,13 +60,14 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
       setClassification('Essencial');
       setOldPrice('');
       setCurrentPrice('');
-      setOldPriceDate('2023-03-01');
-      setCurrentPriceDate('2024-03-01');
+      setOldPriceDate(defaultOldDate);
+      setCurrentPriceDate(defaultCurrentDate);
       setUnit('unidade');
       setNotes('');
     }
     setErrorMsg('');
-  }, [editingItem, isOpen]);
+    setSaving(false);
+  }, [editingItem, isOpen, propGroups]);
 
   // Cálculo ao vivo do peso previsto
   const numericSpend = Number(monthlySpend) || 0;
@@ -73,34 +79,55 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
   const numCurrentPrice = currentPrice !== '' ? Number(currentPrice) : 0;
   const priceVariation = numOldPrice > 0 ? ((numCurrentPrice - numOldPrice) / numOldPrice) * 100 : null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving) return;
+
     if (!name.trim()) {
       setErrorMsg('Informe o nome do produto ou serviço.');
       return;
     }
-    if (numericSpend < 0) {
+    if (!Number.isFinite(numericSpend) || numericSpend < 0) {
       setErrorMsg('O gasto mensal não pode ser negativo.');
       return;
     }
+    if (!isValidIsoDate(currentPriceDate)) {
+      setErrorMsg('Informe uma data válida para o preço atual.');
+      return;
+    }
+    if (numOldPrice > 0 && !isValidIsoDate(oldPriceDate)) {
+      setErrorMsg('Informe uma data válida para o preço anterior.');
+      return;
+    }
 
-    onSave({
-      id: editingItem?.id,
-      name: name.trim(),
-      description: description.trim() || undefined,
-      group,
-      monthlySpend: numericSpend,
-      classification,
-      oldPrice: numOldPrice, // 0 se não informado
-      currentPrice: numCurrentPrice, // 0 se não informado
-      oldPriceDate: numOldPrice > 0 ? oldPriceDate : '',
-      currentPriceDate,
-      unit,
-      notes,
-      active: true,
-    });
-
-    onClose();
+    setSaving(true);
+    setErrorMsg('');
+    try {
+      await onSave({
+        id: editingItem?.id,
+        name: name.trim(),
+        description: description.trim() || undefined,
+        group,
+        monthlySpend: numericSpend,
+        classification,
+        oldPrice: numOldPrice,
+        currentPrice: numCurrentPrice,
+        oldPriceDate: numOldPrice > 0 ? oldPriceDate : '',
+        currentPriceDate,
+        unit: unit.trim() || 'unidade',
+        notes: notes.trim(),
+        active: true,
+      });
+      onClose();
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error && err.message
+          ? err.message
+          : 'Erro ao salvar item. Verifique os campos e tente novamente.'
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -369,10 +396,11 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
           <button
             type="submit"
             form="itemDrawerForm"
-            className="h-10 px-6 rounded-lg bg-[#000000] hover:bg-[#213145] text-[#ffffff] text-sm font-semibold shadow-md transition-all flex items-center gap-2 cursor-pointer"
+            disabled={saving}
+            className="h-10 px-6 rounded-lg bg-[#000000] hover:bg-[#213145] text-[#ffffff] text-sm font-semibold shadow-md transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
           >
-            <span className="material-symbols-outlined text-[18px]">check</span>
-            <span>{editingItem ? 'Atualizar Item' : 'Salvar na Cesta'}</span>
+            <span className="material-symbols-outlined text-[18px]">{saving ? 'sync' : 'check'}</span>
+            <span>{saving ? 'Salvando...' : editingItem ? 'Atualizar Item' : 'Salvar na Cesta'}</span>
           </button>
         </div>
       </div>

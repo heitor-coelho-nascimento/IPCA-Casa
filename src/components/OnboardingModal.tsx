@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FamilyProfile, BasketItem } from '../types';
 import { DEMO_BASKET_ITEMS, StorageService } from '../services/storage';
+import { getMonthsAgoIsoDate, getTodayIsoDate } from '../utils/dates';
 
 export interface OnboardingBundle {
   initialIncome: number;
@@ -13,7 +14,7 @@ interface OnboardingModalProps {
   userDisplayName: string;
   targetProfileId?: string;
   skipLocalPersistence?: boolean;
-  onFinish: (profile: FamilyProfile, bundle?: OnboardingBundle) => void;
+  onFinish: (profile: FamilyProfile, bundle?: OnboardingBundle) => void | Promise<void>;
   onSkip: () => void;
 }
 
@@ -45,94 +46,131 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
 
   // Step 5: Escolha da Cesta
   const [basketChoice, setBasketChoice] = useState<'empty' | 'copy-demo'>('copy-demo');
+  const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const handleComplete = () => {
-    const profileId = targetProfileId || `prof_user_${Date.now()}`;
-    const newProfile: FamilyProfile = {
-      id: profileId,
-      name: profileName || `Orçamento de ${userDisplayName}`,
-      membersCount,
-      referenceRegion: region,
-      currency: 'BRL',
-      isDemo: false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+  const handleComplete = async () => {
+    if (saving) return;
+    setErrorMsg(null);
 
-    let onboardingItems: BasketItem[];
-    if (basketChoice === 'copy-demo') {
-      onboardingItems = DEMO_BASKET_ITEMS.map((item, idx) => ({
-        ...item,
-        id: `item-usr-${Date.now()}-${idx}`,
-        profileId,
-      }));
-    } else {
-      onboardingItems = [
-        {
-          id: `item-ob-1-${Date.now()}`,
-          profileId,
-          name: 'Supermercado & Alimentação Básica',
-          group: 'Alimentação e bebidas',
-          classification: 'Essencial',
-          monthlySpend: groceriesSpend,
-          oldPrice: 100,
-          currentPrice: 108,
-          oldPriceDate: '2023-09-01',
-          currentPriceDate: '2024-09-01',
-          unit: 'mensal',
-          active: true,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-        {
-          id: `item-ob-2-${Date.now()}`,
-          profileId,
-          name: 'Habitação (Aluguel / Condomínio / Luz / Água)',
-          group: 'Habitação',
-          classification: 'Essencial',
-          monthlySpend: housingSpend,
-          oldPrice: 100,
-          currentPrice: 106,
-          oldPriceDate: '2023-09-01',
-          currentPriceDate: '2024-09-01',
-          unit: 'mensal',
-          active: true,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-        {
-          id: `item-ob-3-${Date.now()}`,
-          profileId,
-          name: 'Transporte (Combustível / Transporte Público)',
-          group: 'Transportes',
-          classification: 'Essencial',
-          monthlySpend: transportSpend,
-          oldPrice: 100,
-          currentPrice: 105,
-          oldPriceDate: '2023-09-01',
-          currentPriceDate: '2024-09-01',
-          unit: 'mensal',
-          active: true,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-      ];
+    const safeInitial = Number.isFinite(initialIncome) && initialIncome > 0 ? initialIncome : 0;
+    const safeCurrent = Number.isFinite(currentIncome) && currentIncome >= 0 ? currentIncome : 0;
+    if (safeInitial <= 0) {
+      setErrorMsg('Informe uma renda inicial maior que zero para calcular o poder de compra.');
+      setStep(2);
+      return;
     }
 
-    if (!skipLocalPersistence) {
-      StorageService.saveProfile(newProfile);
-      StorageService.setActiveProfileId(profileId);
-      StorageService.saveIncome(initialIncome, currentIncome);
-      StorageService.importItems(onboardingItems);
-    }
+    setSaving(true);
+    try {
+      const profileId = targetProfileId || `prof_user_${Date.now()}`;
+      const nowIso = new Date().toISOString();
+      const baseDateIso = getMonthsAgoIsoDate(12);
+      const currentDateIso = getTodayIsoDate();
 
-    onFinish(newProfile, {
-      initialIncome,
-      currentIncome,
-      items: onboardingItems,
-    });
+      const newProfile: FamilyProfile = {
+        id: profileId,
+        name: profileName.trim() || `Orçamento de ${userDisplayName}`,
+        membersCount: Math.max(1, Math.min(20, Math.round(membersCount) || 1)),
+        referenceRegion: region,
+        currency: 'BRL',
+        isDemo: false,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+
+      const stamp = Date.now();
+      let onboardingItems: BasketItem[];
+      if (basketChoice === 'copy-demo') {
+        onboardingItems = DEMO_BASKET_ITEMS.map((item, idx) => ({
+          ...item,
+          id: `item-usr-${stamp}-${idx}`,
+          profileId,
+          oldPriceDate: baseDateIso,
+          currentPriceDate: currentDateIso,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        }));
+      } else {
+        onboardingItems = [
+          {
+            id: `item-ob-1-${stamp}`,
+            profileId,
+            name: 'Supermercado & Alimentação Básica',
+            group: 'Alimentação e bebidas',
+            classification: 'Essencial',
+            monthlySpend: Math.max(0, groceriesSpend || 0),
+            oldPrice: 100,
+            currentPrice: 108,
+            oldPriceDate: baseDateIso,
+            currentPriceDate: currentDateIso,
+            unit: 'mensal',
+            active: true,
+            createdAt: nowIso,
+            updatedAt: nowIso,
+          },
+          {
+            id: `item-ob-2-${stamp}`,
+            profileId,
+            name: 'Habitação (Aluguel / Condomínio / Luz / Água)',
+            group: 'Habitação',
+            classification: 'Essencial',
+            monthlySpend: Math.max(0, housingSpend || 0),
+            oldPrice: 100,
+            currentPrice: 106,
+            oldPriceDate: baseDateIso,
+            currentPriceDate: currentDateIso,
+            unit: 'mensal',
+            active: true,
+            createdAt: nowIso,
+            updatedAt: nowIso,
+          },
+          {
+            id: `item-ob-3-${stamp}`,
+            profileId,
+            name: 'Transporte (Combustível / Transporte Público)',
+            group: 'Transportes',
+            classification: 'Essencial',
+            monthlySpend: Math.max(0, transportSpend || 0),
+            oldPrice: 100,
+            currentPrice: 105,
+            oldPriceDate: baseDateIso,
+            currentPriceDate: currentDateIso,
+            unit: 'mensal',
+            active: true,
+            createdAt: nowIso,
+            updatedAt: nowIso,
+          },
+        ];
+      }
+
+      if (!skipLocalPersistence) {
+        StorageService.saveProfile(newProfile);
+        StorageService.setActiveProfileId(profileId);
+        StorageService.saveIncome(safeInitial, safeCurrent, {
+          profileId,
+          initialDate: baseDateIso,
+          finalDate: currentDateIso,
+        });
+        StorageService.importItems(onboardingItems, profileId);
+      }
+
+      await onFinish(newProfile, {
+        initialIncome: safeInitial,
+        currentIncome: safeCurrent,
+        items: onboardingItems,
+      });
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error && err.message
+          ? err.message
+          : 'Não foi possível concluir o salvamento inicial. Tente novamente.'
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -155,6 +193,11 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
               style={{ width: `${(step / 5) * 100}%` }}
             />
           </div>
+          {errorMsg && (
+            <div className="p-2.5 rounded-lg bg-[#ffdad6]/50 border border-[#ba1a1a]/30 text-xs font-mono text-[#ba1a1a]">
+              {errorMsg}
+            </div>
+          )}
         </div>
 
         {/* STEP 1: Perfil Familiar */}
@@ -330,7 +373,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                     Copiar Cesta de Exemplo (Recomendado)
                   </span>
                   <span className="text-[11px] text-[#76777d]">
-                    Inclui 42 produtos/serviços comuns que você poderá editar, excluir e personalizar livremente.
+                    Inclui {DEMO_BASKET_ITEMS.length} produtos e serviços comuns que você poderá editar, excluir e personalizar livremente.
                   </span>
                 </div>
                 {basketChoice === 'copy-demo' && (
@@ -394,11 +437,12 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
           ) : (
             <button
               type="button"
+              disabled={saving}
               onClick={handleComplete}
-              className="h-10 px-6 rounded-lg bg-[#006a61] text-[#ffffff] text-xs font-mono font-semibold hover:bg-[#004e47] transition-all cursor-pointer shadow-sm flex items-center gap-1.5"
+              className="h-10 px-6 rounded-lg bg-[#006a61] text-[#ffffff] text-xs font-mono font-semibold hover:bg-[#004e47] transition-all cursor-pointer shadow-sm flex items-center gap-1.5 disabled:opacity-50"
             >
-              <span>Concluir e Ver Análise</span>
-              <span className="material-symbols-outlined text-[16px]">check</span>
+              <span>{saving ? 'Salvando na nuvem...' : 'Concluir e Ver Análise'}</span>
+              <span className="material-symbols-outlined text-[16px]">{saving ? 'sync' : 'check'}</span>
             </button>
           )}
         </div>
