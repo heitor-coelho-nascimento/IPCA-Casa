@@ -10,6 +10,7 @@ import {
   sanitizeClassification,
   buildProfileWritePayload,
   buildBasketItemWritePayload,
+  buildPriceRecordWritePayload,
 } from '../src/services/firestore';
 import { handleFirestoreError, OperationType } from '../src/lib/firebase';
 import type { BasketItem, FamilyProfile } from '../src/types';
@@ -71,6 +72,7 @@ describe('Segurança Firestore, Blueprint e Guardrails Anti-Dirty-Dozen (IPCA-Ca
     // Referential Integrity (#5, #6)
     expect(RULES_TEXT).toContain('profileExists(userId, incoming().profileId)');
     expect(RULES_TEXT).toContain('itemExists(userId, incoming().itemId)');
+    expect(RULES_TEXT).toContain('existsAfter(/databases/$(database)/documents/users/$(userId)/basketItems/$(incoming().itemId))');
     expect(RULES_TEXT).toContain('userExists(userId)');
 
     // Timestamp & Immutability checks (#10, #11)
@@ -200,6 +202,40 @@ describe('Segurança Firestore, Blueprint e Guardrails Anti-Dirty-Dozen (IPCA-Ca
     expect('profileId' in updatePayload).toBe(false);
     expect('createdAt' in updatePayload).toBe(false);
     expect('description' in updatePayload).toBe(false);
+  });
+
+  it('Constrói payloads seguros de PriceRecord estritamente alinhados ao Blueprint e às chaves permitidas em firestore.rules', () => {
+    const priceSchema = BLUEPRINT_JSON.entities.PriceRecord;
+    const allowedKeys = Object.keys(priceSchema.properties);
+    const requiredKeys: string[] = priceSchema.required;
+
+    const payload = buildPriceRecordWritePayload(
+      {
+        id: 'price_1794513530763_h2w0or',
+        profileId: 'prof_8Zpz6IkKLKSqlnfoMmk7zR4I69f2',
+        itemId: 'item-1794513530-abcd',
+        price: 24.9,
+        referenceDate: '2026-11-12',
+        unit: 'unidade',
+        dataOrigin: 'usuario',
+        source: 'Atualização da Cesta',
+      },
+      '8Zpz6IkKLKSqlnfoMmk7zR4I69f2',
+      true
+    );
+
+    for (const reqKey of requiredKeys) {
+      expect(reqKey in payload).toBe(true);
+    }
+    for (const key of Object.keys(payload)) {
+      expect(allowedKeys).toContain(key);
+    }
+    expect(BLUEPRINT_LIMITS.ID_REGEX.test(String(payload.id))).toBe(true);
+    expect(BLUEPRINT_LIMITS.ID_REGEX.test(String(payload.itemId))).toBe(true);
+    expect(payload.userId).toBe('8Zpz6IkKLKSqlnfoMmk7zR4I69f2');
+    expect(payload.price).toBe(24.9);
+    expect(payload.referenceDate).toBe('2026-11-12');
+    expect(payload.dataOrigin).toBe('usuario');
   });
 
   it('Emite erro JSON estruturado no handleFirestoreError para auditoria de permissões', () => {

@@ -1359,46 +1359,55 @@ export class FirestoreService {
     const itemId = sanitizeFirestoreId(item.id, 'item');
     const path = `users/${uid}/basketItems/${itemId}`;
     const ref = doc(db, path);
-    let shouldRecordPrice = false;
 
     try {
       const snap = await getDoc(ref);
       const existingData = snap.exists() ? snap.data() : null;
       const payload = buildBasketItemWritePayload({ ...item, id: itemId }, uid, !snap.exists());
-      if (snap.exists()) {
-        await updateDoc(ref, payload);
-      } else {
-        await setDoc(ref, payload);
-      }
       const nextPrice = nonNegativeNumber(item.currentPrice, 0);
       const nextDate = extractIsoDatePrefix(item.currentPriceDate) || getTodayIsoDate();
-      shouldRecordPrice =
+      const shouldRecordPrice =
         recordInitialPrice &&
         nextPrice > 0 &&
         (!existingData ||
           existingData.currentPrice !== nextPrice ||
           existingData.currentPriceDate !== nextDate);
+
+      if (shouldRecordPrice) {
+        const priceId = sanitizeFirestoreId(undefined, 'price');
+        const priceRef = doc(db, `users/${uid}/priceHistory/${priceId}`);
+        const pricePayload = buildPriceRecordWritePayload(
+          {
+            id: priceId,
+            profileId: item.profileId,
+            itemId,
+            price: item.currentPrice,
+            referenceDate: nextDate,
+            unit: item.unit,
+            packageSize: item.packageSize,
+            packageUnit: item.packageUnit,
+            dataOrigin: item.dataOrigin || 'usuario',
+            comparabilityBroken: item.comparabilityBroken,
+            source: item.notes || 'Atualização da Cesta',
+          },
+          uid,
+          true
+        );
+        const batch = writeBatch(db);
+        if (snap.exists()) {
+          batch.update(ref, payload);
+        } else {
+          batch.set(ref, payload);
+        }
+        batch.set(priceRef, pricePayload);
+        await batch.commit();
+      } else if (snap.exists()) {
+        await updateDoc(ref, payload);
+      } else {
+        await setDoc(ref, payload);
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, path);
-    }
-
-    if (shouldRecordPrice) {
-      await this.addPriceRecord(
-        uid,
-        {
-          profileId: item.profileId,
-          itemId,
-          price: item.currentPrice,
-          referenceDate: extractIsoDatePrefix(item.currentPriceDate) || getTodayIsoDate(),
-          unit: item.unit,
-          packageSize: item.packageSize,
-          packageUnit: item.packageUnit,
-          dataOrigin: item.dataOrigin || 'usuario',
-          comparabilityBroken: item.comparabilityBroken,
-          source: item.notes || 'Atualização da Cesta',
-        },
-        false
-      );
     }
   }
 

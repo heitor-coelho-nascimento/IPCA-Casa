@@ -418,7 +418,7 @@ service cloud.firestore {
           incoming().createdAt == request.time &&
           incoming().updatedAt == request.time &&
           userExists(userId) &&
-          itemExists(userId, incoming().itemId);
+          (itemExists(userId, incoming().itemId) || existsAfter(/databases/$(database)/documents/users/$(userId)/basketItems/$(incoming().itemId)));
         allow update: if isOwner(userId) &&
           isValidId(priceId) &&
           userExists(userId) &&
