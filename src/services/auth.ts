@@ -458,13 +458,15 @@ export class LegacyMigrationService {
       ? allGroups.filter((g) => g && g.isCustom)
       : [];
 
-    const activeDataProfileIds = new Set<string>([
-      ...realItems.map((i) => i.profileId),
-      ...realIncome.map((i) => i.profileId),
-      ...realPlansA.map((p) => p.profileId),
-      ...realPlansB.map((p) => p.profileId),
-      ...realPlansC.map((p) => p.profileId),
-    ]);
+    const activeDataProfileIds = new Set<string>(
+      [
+        ...realItems.map((i) => i.profileId),
+        ...realIncome.map((i) => i.profileId),
+        ...realPlansA.map((p) => p.profileId),
+        ...realPlansB.map((p) => p.profileId),
+        ...realPlansC.map((p) => p.profileId),
+      ].filter((id): id is string => Boolean(id))
+    );
 
     // Inclui apenas perfis não-demo que tenham dados ou tenham sido criados explicitamente além do rascunho vazio
     const realProfiles = Array.isArray(allProfiles)

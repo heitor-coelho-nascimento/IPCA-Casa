@@ -1088,8 +1088,31 @@ export const PurchasingPowerView: React.FC<PurchasingPowerViewProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
               <div className="flex flex-col gap-1">
+                <label className="font-mono text-xs uppercase text-[#0b1c30] font-bold">
+                  Quanto você recebe por mês atualmente? *
+                </label>
+                <div className="relative flex items-center">
+                  <span className="absolute left-3 text-[#76777d] font-mono text-xs font-semibold">R$</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="100"
+                    value={currentActualSalary}
+                    onChange={(e) => {
+                      const val = Math.max(0, parseFloat(e.target.value) || 0);
+                      setCurrentActualSalary(val);
+                      if (baseSalary === 0) setBaseSalary(val);
+                    }}
+                    placeholder="Ex: 5.000,00"
+                    className="w-full h-10 pl-9 pr-3 rounded-lg bg-[#eff4ff] text-[#0b1c30] font-mono text-sm focus:outline-none focus:bg-[#ffffff] focus:ring-1 focus:ring-[#006a61]"
+                  />
+                </div>
+                <span className="text-[11px] text-[#76777d]">Renda líquida familiar atual</span>
+              </div>
+
+              <div className="flex flex-col gap-1">
                 <label className="font-mono text-xs uppercase text-[#45464d] font-semibold">
-                  Renda Inicial / Base
+                  Quanto recebia há 1 ano? (Renda Base)
                 </label>
                 <div className="relative flex items-center">
                   <span className="absolute left-3 text-[#76777d] font-mono text-xs font-semibold">R$</span>
@@ -1099,73 +1122,72 @@ export const PurchasingPowerView: React.FC<PurchasingPowerViewProps> = ({
                     step="100"
                     value={baseSalary}
                     onChange={(e) => setBaseSalary(Math.max(0, parseFloat(e.target.value) || 0))}
-                    className="w-full h-10 pl-9 pr-3 rounded-lg bg-[#eff4ff] text-[#0b1c30] font-mono text-sm focus:outline-none"
+                    placeholder="Ex: 4.800,00"
+                    className="w-full h-10 pl-9 pr-3 rounded-lg bg-[#eff4ff] text-[#0b1c30] font-mono text-sm focus:outline-none focus:bg-[#ffffff]"
                   />
                 </div>
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="font-mono text-xs uppercase text-[#45464d] font-semibold">
-                  Renda Atual Recebida
-                </label>
-                <div className="relative flex items-center">
-                  <span className="absolute left-3 text-[#76777d] font-mono text-xs font-semibold">R$</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="100"
-                    value={currentActualSalary}
-                    onChange={(e) => setCurrentActualSalary(Math.max(0, parseFloat(e.target.value) || 0))}
-                    className="w-full h-10 pl-9 pr-3 rounded-lg bg-[#eff4ff] text-[#0b1c30] font-mono text-sm focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="font-mono text-xs uppercase text-[#45464d] font-semibold">
-                  Data Inicial de Referência
-                </label>
-                <input
-                  type="date"
-                  value={initialDateInput}
-                  onChange={(e) => setInitialDateInput(e.target.value)}
-                  className="w-full h-10 px-3 rounded-lg bg-[#eff4ff] text-[#0b1c30] font-mono text-xs focus:outline-none"
-                />
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="font-mono text-xs uppercase text-[#45464d] font-semibold">
-                  Data Final de Referência
-                </label>
-                <input
-                  type="date"
-                  value={finalDateInput}
-                  onChange={(e) => setFinalDateInput(e.target.value)}
-                  className="w-full h-10 px-3 rounded-lg bg-[#eff4ff] text-[#0b1c30] font-mono text-xs focus:outline-none"
-                />
-              </div>
-
-              <div className="flex flex-col gap-1 sm:col-span-2">
-                <label className="font-mono text-xs uppercase text-[#45464d] font-semibold">
-                  Taxa IPCA-Casa Aplicada na Simulação
-                </label>
-                <div className="relative flex items-center">
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={appliedInflation}
-                    onChange={(e) => setAppliedInflation(parseFloat(e.target.value) || 0)}
-                    className="w-full h-10 pl-3 pr-8 rounded-lg bg-[#eff4ff] text-[#0b1c30] font-mono text-sm focus:outline-none"
-                  />
-                  <span className="absolute right-3 text-[#76777d] font-mono text-xs font-semibold">%</span>
-                </div>
+                <span className="text-[11px] text-[#76777d]">Se não houve mudança, deixe igual à atual</span>
               </div>
             </div>
 
-            <div className="p-3 bg-[#eff4ff] rounded-lg flex items-start gap-2 text-xs text-[#45464d]">
-              <span className="material-symbols-outlined text-[18px] text-[#76777d] shrink-0 mt-0.5">info</span>
+            {/* Ajustes Avançados Opcionais de Datas e Taxa */}
+            <details className="p-3 bg-[#eff4ff] rounded-xl text-xs text-[#45464d] group">
+              <summary className="font-semibold cursor-pointer list-none flex items-center justify-between text-[#0b1c30]">
+                <span className="flex items-center gap-1.5 font-mono uppercase text-[11px]">
+                  <span className="material-symbols-outlined text-[16px] text-[#006a61]">tune</span>
+                  Ajustar datas e taxa de inflação (Opcional)
+                </span>
+                <span className="material-symbols-outlined text-[16px] group-open:rotate-180 transition-transform">
+                  expand_more
+                </span>
+              </summary>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 mt-2 border-t border-[#c6c6cd]/30">
+                <div className="flex flex-col gap-1">
+                  <span className="font-mono text-[11px] uppercase text-[#45464d] font-semibold">
+                    Data Inicial de Referência
+                  </span>
+                  <input
+                    type="date"
+                    value={initialDateInput}
+                    onChange={(e) => setInitialDateInput(e.target.value)}
+                    className="w-full h-9 px-3 rounded-lg bg-[#ffffff] text-[#0b1c30] font-mono text-xs focus:outline-none"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <span className="font-mono text-[11px] uppercase text-[#45464d] font-semibold">
+                    Data Final de Referência
+                  </span>
+                  <input
+                    type="date"
+                    value={finalDateInput}
+                    onChange={(e) => setFinalDateInput(e.target.value)}
+                    className="w-full h-9 px-3 rounded-lg bg-[#ffffff] text-[#0b1c30] font-mono text-xs focus:outline-none"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1 sm:col-span-2">
+                  <span className="font-mono text-[11px] uppercase text-[#45464d] font-semibold">
+                    Inflação Aplicada na Simulação (% a.a.)
+                  </span>
+                  <div className="relative flex items-center">
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={appliedInflation}
+                      onChange={(e) => setAppliedInflation(parseFloat(e.target.value) || 0)}
+                      className="w-full h-9 pl-3 pr-8 rounded-lg bg-[#ffffff] text-[#0b1c30] font-mono text-xs focus:outline-none"
+                    />
+                    <span className="absolute right-3 text-[#76777d] font-mono text-xs font-semibold">%</span>
+                  </div>
+                </div>
+              </div>
+            </details>
+
+            <div className="p-3 bg-[#e5eeff] rounded-lg flex items-start gap-2 text-xs text-[#0b1c30]">
+              <span className="material-symbols-outlined text-[18px] text-[#006a61] shrink-0 mt-0.5">info</span>
               <span>
-                Cálculo composto: <strong className="font-mono text-[#0b1c30]">Renda = Base × (1 + IPCA) × (1 + Ganho Real)</strong>.
+                O sistema calcula automaticamente o salário que empata com o aumento dos seus preços e o impacto mensal em Reais.
               </span>
             </div>
           </div>

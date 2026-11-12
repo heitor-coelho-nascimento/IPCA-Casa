@@ -64,11 +64,13 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
     let bestTs = 0;
     let bestIso: string | null = null;
     for (const item of calculatedItems) {
-      const candidate = item.currentPriceDate || item.updatedAt;
-      const ts = parseIsoDateToLocalTimestamp(candidate);
-      if (ts > bestTs) {
-        bestTs = ts;
-        bestIso = candidate;
+      const candidate = item.currentPriceDate || item.updatedAt || null;
+      if (candidate) {
+        const ts = parseIsoDateToLocalTimestamp(candidate);
+        if (ts > bestTs) {
+          bestTs = ts;
+          bestIso = candidate;
+        }
       }
     }
     return bestIso;
@@ -445,11 +447,11 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           {/* KPI 1: Gasto Mensal Total */}
           <div className="bg-[#ffffff] rounded-xl p-4 shadow-sm flex flex-col justify-between border border-[#eff4ff]">
             <div className="flex items-center justify-between text-[#45464d]">
-              <span className="font-mono text-xs uppercase tracking-wider font-semibold">Gasto Mensal</span>
+              <span className="font-mono text-xs uppercase tracking-wider font-semibold">Quanto você gasta</span>
               <span className="material-symbols-outlined text-[18px]">payments</span>
             </div>
             <div className="my-2">
-              <span className="text-[11px] text-[#45464d] font-medium">Total Consolidado</span>
+              <span className="text-[11px] text-[#45464d] font-medium">Gasto Mensal Atual</span>
               <div className="text-2xl font-bold text-[#0b1c30] tracking-tight tabular-nums">
                 R$ {intPart}
                 <span className="text-[#45464d] font-normal text-lg">,{decPart}</span>
@@ -457,14 +459,14 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             </div>
             <div className="flex items-center gap-1.5 bg-[#eff4ff] text-[#45464d] px-2 py-0.5 rounded-md w-fit font-mono text-[11px] font-medium">
               <span className="w-1.5 h-1.5 rounded-full bg-[#497cff]" />
-              <span>{totalItemsCount} {totalItemsCount === 1 ? 'item ativo' : 'itens ativos'}</span>
+              <span>{totalItemsCount} {totalItemsCount === 1 ? 'item cadastrado' : 'itens cadastrados'}</span>
             </div>
           </div>
 
-          {/* KPI 2: IPCA-Casa (Inflação Pessoal) */}
+          {/* KPI 2: Aumento dos Seus Gastos (IPCA-Casa) */}
           <div className="bg-[#ffffff] rounded-xl p-4 shadow-sm flex flex-col justify-between border border-[#eff4ff]">
             <div className="flex items-center justify-between text-[#45464d]">
-              <span className="font-mono text-xs uppercase tracking-wider font-semibold">IPCA-Casa</span>
+              <span className="font-mono text-xs uppercase tracking-wider font-semibold">Sua Inflação</span>
               <span
                 className={`material-symbols-outlined text-[18px] ${
                   ipcaCasa12M > 0 ? 'text-[#ba1a1a]' : 'text-[#006a61]'
@@ -474,7 +476,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               </span>
             </div>
             <div className="my-2">
-              <span className="text-[11px] text-[#45464d] font-medium">Inflação da Família</span>
+              <span className="text-[11px] text-[#45464d] font-medium">Aumento nos seus preços</span>
               <div
                 className={`text-2xl font-bold tracking-tight tabular-nums font-mono ${
                   ipcaCasa12M > 0 ? 'text-[#ba1a1a]' : ipcaCasa12M < 0 ? 'text-[#006a61]' : 'text-[#0b1c30]'
@@ -489,14 +491,14 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             </div>
           </div>
 
-          {/* KPI 3: IPCA Oficial IBGE */}
+          {/* KPI 3: Inflação Oficial do País (IBGE) */}
           <div className="bg-[#ffffff] rounded-xl p-4 shadow-sm flex flex-col justify-between border border-[#eff4ff]">
             <div className="flex items-center justify-between text-[#45464d]">
-              <span className="font-mono text-xs uppercase tracking-wider font-semibold">IPCA Oficial</span>
+              <span className="font-mono text-xs uppercase tracking-wider font-semibold">Média do País</span>
               <span className="material-symbols-outlined text-[18px] text-[#497cff]">account_balance</span>
             </div>
             <div className="my-2">
-              <span className="text-[11px] text-[#45464d] font-medium">IBGE Nacional (12M)</span>
+              <span className="text-[11px] text-[#45464d] font-medium">IPCA Oficial (IBGE)</span>
               <div className="text-2xl font-bold text-[#0b1c30] tracking-tight tabular-nums font-mono">
                 {formatSignedPercent(ipcaIBGE12M)}
               </div>
@@ -504,15 +506,15 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             <div className="flex items-center gap-1 text-[#497cff] font-mono text-[11px] font-medium truncate">
               <span className="w-1.5 h-1.5 rounded-full bg-[#497cff] shrink-0" />
               <span className="truncate">
-                {ibgeData?.latestMonthLabel || 'Fonte SIDRA/IBGE'}
+                {ibgeData?.latestMonthLabel || 'Último dado IBGE'}
               </span>
             </div>
           </div>
 
-          {/* KPI 4: Diferencial (Spread) */}
+          {/* KPI 4: Diferença vs. Média Nacional */}
           <div className="bg-[#ffffff] rounded-xl p-4 shadow-sm flex flex-col justify-between border border-[#eff4ff]">
             <div className="flex items-center justify-between text-[#45464d]">
-              <span className="font-mono text-xs uppercase tracking-wider font-semibold">Diferencial</span>
+              <span className="font-mono text-xs uppercase tracking-wider font-semibold">Diferença</span>
               <span
                 className={`material-symbols-outlined text-[18px] ${
                   spreadPP > 0 ? 'text-[#ba1a1a]' : 'text-[#006a61]'
@@ -522,7 +524,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               </span>
             </div>
             <div className="my-2">
-              <span className="text-[11px] text-[#45464d] font-medium">Sobre a Média Oficial</span>
+              <span className="text-[11px] text-[#45464d] font-medium">Comparado ao País</span>
               <div
                 className={`text-2xl font-bold tracking-tight tabular-nums font-mono ${
                   spreadPP > 0.05 ? 'text-[#ba1a1a]' : spreadPP < -0.05 ? 'text-[#006a61]' : 'text-[#0b1c30]'
@@ -543,21 +545,21 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               }`}
             >
               {spreadPP > 0.05
-                ? 'Cesta acima do país'
+                ? 'Seus gastos subiram mais'
                 : spreadPP < -0.05
-                ? 'Cesta abaixo do país'
-                : 'Alinhada à média'}
+                ? 'Seus gastos subiram menos'
+                : 'Alinhado à média'}
             </div>
           </div>
 
-          {/* KPI 5: Variação Renda Nominal */}
+          {/* KPI 5: Variação da Renda */}
           <div className="bg-[#ffffff] rounded-xl p-4 shadow-sm flex flex-col justify-between border border-[#eff4ff]">
             <div className="flex items-center justify-between text-[#45464d]">
-              <span className="font-mono text-xs uppercase tracking-wider font-semibold">Renda Nominal</span>
+              <span className="font-mono text-xs uppercase tracking-wider font-semibold">Sua Renda</span>
               <span className="material-symbols-outlined text-[18px] text-[#006a61]">trending_up</span>
             </div>
             <div className="my-2">
-              <span className="text-[11px] text-[#45464d] font-medium">Ajuste no Período</span>
+              <span className="text-[11px] text-[#45464d] font-medium">Mudança no Salário</span>
               <div className="text-2xl font-bold text-[#0b1c30] tracking-tight tabular-nums font-mono">
                 {purchasingPower.nominalIncomeGrowthPercent !== null
                   ? formatSignedPercent(purchasingPower.nominalIncomeGrowthPercent)
@@ -588,7 +590,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               </span>
             </div>
             <div className="my-2">
-              <span className="text-[11px] text-[#45464d] font-medium">Efeito Real Pós-Inflação</span>
+              <span className="text-[11px] text-[#45464d] font-medium">O que seu dinheiro compra</span>
               <div
                 className={`text-2xl font-bold tracking-tight tabular-nums font-mono ${
                   purchasingPower.realPurchasingPowerChangePercent === null
@@ -605,16 +607,16 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             </div>
             <div className="flex items-center gap-1 text-[#45464d] font-mono text-[11px]">
               {purchasingPower.realPurchasingPowerChangePercent === null ? (
-                <span>Informe a renda para apurar</span>
+                <span>Informe sua renda</span>
               ) : purchasingPower.realPurchasingPowerChangePercent < 0 ? (
                 <>
                   <span className="material-symbols-outlined text-[14px] text-[#ba1a1a]">arrow_downward</span>
-                  <span>Perda de compra real</span>
+                  <span>Dinheiro comprando menos</span>
                 </>
               ) : (
                 <>
                   <span className="material-symbols-outlined text-[14px] text-[#006a61]">arrow_upward</span>
-                  <span>Ganho de compra real</span>
+                  <span>Dinheiro comprando mais</span>
                 </>
               )}
             </div>
@@ -1133,6 +1135,46 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             </div>
           </div>
         </div>
+
+        {/* 5. Transparência Metodológica & Indicadores Avançados (Colapsável) */}
+        <details className="bg-[#ffffff] rounded-xl border border-[#eff4ff] p-5 shadow-sm group">
+          <summary className="font-semibold text-xs text-[#45464d] hover:text-[#0b1c30] cursor-pointer flex items-center justify-between list-none">
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-[18px] text-[#006a61]">menu_book</span>
+              <span className="font-mono uppercase tracking-wider">Como calculamos seus números (Metodologia e Fórmulas)</span>
+            </div>
+            <span className="material-symbols-outlined text-[18px] group-open:rotate-180 transition-transform">
+              expand_more
+            </span>
+          </summary>
+          <div className="pt-4 mt-3 border-t border-[#eff4ff] text-xs text-[#45464d] flex flex-col gap-3 leading-relaxed">
+            <p>
+              O <strong>IPCA-Casa</strong> adota o modelo matemático de índice de preços ponderado por gastos familiares (estrutura análoga ao <em>Índice de Laspeyres</em> utilizado pelo IBGE), medindo a variação no custo de uma cesta fixa de bens e serviços ao longo do tempo:
+            </p>
+            <div className="p-3 bg-[#eff4ff] rounded-lg font-mono text-[11px] text-[#0b1c30] flex flex-col gap-1 overflow-x-auto">
+              <div>Fórmula: <strong>I_L = [ ∑ ( P_atual,i × Q_base,i ) / ∑ ( P_base,i × Q_base,i ) - 1 ] × 100%</strong></div>
+              <div>Peso de cada item: <strong>w_i = Gasto_mensal,i / Gasto_total_da_cesta</strong></div>
+              <div>Cobertura de comparabilidade dos dados: <strong>{summary.comparableCoveragePercent.toFixed(1).replace('.', ',')}%</strong> dos itens possuem preços anterior e atual válidos.</div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 font-mono text-[11px] mt-1">
+              <div className="p-2.5 bg-[#eff4ff] rounded-lg">
+                <span className="text-[#76777d] block">Custo Base da Cesta:</span>
+                <span className="font-bold text-[#0b1c30]">R$ {formatCurrencyBR(summary.methodology.baseBasketCost)}</span>
+              </div>
+              <div className="p-2.5 bg-[#eff4ff] rounded-lg">
+                <span className="text-[#76777d] block">Custo Atual da Mesma Cesta:</span>
+                <span className="font-bold text-[#0b1c30]">R$ {formatCurrencyBR(summary.methodology.currentCostOfBaseBasket)}</span>
+              </div>
+              <div className="p-2.5 bg-[#eff4ff] rounded-lg">
+                <span className="text-[#76777d] block">Efeito Puro dos Preços:</span>
+                <span className={`font-bold ${summary.budgetDecomposition.priceEffectReais >= 0 ? 'text-[#ba1a1a]' : 'text-[#006a61]'}`}>
+                  {summary.budgetDecomposition.priceEffectReais >= 0 ? '+R$ ' : '-R$ '}
+                  {formatCurrencyBR(Math.abs(summary.budgetDecomposition.priceEffectReais))}/mês
+                </span>
+              </div>
+            </div>
+          </div>
+        </details>
       </div>
     </div>
   );

@@ -1,96 +1,184 @@
-/**
- * IPCA-Casa: Tipos e Contratos do Sistema
- * Modelagem de dados para o Índice de Preços ao Consumidor Amplo Doméstico
- */
+export type ItemClassification = 'Essencial' | 'Supérfluo' | 'Discricionário' | 'Não classificado';
+export type ExpenseClassification = ItemClassification;
+export type ExpenseNature = 'Fixa' | 'Variável';
+export type RecurrenceType = 'Recorrente' | 'Eventual';
+export type AccountingType =
+  | 'Consumo'
+  | 'Amortização de dívida'
+  | 'Aplicação financeira'
+  | 'Transferência';
 
-export type ItemClassification = 'Essencial' | 'Supérfluo' | 'Não classificado';
+export type ConsumptionFrequency =
+  | 'mensal'
+  | 'quinzenal'
+  | 'semanal'
+  | 'diaria'
+  | 'anual'
+  | 'personalizada_dias';
 
-export type IBGEGroupName =
+export type DataOrigin =
+  | 'usuario'
+  | 'oficial_ibge'
+  | 'demonstrativo'
+  | 'estimado'
+  | 'simulado'
+  | 'cache';
+
+export type DataCompletenessState =
+  | 'ok'
+  | 'nao_informado'
+  | 'indisponivel'
+  | 'invalido'
+  | 'estimado'
+  | 'desatualizado'
+  | 'sem_comparabilidade';
+
+export type TimeframeWindow = '12M' | 'YTD' | '1M' | 'CUSTOM';
+export type TimeframeOption = TimeframeWindow;
+export type PocketImpactPerspective = 'ipca-oficial' | 'ipca-casa' | 'variacao-cesta';
+
+export type ItemDataStatus = 'Completo' | 'Incompleto' | 'Arquivado';
+
+export type ImpactLevel =
+  | 'Crítico'
+  | 'Alto'
+  | 'Moderado'
+  | 'Baixo'
+  | 'Estável'
+  | 'Alívio'
+  | 'Incompleto';
+
+export type StrategyStatus = 'potencial' | 'simulada' | 'planejada' | 'realizada';
+
+export type InvestmentProductType =
+  | 'poupanca'
+  | 'cdb'
+  | 'tesouro_selic'
+  | 'tesouro_prefixado'
+  | 'tesouro_ipca'
+  | 'fundos'
+  | 'outros';
+
+export type CompoundingFrequency = 'mensal' | 'diaria' | 'anual';
+export type DepositTiming = 'fim' | 'inicio';
+export type TaxMode = 'automatica' | 'manual' | 'isento' | 'bruto';
+
+export type EconomicGroup =
   | 'Alimentação e bebidas'
   | 'Habitação'
+  | 'Artigos de residência'
+  | 'Vestuário'
   | 'Transportes'
   | 'Saúde e cuidados pessoais'
-  | 'Educação'
   | 'Despesas pessoais'
+  | 'Educação'
   | 'Comunicação'
-  | 'Vestuário'
-  | 'Artigos de residência'
-  | (string & {});
+  | string;
+
+export interface ToastNotification {
+  id: string;
+  type: 'success' | 'error' | 'info';
+  message: string;
+  timestamp?: number;
+}
 
 export interface ConsumptionGroup {
   id: string;
   name: string;
-  description: string;
+  description?: string;
   color: string;
   icon: string;
-  nationalWeightIBGE?: number; // Peso médio na POF/IBGE para referência
+  nationalWeightIBGE?: number;
   isCustom?: boolean;
   active?: boolean;
 }
 
-export interface PriceRecord {
+export interface UserAccount {
   id: string;
-  itemId: string;
-  price: number;
-  referenceDate: string; // YYYY-MM-DD
-  unit?: string;
-  source?: string; // ex: "Supermercado Habitual", "Nota Fiscal Paulista", "Boleto Enel"
-  notes?: string;
+  email: string;
+  displayName: string;
+  avatarUrl?: string;
+  authProvider?: 'google' | 'password' | 'email';
+  emailVerified?: boolean;
   createdAt: string;
-}
-
-export type PriceHistory = PriceRecord;
-
-export interface BasketItem {
-  id: string;
+  lastLoginAt: string;
+  lastSyncAt?: string;
   profileId: string;
-  name: string;
-  description?: string;
-  group: string;
-  classification: ItemClassification;
-  monthlySpend: number; // Gasto mensal consolidado (R$)
-  oldPrice: number; // Preço no início do período (R$)
-  currentPrice: number; // Preço no final do período (R$)
-  oldPriceDate: string;
-  currentPriceDate: string;
-  unit: string; // ex: "kg", "litro", "unidade", "kWh", "m³", "mensalidade"
-  notes?: string;
-  active: boolean;
-  isArchived?: boolean;
-  createdAt: string;
-  updatedAt: string;
 }
 
-export interface CalculatedItem extends BasketItem {
-  weightPercent: number; // w_i (%) = (G_i / G_total) * 100
-  priceChangePercent: number | null; // ΔP_i (%) = ((P_1 - P_0) / P_0) * 100 (null se não disponível)
-  weightedContribution: number; // C_i (p.p.) = (w_i / 100) * ΔP_i
-  impactLevel: 'Alívio' | 'Baixo' | 'Moderado' | 'Alto' | 'Crítico';
-  isVillain: boolean; // Alto peso E alta variação
-  isDataComplete: boolean;
-  isPriceChangeAvailable: boolean;
-}
-
-export interface GroupContribution {
-  group: string;
-  totalSpend: number;
-  weightPercent: number;
-  weightedContribution: number; // soma dos C_i do grupo
-  itemCount: number;
-  color: string;
-  icon: string;
+export interface AuthSession {
+  user: UserAccount;
+  token?: string;
+  expiresAt?: string;
 }
 
 export interface FamilyProfile {
   id: string;
   name: string;
   membersCount: number;
-  referenceRegion: string; // ex: "São Paulo - SP", "Rio de Janeiro - RJ", "Brasil"
-  currency: string;
+  referenceRegion: string;
+  currency: 'BRL' | string;
   isDemo?: boolean;
   createdAt: string;
   updatedAt: string;
 }
+
+export interface BasketItem {
+  id: string;
+  profileId?: string;
+  name: string;
+  description?: string;
+  group: EconomicGroup;
+  subcategory?: string;
+  classification: ItemClassification;
+  monthlySpend: number;
+  oldPrice: number;
+  currentPrice: number;
+  oldPriceDate: string;
+  currentPriceDate: string;
+  unit: string;
+  quantity?: number;
+  baseQuantity?: number;
+  packageSize?: number;
+  packageUnit?: string;
+  consumptionFrequency?: ConsumptionFrequency;
+  frequencyDays?: number;
+  expenseNature?: ExpenseNature;
+  recurrenceType?: RecurrenceType;
+  accountingType?: AccountingType;
+  comparabilityBroken?: boolean;
+  comparabilityReason?: string;
+  dataOrigin?: DataOrigin;
+  notes?: string;
+  active: boolean;
+  isArchived?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface PriceRecord {
+  id: string;
+  profileId?: string;
+  itemId: string;
+  itemName?: string;
+  price: number;
+  referenceDate: string;
+  date?: string;
+  unit?: string;
+  source?: string;
+  origin?: string;
+  region?: string;
+  packageSize?: number;
+  packageUnit?: string;
+  dataOrigin?: DataOrigin;
+  comparabilityBroken?: boolean;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  isDemo?: boolean;
+}
+
+export type PriceHistory = PriceRecord;
 
 export interface IncomeRecord {
   id: string;
@@ -100,164 +188,426 @@ export interface IncomeRecord {
   source?: string;
   notes?: string;
   createdAt?: string;
-}
-
-export interface PurchasingPowerAnalysis {
-  hasIncomeData: boolean;
-  initialIncome: number | null;
-  finalIncome: number | null;
-  initialDate: string;
-  finalDate: string;
-  nominalIncomeGrowthPercent: number | null; // g (%)
-  appliedInflationPercent: number; // π (%)
-  inflationSource: 'IPCA-Casa' | 'IBGE';
-  realPurchasingPowerChangePercent: number | null; // r (%)
-  monthlyPurchasingDeficitOrGain: number | null; // em R$
-  annualizedImpact: number | null; // em R$
-  neededSalaryForBreakeven: number | null; // R$ para empate
-  neededSalaryWithRealGain: (targetRealGainPercent: number) => number | null;
+  updatedAt?: string;
+  // Campos opcionais estendidos para diagnóstico financeiro completo (§21, §28, §35)
+  grossIncome?: number;
+  netIncome?: number;
+  incomeType?: string;
+  debtObligations?: number;
+  financialApplications?: number;
+  transfers?: number;
+  availableReserve?: number;
+  workingDaysPerMonth?: number;
 }
 
 export interface SubstitutePlanA {
   id: string;
-  profileId: string;
+  profileId?: string;
   originalItemId: string;
   originalItemName: string;
   originalPrice: number;
+  originalPackageSize?: number;
+  originalPackageUnit?: string;
   substituteName: string;
   substitutePrice: number;
+  substitutePackageSize?: number;
+  substitutePackageUnit?: string;
+  monthlyQuantity?: number;
   monthlySavings: number;
   qualitativeTradeoff: string;
-  applied: boolean;
   unit?: string;
   notes?: string;
+  status?: StrategyStatus;
+  applied: boolean;
 }
 
 export interface EfficiencyPlanB {
   id: string;
-  profileId: string;
+  profileId?: string;
   resourceName: string;
+  resourceCategory?: 'energia' | 'agua' | 'combustivel' | 'gas' | 'internet' | 'outros';
   unit: string;
   tariffPerUnit: number;
+  fixedFee?: number;
+  extraCharges?: number;
+  tariffSource?: string;
+  tariffDate?: string;
+  tieredTariffNote?: string;
   currentConsumption: number;
   targetConsumption: number;
   currentSpend: number;
   estimatedMonthlySavings: number;
   progressPercent: number;
+  status?: StrategyStatus;
   applied: boolean;
   notes?: string;
 }
 
 export interface OpportunityPlanC {
   id: string;
-  profileId: string;
+  profileId?: string;
+  initialCapital?: number;
   monthlyInvestment: number;
-  nominalAnnualRate: number; // ex: 10.5% (Selic/CDI)
-  expectedAnnualInflation: number; // ex: 4.0%
-  realAnnualYield: number; // rentabilidade real Fisher
+  termMonths?: number;
+  nominalAnnualRate: number;
+  expectedAnnualInflation: number;
+  realAnnualYield: number;
   projection12Months: number;
   projection24Months: number;
   projection36Months: number;
+  productType?: InvestmentProductType;
+  compoundingFrequency?: CompoundingFrequency;
+  depositTiming?: DepositTiming;
+  taxMode?: TaxMode;
+  manualTaxRate?: number;
+  adminFeeAnnual?: number;
+  custodyFeeAnnual?: number;
   useLinkedSavings?: boolean;
-  notes?: string;
   isSimulated?: boolean;
+  status?: StrategyStatus;
+  notes?: string;
   updatedAt?: string;
 }
 
-export type TimeframeOption = '12M' | 'YTD' | '1M' | 'CUSTOM';
+export interface IBGEHistoricalPoint {
+  date: string; // 'YYYY-MM-01'
+  monthCode?: string; // 'YYYYMM'
+  label: string; // 'Fev/26'
+  monthlyRate: number;
+  accumulated12M: number;
+  accumulatedYear: number | null;
+}
+
+export interface CalculatedBasketItem extends BasketItem {
+  priceChangePercent: number | null;
+  weightPercent: number; // Peso-base normalizado dentro do subconjunto comparável (soma = 100%)
+  baseWeightPercent: number;
+  currentWeightPercent: number;
+  budgetSharePercent: number; // Participação sobre TODA a despesa de consumo ativa
+  weightedContribution: number;
+  impactLevel: ImpactLevel;
+  isVillain: boolean;
+  isDataComplete: boolean;
+  isPriceChangeAvailable: boolean;
+  dataStatus: ItemDataStatus;
+  dataState: DataCompletenessState;
+  dataOriginResolved: DataOrigin;
+  isConsumptionItem: boolean;
+  isComparable: boolean;
+  exclusionReason?: string;
+  baseCostReais: number;
+  currentCostOfBaseReais: number;
+  priceEffectReais: number;
+  quantityEffectReais: number;
+  mixEffectReais: number;
+  spendChangeReais: number;
+  normalizedCurrentUnitPrice: number | null;
+  normalizedBaseUnitPrice: number | null;
+  canonicalUnit: string;
+  monthlyEquivalenceNote?: string;
+  isMonthlyEquivalence?: boolean;
+  effectiveOldPrice: number;
+  effectiveCurrentPrice: number;
+}
+
+export type CalculatedItem = CalculatedBasketItem;
+
+export interface GroupContribution {
+  group: EconomicGroup;
+  totalSpend: number;
+  baseSpend: number;
+  weightPercent: number;
+  baseWeightPercent: number;
+  currentWeightPercent: number;
+  weightedContribution: number;
+  groupInflationPercent: number | null;
+  groupCoveragePercent: number;
+  itemCount: number;
+  eligibleItemsCount: number;
+  isOfficialIbgeGroup: boolean;
+  color: string;
+  icon: string;
+}
+
+export interface PurchasingPowerAnalysis {
+  initialIncome: number | null;
+  finalIncome: number | null;
+  grossIncome: number | null;
+  netIncome: number | null;
+  initialDate: string;
+  finalDate: string;
+  hasIncomeData: boolean;
+  nominalIncomeGrowthPercent: number | null;
+  appliedInflationPercent: number;
+  inflationSource: string;
+  realPurchasingPowerChangePercent: number | null;
+  neededSalaryForBreakeven: number | null;
+  neededSalaryWithRealGain: (targetRealGain: number) => number | null;
+  monthlyPurchasingDeficitOrGain: number | null;
+  annualizedImpact: number | null;
+}
+
+export interface PocketImpactBreakdown {
+  ibgeMonthlyEffect: number;
+  ibgeAnnualEffect: number;
+  houseMonthlyEffect: number;
+  houseAnnualEffect: number;
+  directBasketDifference: number;
+  directBasketAnnual: number;
+  monthlyRealVariation: number;
+  annualRealVariation: number;
+  annualizationNotice: string;
+}
+
+export interface LaspeyresResult {
+  methodology: 'laspeyres_classico' | 'ponderado_gasto_informado' | 'insuficiente';
+  methodologyLabel: string;
+  indexValue: number | null;
+  variationPercent: number;
+  baseBasketCost: number;
+  currentCostOfBaseBasket: number;
+  comparableCoveragePercent: number;
+  comparableItemsCount: number;
+  totalConsumptionItemsCount: number;
+  sumOfComparableWeights: number;
+}
+
+export interface BudgetDecomposition {
+  baseCostTotal: number;
+  currentCostTotal: number;
+  currentCostOfBaseBasket: number;
+  priceEffectReais: number;
+  quantityEffectReais: number;
+  mixEffectReais: number;
+  totalSpendChangeReais: number;
+  totalSpendChangePercent: number | null;
+  reconcilesExact: boolean;
+}
+
+export interface HouseholdIndicators {
+  netIncome: number | null;
+  grossIncome: number | null;
+  consumptionExpenses: number;
+  debtObligations: number;
+  financialApplications: number;
+  transfers: number;
+  essentialExpenses: number;
+  discretionaryExpenses: number;
+  totalCommitments: number;
+  monthlyBalance: number | null;
+  expenseToIncomePercent: number | null;
+  savingsRatePercent: number | null;
+  essentialSharePercent: number | null;
+  debtCommitmentPercent: number | null;
+  reserveInMonths: number | null;
+  availableReserve: number | null;
+  realExpenseVariationPercent: number | null;
+  completenessStatus: 'completo' | 'parcial' | 'insuficiente';
+  missingFields: string[];
+}
+
+export interface ChainedSeriesPoint {
+  monthCode: string;
+  label: string;
+  monthlyChangePercent: number;
+  chainedIndexValue: number;
+  accumulatedPercent: number;
+  comparableItemsCount: number;
+  coveragePercent: number;
+  compositionChanged: boolean;
+}
+
+export interface CalculationTrace {
+  id: string;
+  label: string;
+  formula: string;
+  inputsSummary: string;
+  referencePeriod: string;
+  unit: string;
+  resultDisplay: string;
+  dataOrigin: DataOrigin;
+  premises: string[];
+  limitations: string[];
+  validityStatus: 'valido' | 'parcial' | 'indisponivel' | 'estimado';
+}
 
 export interface EconomicCalculationSummary {
   totalMonthlySpend: number;
+  nonConsumptionSpend: number;
   totalItemsCount: number;
   eligibleItemsCount: number;
   ignoredItemsCount: number;
+  incompleteItemsCount: number;
   essentialCount: number;
   superfluousCount: number;
   unclassifiedCount: number;
+  sumOfWeights: number;
+  comparableCoveragePercent: number;
   ipcaCasa12M: number;
   ipcaIBGE12M: number;
-  spreadPP: number; // IPCA-Casa - IPCA IBGE
-  sumOfWeights: number;
+  spreadPP: number;
   timeframeLabel: string;
-  calculatedItems: CalculatedItem[];
+  activeTimeframe: TimeframeWindow;
+  periodStartDate?: string;
+  periodEndDate?: string;
+  methodology: LaspeyresResult;
+  budgetDecomposition: BudgetDecomposition;
+  householdIndicators: HouseholdIndicators;
+  chainedSeries: ChainedSeriesPoint[];
   groupContributions: GroupContribution[];
-  topIncreases: CalculatedItem[]; // Top maiores variações nominais
-  topVillains: CalculatedItem[]; // Top maiores contribuições ponderadas em p.p.
+  calculatedItems: CalculatedBasketItem[];
+  topVillains: CalculatedBasketItem[];
+  topIncreases: CalculatedBasketItem[];
+  topReliefs: CalculatedBasketItem[];
   purchasingPower: PurchasingPowerAnalysis;
+  pocketImpact: PocketImpactBreakdown;
+  traces: CalculationTrace[];
 }
 
-export interface IBGEHistoricalPoint {
-  date: string; // YYYY-MM
-  label: string; // "Mar/23", etc.
-  monthlyRate: number; // variação percentual do mês
-  accumulated12M: number; // acumulado 12 meses (%)
+export interface MonetaryCorrectionResult {
+  valid: boolean;
+  initialAmount: number;
+  correctedAmount: number | null;
+  differenceReais: number | null;
+  accumulatedFactor: number | null;
+  accumulatedPercent: number | null;
+  indexUsedLabel: string;
+  periodLabel: string;
+  reason?: string;
 }
 
-export interface ToastNotification {
-  id: string;
-  type: 'success' | 'error' | 'info';
-  message: string;
-  timestamp: number;
+export interface WorkingDaysEquivalenceResult {
+  valid: boolean;
+  dailyRate: number | null;
+  workingDaysNeeded: number | null;
+  purchasableUnitsWithIncome: number | null;
+  workingDaysPerMonth: number;
+  premiseNote: string;
+  reason?: string;
 }
 
-// ==========================================
-// AUTENTICAÇÃO E CONTA DE USUÁRIO
-// ==========================================
-export interface UserAccount {
-  id: string;
-  email: string;
-  displayName: string;
-  avatarUrl?: string;
-  authProvider?: 'google' | 'password';
-  emailVerified?: boolean;
-  createdAt: string;
-  lastLoginAt: string;
-  profileId: string;
+export interface NormalizedQuoteStats {
+  totalCount: number;
+  comparableCount: number;
+  excludedCount: number;
+  minPrice: number | null;
+  maxPrice: number | null;
+  averagePrice: number | null;
+  latestPrice: number | null;
+  oldestPrice: number | null;
+  absoluteChange: number | null;
+  percentChange: number | null;
+  canonicalUnit: string;
+  isNormalized: boolean;
+  averageMethodNote: string;
+  minRecord?: PriceRecord;
+  maxRecord?: PriceRecord;
+  latestRecord?: PriceRecord;
 }
 
-export interface AuthSession {
-  user: UserAccount;
-  token?: string;
+export interface PlanCScheduleRow {
+  month: number;
+  contributedCumulative: number;
+  grossBalance: number;
+  interestPeriod: number;
+  netEstimated: number;
+  realValue: number;
 }
 
-// ==========================================
-// DADOS DETALHADOS DO IBGE / SIDRA
-// ==========================================
-export interface IBGEGroupDetail {
-  code: string;
-  name: string;
-  monthlyRate: number;
-  accumulatedYearRate?: number;
-  accumulated12MRate?: number;
-  weightPercent?: number;
+export interface PlanCSimulationResult {
+  valid: boolean;
+  productType: InvestmentProductType;
+  productLabel: string;
+  compoundingFrequency: CompoundingFrequency;
+  depositTiming: DepositTiming;
+  termMonths: number;
+  initialCapital: number;
+  monthlyDeposit: number;
+  totalContributed: number;
+  grossFutureValue: number;
+  grossInterest: number;
+  estimatedTaxes: number;
+  estimatedTaxRatePercent: number;
+  estimatedCosts: number;
+  netFutureValue: number;
+  realFutureValue: number;
+  nominalReturnPercent: number;
+  realReturnPercent: number;
+  taxAppliedLabel: string;
+  fgcAndRiskDisclaimer: string;
+  liquidityDisclaimer: string;
+  missingTaxInfoNote?: string;
+  schedule: PlanCScheduleRow[];
 }
 
-export interface IBGERegionalItem {
-  id: string;
-  name: string;
-  state: string;
-  monthlyRate: number;
-  accumulated12MRate?: number;
-}
-
-// ==========================================
-// IMPACTO DA INFLAÇÃO NO BOLSO
-// ==========================================
-export type PocketImpactPerspective = 'ipca-oficial' | 'ipca-casa' | 'variacao-cesta';
-
-export interface PocketImpactMetrics {
-  monthlySpendReference: number; // G
-  inflationRatePercent: number; // π (%)
-  estimatedMonthlyImpact: number; // G * (π / 100)
-  estimatedAnnualImpact: number; // estimatedMonthlyImpact * 12 (sem dupla contagem)
-  initialIncome: number; // R_inicial
-  currentIncome: number; // R_atual
-  neededIncomeForBreakeven: number; // R_inicial * (1 + π/100)
-  realDifferenceReais: number; // R_atual - R_necessária
+export interface EconomicScenarioInput {
+  id: 'conservador' | 'base' | 'otimista';
+  label: string;
+  annualInflationPercent: number;
   nominalIncomeGrowthPercent: number;
-  realPurchasingPowerPercent: number;
-  hasLoss: boolean;
-  perspective: PocketImpactPerspective;
-  observedBasketDifferenceReais?: number;
+  priceShockPercent: number;
+  consumptionAdjustmentPercent: number;
+  monthlyContribution: number;
+  unexpectedExpenseMonthly: number;
 }
 
+export interface EconomicScenarioResult extends EconomicScenarioInput {
+  projectedMonthlyExpense: number;
+  projectedMonthlyIncome: number;
+  projectedMonthlyBalance: number;
+  projectedAnnualBalance: number;
+  realIncomeVariationPercent: number;
+  projected12MInvestmentNet: number;
+  disclaimer: string;
+}
+
+export interface SensitivityCell {
+  inflationPercent: number;
+  incomeGrowthPercent: number;
+  consumptionReductionPercent: number;
+  projectedExpenseMonthly: number;
+  projectedIncomeMonthly: number;
+  projectedBalanceMonthly: number;
+  realIncomeChangePercent: number;
+}
+
+export interface ReportExportPayload {
+  generatedAt: string;
+  profile: FamilyProfile | null;
+  isDemo: boolean;
+  timeframeLabel: string;
+  ibgeOriginLabel: string;
+  ibgeReferenceMonth: string;
+  summary: {
+    ipcaCasaPercent: number;
+    ipcaOficialPercent: number;
+    spreadPP: number;
+    totalMonthlySpend: number;
+    nonConsumptionSpend: number;
+    comparableCoveragePercent: number;
+    methodologyLabel: string;
+  };
+  householdIndicators: HouseholdIndicators;
+  purchasingPower: PurchasingPowerAnalysis;
+  budgetDecomposition: BudgetDecomposition;
+  groupContributions: GroupContribution[];
+  topVillains: Array<{
+    name: string;
+    group: string;
+    weightPercent: number;
+    priceChangePercent: number | null;
+    weightedContribution: number;
+  }>;
+  activeStrategies: {
+    planATotalMonthly: number;
+    planBTotalMonthly: number;
+    totalMonthlyPotential: number;
+    planCNetProjection36M: number;
+    planCConsidered: boolean;
+    itemsCountA: number;
+    itemsCountB: number;
+  };
+  premises: string[];
+  limitations: string[];
+  sources: string[];
+}

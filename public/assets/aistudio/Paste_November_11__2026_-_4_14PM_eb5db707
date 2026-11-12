@@ -1,0 +1,1170 @@
+MISSÃO: AUDITORIA, CORREÇÃO E CONSOLIDAÇÃO COMPLETA DO IPCA-CASA
+1. OBJETIVO PRINCIPAL
+
+Você já está trabalhando no desenvolvimento do IPCA-Casa e conhece o projeto, sua estrutura, suas tecnologias, suas funcionalidades e suas decisões de implementação.
+
+Agora, sua missão é realizar uma auditoria técnica, matemática, estatística, financeira e funcional de tudo o que já foi desenvolvido, corrigindo inconsistências e implementando diretamente no projeto as melhorias necessárias.
+
+Não comece o projeto novamente. Não recrie funcionalidades que já estão funcionando. Não substitua a arquitetura existente sem necessidade.
+
+Aproveite o trabalho já realizado e concentre-se em identificar o que está incorreto, incompleto, inconsistente, desconectado ou implementado apenas visualmente.
+
+Não quero apenas um relatório, sugestões ou exemplos de código.
+
+Quero que você execute as alterações diretamente no projeto, teste as implementações e deixe o sistema funcionando.
+
+O objetivo é transformar o IPCA-Casa em uma plataforma financeiramente consistente, matematicamente confiável, estatisticamente transparente e funcional em todas as suas áreas.
+
+2. REGRAS FUNDAMENTAIS DE EXECUÇÃO
+
+Siga rigorosamente estas regras durante todo o trabalho:
+
+Preserve as funcionalidades que já estão corretas.
+Preserve a identidade visual e a experiência de navegação existentes, salvo quando houver problemas que justifiquem alterações.
+Reutilize componentes, serviços, estruturas e integrações já implementados.
+Evite duplicação de código e de regras de negócio.
+Não crie números fixos nos componentes para mascarar cálculos ausentes.
+Não invente dados oficiais ou resultados estatísticos.
+Não substitua dados reais do usuário por dados demonstrativos.
+Não apresente estimativas como resultados observados.
+Não altere funcionalidades sem verificar seus impactos nas demais áreas.
+Não deixe botões, filtros, gráficos ou formulários funcionando apenas visualmente.
+Não considere uma funcionalidade concluída apenas porque sua interface está pronta.
+Não afirme que executou testes, integrações ou validações que não foram realmente realizados.
+
+Antes de alterar qualquer funcionalidade, verifique como ela está implementada atualmente e quais outras partes do sistema dependem dela.
+
+Quando identificar uma implementação correta, preserve-a.
+
+Quando identificar uma implementação parcialmente correta, corrija apenas o necessário.
+
+Quando identificar uma implementação matematicamente incorreta, substitua-a por uma implementação validada.
+
+PARTE I — AUDITORIA DO ESTADO ATUAL
+3. AUDITORIA GERAL
+
+Examine o projeto existente e identifique:
+
+Estrutura atual.
+Serviços responsáveis pelos cálculos.
+Modelos e tipos de dados.
+Armazenamento e persistência.
+Integrações com o IBGE.
+Dados demonstrativos.
+Dados reais informados pelos usuários.
+Componentes das dez abas.
+Fórmulas financeiras e estatísticas.
+Indicadores apresentados.
+Gráficos e tabelas.
+Relatórios.
+Configurações.
+Filtros e formulários.
+Funcionalidades incompletas.
+Valores fixos inseridos diretamente nas interfaces.
+Possíveis divergências entre os números apresentados em diferentes telas.
+
+Investigue os arquivos existentes, sem presumir que os caminhos originais continuam iguais.
+
+Identifique principalmente se há cálculos duplicados, resultados armazenados desatualizados ou componentes que utilizam fontes diferentes para apresentar o mesmo indicador.
+
+4. IDENTIFICAÇÃO DOS PROBLEMAS
+
+Classifique os problemas encontrados em:
+
+Críticos: erros que comprometem resultados financeiros ou estatísticos.
+Altos: inconsistências que afetam indicadores, relatórios ou funcionalidades.
+Médios: problemas de integração, atualização, validação ou experiência de uso.
+Baixos: melhorias de organização, documentação e manutenção.
+
+Após essa identificação, não interrompa o trabalho.
+
+Utilize a auditoria como base para executar as correções.
+
+PARTE II — CONSOLIDAÇÃO DO MOTOR FINANCEIRO
+5. FONTE ÚNICA DE VERDADE
+
+Garanta que todas as abas utilizem uma única fonte de dados e regras de cálculo.
+
+Centralize as operações financeiras e estatísticas nos serviços apropriados à arquitetura existente.
+
+Evite que cada componente implemente suas próprias fórmulas.
+
+O motor deverá ser responsável por:
+
+Cálculo da inflação doméstica.
+Índices de preços.
+Variação de preços.
+Pesos orçamentários.
+Contribuições por item e grupo.
+Gastos mensais.
+Impacto da inflação.
+Análise de renda.
+Poder de compra.
+Projeções financeiras.
+Estratégias de economia.
+Análises históricas.
+Indicadores financeiros.
+Validação dos dados.
+
+Cada resultado importante deverá possuir informações suficientes para sua rastreabilidade:
+
+Identificação do cálculo.
+Fórmula ou metodologia.
+Dados utilizados.
+Período de referência.
+Unidade.
+Resultado.
+Origem dos dados.
+Premissas.
+Limitações.
+Status de validade.
+
+Os componentes visuais devem consumir os resultados processados pelo motor.
+
+Utilize precisão decimal adequada para operações financeiras. Evite erros de ponto flutuante e arredondamentos intermediários desnecessários.
+
+6. SINCRONIZAÇÃO AUTOMÁTICA
+
+Qualquer alteração nos dados deverá atualizar todos os indicadores dependentes.
+
+Exemplo:
+
+Ao alterar o preço de um produto, o sistema deverá atualizar:
+
+Gasto mensal do produto.
+Gasto total da cesta.
+Peso orçamentário.
+Variação de preço.
+Contribuição para a inflação.
+Índice doméstico, quando houver dados comparáveis.
+Indicadores financeiros.
+Gráficos.
+Comparações.
+Relatórios.
+
+Implemente invalidação e atualização dos dados derivados conforme a arquitetura existente.
+
+Não permita que uma tela apresente valores antigos enquanto outra apresenta valores atualizados.
+
+PARTE III — PADRONIZAÇÃO DOS DADOS
+7. ESTRUTURA DOS ITENS DA CESTA
+
+Verifique se cada item possui informações suficientes para os cálculos.
+
+A estrutura deverá contemplar:
+
+ID.
+Nome.
+Descrição.
+Categoria.
+Subcategoria.
+Unidade de medida.
+Preço.
+Quantidade.
+Frequência de consumo.
+Gasto mensal.
+Histórico de preços.
+Data de atualização.
+Origem.
+Classificação do dado.
+Observações.
+
+Diferencie claramente:
+
+Dados reais informados pelo usuário.
+Dados oficiais.
+Dados demonstrativos.
+Dados estimados.
+Dados simulados.
+Dados provenientes de cache.
+
+Não misture essas classificações nos mesmos indicadores sem identificação.
+
+8. UNIDADES E FREQUÊNCIA
+
+Implemente ou corrija as conversões de unidades.
+
+Exemplos:
+
+1 kg = 1.000 g.
+1 litro = 1.000 ml.
+1 dúzia = 12 unidades.
+
+Normalize os preços antes de realizar comparações.
+
+Não compare produtos com unidades incompatíveis.
+
+Para despesas fixas, como aluguel, condomínio e mensalidades, utilize valores mensais diretamente.
+
+Calcule gastos mensais conforme a frequência informada.
+
+Exemplo:
+
+Uma compra de R$ 30 a cada 15 dias:
+
+Gasto mensal estimado = 30 / 15 × 30 = R$ 60.
+
+Deixe explícita a convenção de 30 dias utilizada nessa estimativa.
+
+Para despesas anuais:
+
+Gasto mensal equivalente = Valor anual / 12.
+
+Identifique quando o valor representa uma equivalência mensal, e não uma cobrança efetivamente realizada.
+
+9. VALIDAÇÃO
+
+Corrija validações para impedir:
+
+Preços negativos.
+Quantidades negativas.
+Datas inválidas.
+Unidades incompatíveis.
+Divisão por zero.
+Histórico inconsistente.
+Duplicidades indevidas.
+Comparações sem normalização.
+Inflação calculada com preços inválidos.
+Projeções sem premissas.
+
+Não transforme automaticamente dados ausentes em zero.
+
+Diferencie preço zero, preço ausente, item não consumido e informação indisponível.
+
+PARTE IV — MOTOR DE INFLAÇÃO DOMÉSTICA
+10. VARIAÇÃO DOS PREÇOS
+
+Utilize:
+
+Variação percentual = [(Preço atual / Preço anterior) - 1] × 100.
+
+Somente compare preços efetivamente comparáveis.
+
+Considere alterações de embalagem, quantidade e qualidade.
+
+Quando houver quebra de comparabilidade, sinalize a situação em vez de apresentar uma variação potencialmente incorreta.
+
+11. PESOS ORÇAMENTÁRIOS
+
+Implemente separadamente:
+
+Peso-base = Gasto-base do item / Gasto-base total × 100.
+
+Peso atual = Gasto atual do item / Gasto atual total × 100.
+
+Não misture pesos atuais e pesos-base na mesma metodologia.
+
+Apresente a cobertura considerada.
+
+A soma dos pesos deverá corresponder a 100% dentro do conjunto de itens válidos utilizado no cálculo.
+
+12. ÍNDICE DE LASPEYRES
+
+Verifique e corrija a implementação do índice clássico de Laspeyres.
+
+Fórmula:
+
+IL = [Σ(P1 × Q0) / Σ(P0 × Q0)] × 100.
+
+Onde:
+
+P0 = preço no período-base.
+P1 = preço no período atual.
+Q0 = quantidade no período-base.
+
+Variação percentual = IL - 100.
+
+Utilize sempre as quantidades do período-base.
+
+Não substitua quantidades-base pelas quantidades atuais.
+
+Exemplo obrigatório de validação:
+
+Produto	Preço-base	Preço atual	Quantidade-base
+Arroz	5,00	6,00	10
+Feijão	8,00	10,00	5
+
+Custo-base = R$ 90.
+
+Custo atual da cesta-base = R$ 110.
+
+Índice = 122,22.
+
+Variação = 22,22%.
+
+Crie teste automatizado para reproduzir esse resultado.
+
+Se os dados disponíveis não permitirem calcular um Laspeyres clássico, utilize uma metodologia doméstica simplificada, claramente identificada.
+
+Não denomine um índice doméstico simplificado como IPCA oficial.
+
+13. ÍNDICE ENCADEADO
+
+Quando houver histórico mensal suficiente, implemente índices sucessivos.
+
+Para quantidades de referência compatíveis:
+
+Índice mensal = [Σ(Pt × Qref) / Σ(Pt-1 × Qref)] × 100.
+
+A evolução acumulada deverá ser calculada multiplicativamente.
+
+Índice acumulado = Produto dos fatores mensais.
+
+Variação acumulada = (Índice acumulado - 1) × 100.
+
+Documente mudanças de composição, ponderação e período-base.
+
+Não encadeie séries incompatíveis sem procedimento metodológico explícito.
+
+14. INFLAÇÃO ACUMULADA
+
+Implemente:
+
+Acumulada = [Π(1 + it) - 1] × 100.
+
+Considere it como taxa mensal decimal.
+
+Exemplo:
+
+1% e 2%:
+
+(1,01 × 1,02 - 1) × 100 = 3,02%.
+
+Implemente separadamente:
+
+Variação mensal.
+Acumulado no ano.
+Acumulado em 12 meses.
+Acumulado em período personalizado.
+
+Identifique sempre os meses utilizados.
+
+15. CONTRIBUIÇÃO PARA A INFLAÇÃO
+
+Implemente contribuições consistentes com a metodologia do índice.
+
+Para Laspeyres com pesos-base:
+
+Contribuição em pontos percentuais = Peso-base decimal × Variação percentual do item.
+
+Exemplo:
+
+Peso-base = 20%.
+
+Variação do item = 10%.
+
+Contribuição = 2 pontos percentuais.
+
+A soma das contribuições deverá reconciliar com a variação total do índice, considerando a metodologia e a precisão dos cálculos.
+
+Diferencie:
+
+Peso orçamentário.
+Variação percentual.
+Contribuição em pontos percentuais.
+Participação na variação total.
+
+Apresente os itens que mais pressionaram e os que reduziram o custo da cesta.
+
+16. ANÁLISE POR GRUPOS
+
+Utilize os grupos existentes no projeto, preservando sua classificação quando estiver correta.
+
+Considere categorias como:
+
+Alimentação e bebidas.
+Habitação.
+Artigos de residência.
+Vestuário.
+Transportes.
+Saúde e cuidados pessoais.
+Despesas pessoais.
+Educação.
+Comunicação.
+
+Calcule por grupo:
+
+Despesa total.
+Peso.
+Variação.
+Contribuição.
+Evolução histórica.
+
+Diferencie grupos domésticos personalizados dos agrupamentos oficiais do IBGE.
+
+PARTE V — INTEGRAÇÃO COM O IPCA OFICIAL
+17. IBGE E SIDRA
+
+Audite e corrija a integração existente com as fontes oficiais.
+
+Verifique as tabelas, variáveis, classificações, períodos e abrangências geográficas efetivamente utilizados.
+
+Obtenha, quando disponíveis:
+
+IPCA mensal.
+IPCA acumulado no ano.
+IPCA acumulado em 12 meses.
+Variação por grupos.
+Variação regional.
+Período de referência.
+Fonte oficial.
+
+Não invente códigos de tabelas ou variáveis.
+
+Valide os resultados obtidos com a documentação e os dados publicados pelo IBGE.
+
+Não utilize multiplicadores arbitrários para estimar acumulados.
+
+Quando necessário, componha as variações mensais pela fórmula geométrica.
+
+18. CACHE E ATUALIZAÇÃO
+
+Corrija o mecanismo de cache para registrar:
+
+Data da consulta.
+Período de referência.
+Fonte.
+Status.
+Prazo de validade.
+Data da próxima atualização.
+
+Se a API estiver indisponível, utilize o último dado válido, claramente identificado como cache.
+
+Não apresente dados antigos como atualizados.
+
+Não substitua silenciosamente uma falha da API por valores fictícios.
+
+19. COMPARAÇÃO IPCA-CASA E IPCA OFICIAL
+
+Garanta que a comparação utilize períodos equivalentes.
+
+Apresente:
+
+IPCA-Casa.
+IPCA oficial.
+Diferença em pontos percentuais.
+Diferença relativa, quando pertinente.
+Período.
+Cobertura da cesta.
+Metodologia.
+
+Explique que o IPCA representa uma cesta de referência estatística e não necessariamente a inflação de cada família.
+
+Nunca apresente o índice doméstico como se fosse o índice oficial do IBGE.
+
+PARTE VI — ORÇAMENTO E IMPACTO FINANCEIRO
+20. DESPESAS
+
+Calcule a despesa total a partir das despesas válidas.
+
+Classifique:
+
+Fixas.
+Variáveis.
+Recorrentes.
+Eventuais.
+Essenciais.
+Não essenciais.
+
+Permita que o usuário revise essas classificações.
+
+Apresente:
+
+Total mensal.
+Total anualizado.
+Gastos por grupo.
+Gastos por item.
+Variação em reais.
+Variação percentual.
+Evolução histórica.
+
+Identifique o total anualizado como estimativa quando resultar da multiplicação de um mês por 12.
+
+21. RENDA E SALDO
+
+Diferencie renda bruta e líquida.
+
+Calcule:
+
+Comprometimento da renda = Despesas / Renda líquida × 100.
+
+Saldo = Renda líquida - Despesas.
+
+Separe:
+
+Despesas de consumo.
+Amortização de dívidas.
+Aplicações financeiras.
+Transferências entre contas.
+
+Evite dupla contagem.
+
+Não apresente diagnóstico completo quando os dados financeiros forem parciais.
+
+22. IMPACTO DA INFLAÇÃO NO ORÇAMENTO
+
+Utilize:
+
+Impacto em reais = Custo atual da cesta-base - Custo-base.
+
+Impacto percentual = (Custo atual / Custo-base - 1) × 100.
+
+Separe claramente:
+
+Efeito dos preços.
+Efeito das quantidades.
+Efeito da mudança de composição.
+Aumento total da despesa.
+
+Não atribua automaticamente todo aumento dos gastos à inflação.
+
+23. PROJEÇÕES
+
+Utilize:
+
+Despesa futura = Despesa atual × (1 + taxa mensal)^n.
+
+Quando a entrada for uma taxa anual efetiva:
+
+Taxa mensal equivalente = (1 + taxa anual)^(1/12) - 1.
+
+Identifique:
+
+Valores observados.
+Valores estimados.
+Valores projetados.
+Premissas.
+Horizonte temporal.
+
+Não confunda anualização com inflação efetivamente observada.
+
+PARTE VII — RENDA E PODER DE COMPRA
+24. EVOLUÇÃO DA RENDA
+
+Armazene o histórico de renda por período.
+
+Calcule a variação nominal:
+
+(Renda atual / Renda anterior - 1) × 100.
+
+25. VARIAÇÃO REAL DA RENDA
+
+Utilize:
+
+Variação real = [(1 + crescimento nominal) / (1 + inflação) - 1] × 100.
+
+Exemplo:
+
+Crescimento nominal = 5%.
+
+Inflação = 8%.
+
+Resultado = -2,78%.
+
+Demonstre quando a renda aumenta nominalmente, mas perde poder de compra.
+
+26. RENDA NECESSÁRIA
+
+Calcule:
+
+Renda necessária = Renda-base × (1 + inflação acumulada).
+
+Apresente:
+
+Renda-base.
+Renda atual.
+Renda necessária.
+Diferença em reais.
+Diferença percentual.
+Período.
+
+Não utilize valores fixos.
+
+27. CORREÇÃO MONETÁRIA
+
+Implemente:
+
+Valor corrigido = Valor inicial × (Índice final / Índice inicial).
+
+Permita selecionar:
+
+IPCA oficial.
+Índice doméstico.
+Período inicial.
+Período final.
+
+Identifique o índice utilizado.
+
+28. EQUIVALÊNCIA DE CONSUMO E DIAS DE TRABALHO
+
+Permita calcular quantidades adquiríveis com determinada renda.
+
+Quando houver informações suficientes:
+
+Valor diário de referência = Renda mensal / Dias de trabalho considerados.
+
+Dias necessários = Despesa / Valor diário de referência.
+
+Identifique todas as premissas.
+
+Não apresente estimativas como jornada efetivamente realizada pelo usuário.
+
+PARTE VIII — HISTÓRICO DE PREÇOS
+29. COTAÇÕES
+
+Garanta que o histórico registre:
+
+Produto.
+Estabelecimento ou origem.
+Preço.
+Unidade.
+Quantidade da embalagem.
+Data.
+Região.
+Fonte.
+Classificação do dado.
+
+Implemente:
+
+Menor preço.
+Maior preço.
+Preço médio.
+Último preço.
+Variação em reais.
+Variação percentual.
+Evolução histórica.
+
+O preço médio deve utilizar uma metodologia identificada.
+
+Não misture produtos ou embalagens incompatíveis.
+
+30. COMPARAÇÃO NORMALIZADA
+
+Exemplo:
+
+Produto A: 500 g por R$ 12.
+
+Produto B: 1 kg por R$ 20.
+
+Produto A = R$ 24/kg.
+
+Produto B = R$ 20/kg.
+
+Identifique a opção mais econômica por unidade de medida.
+
+Só calcule economia quando houver comparabilidade adequada.
+
+PARTE IX — ESTRATÉGIAS DE ECONOMIA E INVESTIMENTOS
+31. PLANO A — SUBSTITUIÇÃO
+
+Permita simular a substituição de produtos.
+
+Economia unitária = Preço original normalizado - Preço substituto normalizado.
+
+Economia mensal = Economia unitária × Quantidade mensal.
+
+Economia anual estimada = Economia mensal × 12.
+
+Quando o substituto for mais caro, apresente o aumento de despesa.
+
+Identifique os resultados como economia potencial, não realizada.
+
+32. PLANO B — EFICIÊNCIA DE CONSUMO
+
+Implemente simulações para:
+
+Energia elétrica.
+Água.
+Combustível.
+Gás.
+Internet.
+Outros consumos.
+
+Economia = (Consumo atual - Consumo projetado) × Tarifa aplicável.
+
+Considere tarifas por faixa, custos fixos e cobranças adicionais quando disponíveis.
+
+Identifique a fonte e a data das tarifas.
+
+Não apresente uma tarifa média como se fosse universal.
+
+33. PLANO C — INVESTIMENTOS
+
+Revise e corrija o simulador de investimentos.
+
+Entradas:
+
+Capital inicial.
+Aporte mensal.
+Prazo.
+Taxa.
+Inflação.
+Tributação.
+Custos.
+Frequência de capitalização.
+Momento dos aportes.
+
+Juros compostos:
+
+VF = Capital inicial × (1 + i)^n.
+
+Aportes no final do período:
+
+VF = PMT × [((1 + i)^n - 1) / i].
+
+Capital inicial e aportes:
+
+VF total = Capital inicial × (1 + i)^n + PMT × [((1 + i)^n - 1) / i].
+
+Para aportes no início do período, aplique a capitalização adicional correspondente.
+
+Trate separadamente taxa igual a zero.
+
+Rentabilidade real:
+
+Taxa real = [(1 + taxa nominal) / (1 + inflação) - 1] × 100.
+
+Valor real futuro:
+
+Valor real = Valor nominal futuro / (1 + inflação acumulada).
+
+34. TRIBUTAÇÃO E PRODUTOS FINANCEIROS
+
+Não aplique alíquota universal.
+
+Considere o tipo de investimento, prazo, regras vigentes, custos e base tributável.
+
+Diferencie:
+
+Poupança.
+CDB.
+Tesouro Selic.
+Tesouro Prefixado.
+Tesouro IPCA+.
+Fundos.
+Outros produtos.
+
+Não confunda títulos públicos com CDB.
+
+Não prometa rentabilidade.
+
+Não afirme que todos os produtos possuem liquidez diária ou proteção do FGC.
+
+Quando não houver dados suficientes para calcular tributação corretamente, apresente o resultado bruto e identifique o que não foi considerado.
+
+O simulador deverá apresentar:
+
+Total aportado.
+Juros brutos.
+Tributos estimados.
+Custos.
+Montante líquido estimado.
+Valor real futuro.
+Rentabilidade nominal.
+Rentabilidade real.
+Evolução por período.
+PARTE X — INDICADORES FINANCEIROS
+35. INDICADORES DINÂMICOS
+
+Revise e implemente:
+
+Participação das despesas na renda
+
+Despesas / Renda líquida × 100.
+
+Taxa de poupança
+
+(Renda líquida - Despesas) / Renda líquida × 100.
+
+Participação das despesas essenciais
+
+Despesas essenciais / Despesas totais × 100.
+
+Comprometimento com dívidas
+
+Obrigações de dívida / Renda líquida × 100.
+
+Reserva financeira em meses
+
+Reserva disponível / Despesa essencial mensal.
+
+Saldo financeiro
+
+Renda líquida - Despesas totais.
+
+Variação real das despesas
+
+[(Despesa atual / Despesa-base) / (Índice atual / Índice-base) - 1] × 100.
+
+Cada indicador deverá possuir explicação compreensível e identificação de suas premissas.
+
+Trate denominadores iguais a zero e dados incompletos adequadamente.
+
+36. CENÁRIOS
+
+Implemente cenários conservador, base e otimista.
+
+Permita alterar:
+
+Inflação.
+Renda.
+Preços.
+Consumo.
+Aportes.
+Despesas inesperadas.
+
+Os resultados deverão mudar conforme as premissas.
+
+Não apresente cenários como previsões garantidas.
+
+PARTE XI — REVISÃO DAS DEZ ABAS
+37. VISÃO GERAL
+
+Apresente dados consolidados e dinâmicos:
+
+Despesa mensal.
+Renda mensal.
+Saldo.
+IPCA-Casa.
+IPCA oficial.
+Impacto financeiro.
+Poder de compra.
+Grupos de maior despesa.
+Maiores contribuições.
+Evolução histórica.
+38. IMPACTO NO SEU BOLSO
+
+Apresente:
+
+Custo-base.
+Custo atual da cesta-base.
+Diferença em reais.
+Variação percentual.
+Comparação com IPCA oficial.
+Impacto mensal.
+Impacto anualizado.
+Metodologia.
+Período.
+39. IPCA OFICIAL
+
+Apresente:
+
+Série histórica.
+Variação mensal.
+Acumulado no ano.
+Acumulado em 12 meses.
+Grupos.
+Regiões disponíveis.
+Fonte oficial.
+Data de referência.
+Histórico de atualização.
+40. MINHA CESTA FAMILIAR
+
+Garanta:
+
+Cadastro.
+Edição.
+Exclusão.
+Preços.
+Quantidades.
+Unidades.
+Frequências.
+Categorias.
+Histórico.
+Identificação de dados incompletos.
+
+Toda alteração deverá atualizar os indicadores relacionados.
+
+41. PREÇOS E HISTÓRICO
+
+Apresente:
+
+Histórico por item.
+Comparação normalizada.
+Variação.
+Menor preço.
+Maior preço.
+Preço médio.
+Origem.
+Data.
+Gráficos.
+42. ANÁLISE DA INFLAÇÃO
+
+Apresente:
+
+Inflação da cesta.
+Inflação por grupo.
+Inflação por item.
+Pesos.
+Contribuições.
+Pontos percentuais.
+Acumulados.
+Evolução histórica.
+Comparação oficial.
+
+Os filtros deverão recalcular os resultados.
+
+43. RENDA E PODER DE COMPRA
+
+Apresente:
+
+Renda inicial.
+Renda atual.
+Crescimento nominal.
+Inflação.
+Crescimento real.
+Renda necessária.
+Diferença em reais.
+Equivalência monetária.
+44. ESTRATÉGIAS DE ECONOMIA
+
+Integre os Planos A, B e C.
+
+Diferencie:
+
+Economia potencial.
+Economia simulada.
+Economia planejada.
+Economia realizada.
+Aporte planejado.
+Resultado projetado.
+Histórico de simulações.
+45. RELATÓRIOS
+
+Garanta que os relatórios utilizem exatamente os mesmos serviços e resultados das telas.
+
+Inclua:
+
+Resumo executivo.
+Período.
+Renda.
+Despesas.
+Cesta.
+IPCA-Casa.
+IPCA oficial.
+Poder de compra.
+Grupos de maior impacto.
+Estratégias.
+Premissas.
+Limitações.
+Fontes.
+
+Não utilize nomenclaturas que sugiram certificação oficial ou laudo econométrico oficial para análises privadas.
+
+46. CONFIGURAÇÕES
+
+Verifique:
+
+Gerenciamento da cesta.
+Períodos.
+Preferências.
+Referências.
+Dados demonstrativos.
+Informações metodológicas.
+
+A restauração de dados demonstrativos jamais deverá apagar ou sobrescrever dados reais do usuário.
+
+PARTE XII — QUALIDADE MATEMÁTICA E ESTATÍSTICA
+47. PRECISÃO E ARREDONDAMENTO
+
+Centralize as regras:
+
+Precisão adequada nos cálculos internos.
+Valores monetários exibidos com duas casas decimais.
+Taxas com precisão apropriada.
+Pesos sem distorções.
+Arredondamento preferencialmente apenas na apresentação.
+
+Não arredonde parcelas antes de agregá-las quando isso produzir divergências.
+
+48. DADOS AUSENTES E COBERTURA
+
+Implemente estados específicos para:
+
+Não informado.
+Indisponível.
+Inválido.
+Estimado.
+Desatualizado.
+Sem comparabilidade.
+
+Apresente cobertura da cesta nos índices domésticos.
+
+Não produza indicadores aparentemente completos quando houver dados insuficientes.
+
+49. ANÁLISE DE SENSIBILIDADE
+
+Permita comparar premissas diferentes.
+
+Exemplos:
+
+Inflação de 3%, 5% e 8%.
+Crescimento da renda de 2%, 5% e 10%.
+Redução do consumo de 5%, 10% e 15%.
+
+Mantenha resultados observados separados de simulações.
+
+50. INTERPRETAÇÃO DOS INDICADORES
+
+Inclua explicações curtas e claras.
+
+Diferencie:
+
+Inflação.
+Aumento isolado de preços.
+Peso orçamentário.
+Contribuição.
+Poder de compra.
+Rentabilidade nominal.
+Rentabilidade real.
+Economia potencial.
+Economia realizada.
+
+Evite conclusões que os dados disponíveis não permitem sustentar.
+
+PARTE XIII — TESTES E VALIDAÇÃO
+51. TESTES MATEMÁTICOS
+
+Crie ou atualize testes automatizados para:
+
+Variação percentual.
+Conversão de unidades.
+Gasto mensal.
+Peso orçamentário.
+Laspeyres.
+Índice encadeado.
+Inflação acumulada.
+Contribuições.
+Pontos percentuais.
+Variação por grupo.
+Impacto na cesta.
+Comprometimento da renda.
+Saldo mensal.
+Taxa de poupança.
+Variação nominal.
+Variação real.
+Renda necessária.
+Correção monetária.
+Dias de trabalho.
+Substituição de produtos.
+Redução de consumo.
+Juros compostos.
+Aportes periódicos.
+Tributação.
+Rentabilidade real.
+Valor futuro real.
+Projeções.
+Cenários.
+Dados incompletos.
+Divisão por zero.
+52. TESTES DE CONSISTÊNCIA
+
+Verifique:
+
+Soma das despesas.
+Soma dos pesos.
+Reconciliação das contribuições.
+Composição dos acumulados.
+Renda necessária.
+Consistência entre indicadores e gráficos.
+Consistência entre telas e relatórios.
+Funcionamento dos filtros.
+Atualização após mudanças na cesta.
+Persistência dos dados.
+53. TESTES FUNCIONAIS
+
+Teste as dez abas.
+
+Verifique:
+
+Navegação.
+Formulários.
+Botões.
+Filtros.
+Gráficos.
+Histórico.
+Simulações.
+Exportações.
+Persistência.
+Restauração da demonstração.
+
+Execute testes unitários, de integração e E2E quando a infraestrutura existente permitir.
+
+Execute o build de produção.
+
+Corrija os erros encontrados.
+
+Não esconda falhas de testes nem desative testes existentes apenas para conseguir um build aprovado.
+
+PARTE XIV — ORDEM DE EXECUÇÃO
+54. EXECUÇÃO OBRIGATÓRIA
+
+Execute o trabalho na seguinte ordem:
+
+Auditar o estado atual.
+Identificar problemas e dependências.
+Corrigir estruturas de dados.
+Consolidar o motor financeiro.
+Corrigir os índices de preços.
+Validar a integração com IBGE.
+Corrigir orçamento e impacto financeiro.
+Corrigir renda e poder de compra.
+Corrigir histórico de preços.
+Corrigir os Planos A, B e C.
+Sincronizar as dez abas.
+Corrigir relatórios.
+Implementar e executar testes.
+Executar build de produção.
+Validar o funcionamento final.
+
+Não interrompa a execução após a auditoria. Prossiga com as implementações.
+
+Se houver limitações de ambiente, dependências, credenciais ou serviços externos, implemente tudo o que for possível e documente exatamente o impedimento.
+
+Não substitua integrações reais por dados fictícios para simular sucesso.
+
+PARTE XV — ENTREGA FINAL
+55. RELATÓRIO DE CONCLUSÃO
+
+Ao terminar, apresente um relatório objetivo contendo:
+
+Problemas identificados.
+Problemas corrigidos.
+Arquivos modificados.
+Arquivos criados.
+Serviços financeiros consolidados.
+Fórmulas implementadas ou corrigidas.
+Metodologias adotadas.
+Integrações oficiais verificadas.
+Indicadores atualizados.
+Funcionalidades efetivamente implementadas.
+Testes executados e respectivos resultados.
+Resultado do build.
+Pendências.
+Dependências externas.
+Exemplos numéricos de validação.
+
+Diferencie claramente o que foi concluído, o que foi parcialmente implementado e o que depende de fatores externos.
+
+Não declare funcionalidades concluídas sem comprovação.
+
+56. CRITÉRIO FINAL DE ACEITAÇÃO
+
+O IPCA-Casa deverá funcionar como uma plataforma integrada, na qual:
+
+Os dados inseridos pelo usuário alimentam o motor financeiro.
+Os cálculos seguem metodologias matemáticas e estatísticas consistentes.
+As dez abas apresentam informações sincronizadas.
+O índice doméstico é diferenciado do IPCA oficial.
+Os dados oficiais possuem fontes e períodos identificados.
+As projeções possuem premissas explícitas.
+Os relatórios reproduzem os indicadores da plataforma.
+Os dados reais são preservados.
+Os testes validam os cálculos.
+A aplicação compila e funciona conforme as condições do ambiente.
+
+PRIORIDADE MÁXIMA: CONSISTÊNCIA DOS RESULTADOS.
+
+Não priorize simplesmente fazer todas as telas exibirem números. Priorize garantir que os números apresentados sejam corretos, rastreáveis, coerentes entre si e calculados a partir dos mesmos dados e das mesmas regras.
+
+O resultado esperado é a consolidação do IPCA-Casa como uma ferramenta confiável de análise da inflação familiar, orçamento doméstico, evolução da renda, poder de compra e simulação financeira.

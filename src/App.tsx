@@ -146,6 +146,57 @@ const PageChunkFallback: React.FC<{ label?: string }> = ({
   </div>
 );
 
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+  fallbackTitle?: string;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('[IPCA-Casa ErrorBoundary]', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-8 my-8 mx-auto max-w-xl bg-[#ffffff] border border-[#ffdad6] rounded-2xl shadow-sm text-center">
+          <div className="w-12 h-12 mx-auto mb-4 rounded-xl bg-[#ffdad6]/40 flex items-center justify-center text-[#ba1a1a]">
+            <span className="material-symbols-outlined text-[24px]">warning</span>
+          </div>
+          <h2 className="text-base font-bold text-[#0b1c30] mb-1">
+            {this.props.fallbackTitle || 'Não foi possível carregar este módulo'}
+          </h2>
+          <p className="text-xs text-[#45464d] mb-4">
+            {this.state.error?.message || 'Ocorreu uma falha inesperada na visualização.'}
+          </p>
+          <button
+            type="button"
+            onClick={() => this.setState({ hasError: false, error: null })}
+            className="px-4 py-2 bg-[#000000] text-[#ffffff] text-xs font-semibold rounded-lg hover:bg-[#213145] transition-colors cursor-pointer"
+          >
+            Recarregar Módulo
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
   const initialPathname =
     typeof window !== 'undefined' ? normalizeRoutePath(window.location.pathname) : '/';
@@ -206,6 +257,7 @@ export default function App() {
   // Navegação do Painel & Busca Global
   const [activeTab, setActiveTab] = useState<NavTab>(initialTabFromUrl || 'visao-geral');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [globalSearchTerm, setGlobalSearchTerm] = useState('');
 
   // Metadados oficiais do IBGE carregados somente quando necessário
@@ -1576,7 +1628,7 @@ export default function App() {
     <div className="flex min-h-screen bg-[#f8f9ff] text-[#0b1c30]">
       <SeoHeadManager currentPath={effectiveSeoPath} />
 
-      <Suspense fallback={<div className="w-72 shrink-0 bg-[#ffffff] border-r border-[#eff4ff]" />}>
+      <Suspense fallback={<div className="hidden md:block w-72 shrink-0 bg-[#ffffff] border-r border-[#eff4ff]" />}>
         <Sidebar
           activeTab={activeTab}
           onSelectTab={handleSelectDashboardTab}
@@ -1587,6 +1639,8 @@ export default function App() {
           userAvatar={currentUser?.avatarUrl}
           authProvider={currentUser?.authProvider}
           onLogout={handleLogout}
+          isMobileOpen={isMobileMenuOpen}
+          onCloseMobile={() => setIsMobileMenuOpen(false)}
         />
       </Suspense>
 
@@ -1672,12 +1726,14 @@ export default function App() {
             onSwitchToEmptyBasket={handleRequestEmptyBasket}
             onSwitchToDemoBasket={handleSwitchToDemoBasket}
             isDemo={isDemo}
+            onOpenMobileMenu={() => setIsMobileMenuOpen(true)}
           />
         </Suspense>
 
         {/* Visão Ativa */}
         <main className="flex-1 pb-16">
-          <Suspense fallback={<PageChunkFallback label="Carregando módulo analítico..." />}>
+          <ErrorBoundary fallbackTitle="Falha ao carregar a visão do painel">
+            <Suspense fallback={<PageChunkFallback label="Carregando módulo analítico..." />}>
             {activeTab === 'visao-geral' && (
               <OverviewView
                 summary={effectiveSummary}
@@ -1858,7 +1914,8 @@ export default function App() {
               />
             )}
           </Suspense>
-        </main>
+        </ErrorBoundary>
+      </main>
       </div>
 
       {/* Modais Globais sob demanda */}

@@ -321,13 +321,11 @@ export const LandingPageView: React.FC<LandingPageViewProps> = ({
 
         <div className="lg:col-span-6">
           <picture>
-            <source srcSet="/images/ipca-comparativo-ilustracao.avif" type="image/avif" />
-            <source srcSet="/images/ipca-comparativo-ilustracao.webp" type="image/webp" />
             <img
-              src="/images/ipca-comparativo-ilustracao.png"
-              alt="Comparativo visual entre a cesta média nacional do IPCA Oficial do IBGE e a ponderação pessoal do IPCA-Casa pelo Índice de Laspeyres"
-              width={800}
-              height={450}
+              src="/assets/aistudio/image_7ff3e2de.png"
+              alt="Metodologia comparativa: Por que a inflação da sua casa difere da média nacional — IPCA Oficial (IBGE) vs. IPCA da Família e impacto real no poder de compra"
+              width={1024}
+              height={559}
               loading="lazy"
               decoding="async"
               className="w-full h-auto rounded-2xl border border-[#eff4ff]"

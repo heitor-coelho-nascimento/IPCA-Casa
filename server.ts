@@ -3,6 +3,7 @@ import express, { NextFunction, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
@@ -21,7 +22,7 @@ import {
   injectRouteSeoHtml,
 } from './src/config/seoFiles';
 import { firebaseConfig, isFirebaseConfigured } from './src/lib/firebaseConfig';
-import { fetchOfficialIPCA, isValidIBGERegionCode } from './src/services/ibge';
+import { fetchOfficialIPCAFromSidra, isValidIBGERegionCode } from './src/services/ibge';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -198,6 +199,7 @@ export async function createServerApp(options: ServerAppOptions = {}): Promise<e
           connectSrc: [
             "'self'",
             'https://servicodados.ibge.gov.br',
+            'https://apisidra.ibge.gov.br',
             'https://*.googleapis.com',
             'https://*.google-analytics.com',
             'https://*.analytics.google.com',
@@ -374,7 +376,7 @@ export async function createServerApp(options: ServerAppOptions = {}): Promise<e
         lastForcedIbgeByRegion.set(region, now);
       }
 
-      const metadata = await fetchOfficialIPCA(region, force, { bypassLocalApiProxy: true });
+      const metadata = await fetchOfficialIPCAFromSidra(region, force);
       return res.json(metadata);
     } catch (err) {
       return next(err);
@@ -476,7 +478,9 @@ export async function createServerApp(options: ServerAppOptions = {}): Promise<e
       }
     });
   } else if (shouldUseDist) {
-    const distDir = path.join(__dirname, 'dist');
+    const distDir = fsSync.existsSync(path.join(__dirname, 'index.html'))
+      ? __dirname
+      : path.join(__dirname, 'dist');
     app.use(
       '/assets',
       express.static(path.join(distDir, 'assets'), {
@@ -550,10 +554,26 @@ export async function createServerApp(options: ServerAppOptions = {}): Promise<e
 
 export async function startServer() {
   const app = await createServerApp();
-  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-  return app.listen(PORT, '0.0.0.0', () => {
+  const PORT = process.env.PORT && process.env.PORT !== '8080' ? parseInt(process.env.PORT, 10) : 3000;
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`IPCA-Casa Server rodando em http://localhost:${PORT}`);
   });
+
+  // Pre-warming em background do cache oficial do IBGE para a localidade padrão (Brasil)
+  fetchOfficialIPCAFromSidra('N1[all]', false)
+    .then((meta) => {
+      console.log(
+        `[IPCA-Casa Server] Pre-warming concluído: referência ${meta.latestMonthLabel} (${meta.sourceMode}).`
+      );
+    })
+    .catch((err) => {
+      console.warn(
+        '[IPCA-Casa Server] Pre-warming operando com dados de contingência/cache:',
+        err?.message || err
+      );
+    });
+
+  return server;
 }
 
 const isTestProcess = Boolean(process.env.VITEST || process.env.NODE_ENV === 'test');

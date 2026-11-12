@@ -64,7 +64,7 @@
   }
 }
 
-/* Material Symbols standard sizing and alignment (prevents font-swap CLS) */
+/* Material Symbols standard sizing and alignment */
 .material-symbols-outlined {
   font-family: 'Material Symbols Outlined';
   font-weight: normal;

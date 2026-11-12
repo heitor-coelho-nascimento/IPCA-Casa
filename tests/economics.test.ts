@@ -13,7 +13,15 @@ import {
   calculateEstimatedAnnualImpact,
   calculateRealIncomeDifference,
   processBasketEconomics,
+  calculateFisherRealYield,
+  calculateFutureProjection,
+  resolveEffectiveMonthlySpend,
+  simulatePlanA,
+  simulatePlanB,
+  simulatePlanC,
+  calculateWorkingDaysEquivalence,
 } from '../src/services/economics';
+import { compareNormalizedUnitPrices, areUnitsCompatible, frequencyToMonthlyMultiplier } from '../src/services/units';
 import { CalculatedItem, BasketItem } from '../src/types';
 
 describe('Testes Obrigatórios de Regras Econômicas (IPCA-Casa)', () => {
@@ -179,5 +187,158 @@ describe('Testes Obrigatórios de Regras Econômicas (IPCA-Casa)', () => {
     expect(result.differenceReais).toBe(-50);
     expect(result.hasLoss).toBe(true);
   });
+
+  // Teste M — Deflação (Variação negativa)
+  it('Teste M — Deflação tratada corretamente no acumulado e poder de compra', () => {
+    const deflatedPrice = calculatePriceVariation(100, 95);
+    expect(deflatedPrice).toBe(-5);
+
+    // Produto composto com deflação: (1 - 0.02) * (1 - 0.03) - 1 = 0.98 * 0.97 - 1 = -0.0494 (-4.94%)
+    const accDeflation = calculateAccumulatedInflation([-2.0, -3.0]);
+    expect(accDeflation).toBeCloseTo(-4.94, 2);
+
+    // Poder de compra com deflação: renda constante (0%) e deflação (-5%) resulta em ganho real
+    const realGain = calculateRealPurchasingPowerChange(0, -5);
+    expect(realGain).not.toBeNull();
+    expect(realGain!).toBeGreaterThan(0);
+    expect(realGain!).toBeCloseTo(5.263, 3);
+  });
+
+  // Teste N — Cesta Vazia
+  it('Teste N — Cesta vazia tratada com segurança retornando totais zerados e status adequado', () => {
+    const emptyResult = processBasketEconomics([], 4.5, null, null);
+    expect(emptyResult.totalMonthlySpend).toBe(0);
+    expect(emptyResult.eligibleItemsCount).toBe(0);
+    expect(emptyResult.ipcaCasa12M).toBe(0);
+    expect(emptyResult.methodology.methodology).toBe('insuficiente');
+    expect(emptyResult.methodology.comparableCoveragePercent).toBe(0);
+  });
+
+  // Teste O — Equação de Fisher e Projeção Futura
+  it('Teste O — Equação de Fisher (Rentabilidade Real) e Projeção Futura com juros compostos', () => {
+    // CDI nominal 12% a.a., Inflação 5% a.a. -> r_real = (1.12 / 1.05 - 1) * 100 = 6.6667%
+    const realYield = calculateFisherRealYield(12.0, 5.0);
+    expect(realYield).toBeCloseTo(6.667, 3);
+
+    // Despesa de R$ 1.000 sob inflação de 6% a.a. após 12 meses
+    const futureExpense = calculateFutureProjection(1000, 6.0, 12);
+    expect(futureExpense).toBeCloseTo(1060, 1);
+  });
+
+  // Teste P — Frequências de consumo e equivalência mensal
+  it('Teste P — Frequências de consumo e conversão para equivalência mensal', () => {
+    // Semanal: convenção explícita de 30 dias -> 30 / 7
+    const weeklyFreq = frequencyToMonthlyMultiplier('semanal');
+    expect(weeklyFreq.multiplierToMonthly).toBeCloseTo(30 / 7, 3);
+
+    // Quinzenal: 30 / 15 = 2x ao mês
+    const biweeklyFreq = frequencyToMonthlyMultiplier('quinzenal');
+    expect(biweeklyFreq.multiplierToMonthly).toBe(2);
+
+    // Anual: 1 / 12 ao mês
+    const annualFreq = frequencyToMonthlyMultiplier('anual');
+    expect(annualFreq.multiplierToMonthly).toBeCloseTo(1 / 12, 3);
+
+    // Mensal: 1x ao mês
+    const monthlyFreq = frequencyToMonthlyMultiplier('mensal');
+    expect(monthlyFreq.multiplierToMonthly).toBe(1);
+
+    // Teste com BasketItem: item quinzenal sem monthlySpend armazenado, mas com quantity 2 a R$ 50 cada
+    // Equivalência mensal = 2 un * R$ 50 * 2 = R$ 200/mês
+    const biweeklyItem = {
+      quantity: 2,
+      currentPrice: 50,
+      monthlySpend: 0,
+      consumptionFrequency: 'quinzenal',
+    } as BasketItem;
+    const effSpend = resolveEffectiveMonthlySpend(biweeklyItem);
+    expect(effSpend.monthlySpend).toBe(200);
+    expect(effSpend.isMonthlyEquivalence).toBe(true);
+  });
+
+  // Teste Q — Normalização e comparabilidade de unidades
+  it('Teste Q — Normalização de unidades compatíveis e rejeição de incompatíveis', () => {
+    // 500g a R$ 10,00 vs 1kg a R$ 18,00 -> Ambos na unidade canônica kg: R$ 20/kg vs R$ 18/kg
+    expect(areUnitsCompatible('g', 'kg')).toBe(true);
+    expect(areUnitsCompatible('kg', 'l')).toBe(false);
+
+    const comparison = compareNormalizedUnitPrices(
+      { price: 10, packageSize: 500, packageUnit: 'g' },
+      { price: 18, packageSize: 1, packageUnit: 'kg' }
+    );
+    expect(comparison.comparable).toBe(true);
+    expect(comparison.canonicalUnit).toBe('kg');
+    expect(comparison.pricePerCanonicalA).toBe(20);
+    expect(comparison.pricePerCanonicalB).toBe(18);
+    expect(comparison.unitSavingsAbsolute).toBe(2); // economia de R$ 2,00 por kg
+
+    // Incompatíveis (kg vs litros) não devem ser comparados
+    const incompatible = compareNormalizedUnitPrices(
+      { price: 10, packageSize: 1, packageUnit: 'kg' },
+      { price: 10, packageSize: 1, packageUnit: 'l' }
+    );
+    expect(incompatible.comparable).toBe(false);
+  });
+
+  // Teste R — Simulações financeiras (Planos A, B e C)
+  it('Teste R — Simulações de substituição (Plano A), eficiência (Plano B) e investimento (Plano C)', () => {
+    // Plano A: 500g a R$ 10 substituído por 1kg a R$ 18, consumo mensal 4kg
+    const planA = simulatePlanA({
+      originalPrice: 10,
+      originalPackageSize: 500,
+      originalPackageUnit: 'g',
+      substitutePrice: 18,
+      substitutePackageSize: 1,
+      substitutePackageUnit: 'kg',
+      monthlyQuantity: 4,
+    });
+    expect(planA.comparable).toBe(true);
+    expect(planA.monthlySavings).toBe(8); // R$ 2/kg * 4kg = R$ 8/mês
+    expect(planA.annualEstimatedSavings).toBe(96);
+
+    // Plano B: consumo de energia de 300 kWh para 250 kWh a R$ 0,90/kWh
+    const planB = simulatePlanB({
+      currentConsumption: 300,
+      targetConsumption: 250,
+      tariffPerUnit: 0.9,
+    });
+    expect(planB.valid).toBe(true);
+    expect(planB.estimatedMonthlySavings).toBe(45); // (300 - 250) * 0.90 = R$ 45
+    expect(planB.reductionPercent).toBeCloseTo(16.67, 1);
+
+    // Plano C: Aporte mensal de R$ 500 a 12% a.a. por 12 meses
+    const planC = simulatePlanC({
+      monthlyDeposit: 500,
+      termMonths: 12,
+      nominalAnnualRatePercent: 12,
+      expectedAnnualInflationPercent: 4.5,
+      productType: 'cdb',
+    });
+    expect(planC.valid).toBe(true);
+    expect(planC.totalContributed).toBe(6000);
+    expect(planC.grossFutureValue).toBeGreaterThan(6000);
+    expect(planC.realReturnPercent).toBeGreaterThan(0);
+  });
+
+  // Teste S — Equivalência de despesas em dias de trabalho
+  it('Teste S — Equivalência de despesa em dias úteis com base na renda líquida', () => {
+    // Renda R$ 4.400 / 22 dias úteis = R$ 200/dia. Despesa R$ 600 -> 3 dias de trabalho
+    const workDays = calculateWorkingDaysEquivalence({
+      monthlyIncome: 4400,
+      expenseAmount: 600,
+      workingDaysPerMonth: 22,
+    });
+    expect(workDays.valid).toBe(true);
+    expect(workDays.dailyRate).toBe(200);
+    expect(workDays.workingDaysNeeded).toBe(3);
+
+    // Renda zero ou negativa deve retornar valid = false
+    const invalidWorkDays = calculateWorkingDaysEquivalence({
+      monthlyIncome: 0,
+      expenseAmount: 600,
+    });
+    expect(invalidWorkDays.valid).toBe(false);
+  });
 });
+
 

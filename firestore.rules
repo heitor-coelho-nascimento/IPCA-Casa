@@ -39,6 +39,10 @@ service cloud.firestore {
       return (val is int || val is float) && val >= minVal && val <= maxVal;
     }
 
+    function isValidDataOrigin(val) {
+      return val in ['usuario', 'oficial_ibge', 'demonstrativo', 'estimado', 'simulado', 'cache'];
+    }
+
     function userExists(userId) {
       return exists(/databases/$(database)/documents/users/$(userId));
     }
@@ -113,9 +117,12 @@ service cloud.firestore {
           'unit', 'active', 'isArchived', 'createdAt', 'updatedAt'
         ]) &&
         data.keys().hasOnly([
-          'id', 'userId', 'profileId', 'name', 'description', 'group', 'classification',
+          'id', 'userId', 'profileId', 'name', 'description', 'group', 'subcategory', 'classification',
           'monthlySpend', 'oldPrice', 'currentPrice', 'oldPriceDate', 'currentPriceDate',
-          'unit', 'notes', 'active', 'isArchived', 'createdAt', 'updatedAt'
+          'unit', 'quantity', 'baseQuantity', 'packageSize', 'packageUnit',
+          'consumptionFrequency', 'frequencyDays', 'expenseNature', 'recurrenceType',
+          'accountingType', 'comparabilityBroken', 'comparabilityReason', 'dataOrigin',
+          'notes', 'active', 'isArchived', 'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.id) &&
         data.id == itemId &&
@@ -125,6 +132,7 @@ service cloud.firestore {
         isBoundedString(data.name, 1, 200) &&
         (!('description' in data) || isBoundedString(data.description, 0, 500)) &&
         isBoundedString(data.group, 1, 120) &&
+        (!('subcategory' in data) || isBoundedString(data.subcategory, 0, 120)) &&
         data.classification in ['Essencial', 'Supérfluo', 'Não classificado'] &&
         isNonNegativeNumber(data.monthlySpend) &&
         isNonNegativeNumber(data.oldPrice) &&
@@ -132,6 +140,18 @@ service cloud.firestore {
         isBoundedString(data.oldPriceDate, 0, 32) &&
         isBoundedString(data.currentPriceDate, 0, 32) &&
         isBoundedString(data.unit, 1, 40) &&
+        (!('quantity' in data) || isNonNegativeNumber(data.quantity)) &&
+        (!('baseQuantity' in data) || isNonNegativeNumber(data.baseQuantity)) &&
+        (!('packageSize' in data) || isNonNegativeNumber(data.packageSize)) &&
+        (!('packageUnit' in data) || isBoundedString(data.packageUnit, 0, 40)) &&
+        (!('consumptionFrequency' in data) || data.consumptionFrequency in ['mensal', 'quinzenal', 'semanal', 'diaria', 'anual', 'personalizada_dias']) &&
+        (!('frequencyDays' in data) || isBoundedNumber(data.frequencyDays, 1, 3650)) &&
+        (!('expenseNature' in data) || data.expenseNature in ['Fixa', 'Variável']) &&
+        (!('recurrenceType' in data) || data.recurrenceType in ['Recorrente', 'Eventual']) &&
+        (!('accountingType' in data) || data.accountingType in ['Consumo', 'Amortização de dívida', 'Aplicação financeira', 'Transferência']) &&
+        (!('comparabilityBroken' in data) || data.comparabilityBroken is bool) &&
+        (!('comparabilityReason' in data) || isBoundedString(data.comparabilityReason, 0, 250)) &&
+        (!('dataOrigin' in data) || isValidDataOrigin(data.dataOrigin)) &&
         (!('notes' in data) || isBoundedString(data.notes, 0, 1000)) &&
         data.active is bool &&
         data.isArchived is bool &&
@@ -142,17 +162,26 @@ service cloud.firestore {
     function isValidPriceRecord(data, userId, priceId) {
       return data.keys().hasAll(['id', 'userId', 'itemId', 'price', 'referenceDate', 'createdAt', 'updatedAt']) &&
         data.keys().hasOnly([
-          'id', 'userId', 'itemId', 'price', 'referenceDate', 'unit', 'source', 'notes', 'createdAt', 'updatedAt'
+          'id', 'userId', 'profileId', 'itemId', 'price', 'referenceDate', 'unit', 'source',
+          'origin', 'region', 'packageSize', 'packageUnit', 'dataOrigin', 'comparabilityBroken',
+          'notes', 'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.id) &&
         data.id == priceId &&
         data.userId == request.auth.uid &&
         data.userId == userId &&
+        (!('profileId' in data) || isBoundedString(data.profileId, 0, 128)) &&
         isValidId(data.itemId) &&
         isNonNegativeNumber(data.price) &&
         isBoundedString(data.referenceDate, 1, 32) &&
         (!('unit' in data) || isBoundedString(data.unit, 0, 40)) &&
         (!('source' in data) || isBoundedString(data.source, 0, 255)) &&
+        (!('origin' in data) || isBoundedString(data.origin, 0, 255)) &&
+        (!('region' in data) || isBoundedString(data.region, 0, 120)) &&
+        (!('packageSize' in data) || isNonNegativeNumber(data.packageSize)) &&
+        (!('packageUnit' in data) || isBoundedString(data.packageUnit, 0, 40)) &&
+        (!('dataOrigin' in data) || isValidDataOrigin(data.dataOrigin)) &&
+        (!('comparabilityBroken' in data) || data.comparabilityBroken is bool) &&
         (!('notes' in data) || isBoundedString(data.notes, 0, 500)) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
@@ -161,7 +190,10 @@ service cloud.firestore {
     function isValidIncomeRecord(data, userId, incomeId) {
       return data.keys().hasAll(['id', 'userId', 'profileId', 'referenceDate', 'nominalIncome', 'createdAt', 'updatedAt']) &&
         data.keys().hasOnly([
-          'id', 'userId', 'profileId', 'referenceDate', 'nominalIncome', 'source', 'notes', 'createdAt', 'updatedAt'
+          'id', 'userId', 'profileId', 'referenceDate', 'nominalIncome', 'source', 'notes',
+          'grossIncome', 'netIncome', 'incomeType', 'debtObligations', 'financialApplications',
+          'transfers', 'availableReserve', 'workingDaysPerMonth',
+          'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.id) &&
         data.id == incomeId &&
@@ -172,6 +204,14 @@ service cloud.firestore {
         isNonNegativeNumber(data.nominalIncome) &&
         (!('source' in data) || isBoundedString(data.source, 0, 255)) &&
         (!('notes' in data) || isBoundedString(data.notes, 0, 500)) &&
+        (!('grossIncome' in data) || isNonNegativeNumber(data.grossIncome)) &&
+        (!('netIncome' in data) || isNonNegativeNumber(data.netIncome)) &&
+        (!('incomeType' in data) || isBoundedString(data.incomeType, 0, 60)) &&
+        (!('debtObligations' in data) || isNonNegativeNumber(data.debtObligations)) &&
+        (!('financialApplications' in data) || isNonNegativeNumber(data.financialApplications)) &&
+        (!('transfers' in data) || isNonNegativeNumber(data.transfers)) &&
+        (!('availableReserve' in data) || isNonNegativeNumber(data.availableReserve)) &&
+        (!('workingDaysPerMonth' in data) || isBoundedNumber(data.workingDaysPerMonth, 1, 31)) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -201,12 +241,16 @@ service cloud.firestore {
           'id', 'userId', 'profileId', 'planType', 'title', 'applied', 'monthlySavings', 'createdAt', 'updatedAt'
         ]) &&
         data.keys().hasOnly([
-          'id', 'userId', 'profileId', 'planType', 'title', 'description', 'applied', 'monthlySavings',
-          'originalItemId', 'originalItemName', 'originalPrice', 'substituteName', 'substitutePrice',
-          'qualitativeTradeoff', 'resourceName', 'unit', 'tariffPerUnit', 'currentConsumption',
-          'targetConsumption', 'currentSpend', 'progressPercent', 'notes', 'monthlyInvestment',
-          'nominalAnnualRate', 'expectedAnnualInflation', 'realAnnualYield',
-          'projection12Months', 'projection24Months', 'projection36Months', 'useLinkedSavings',
+          'id', 'userId', 'profileId', 'planType', 'title', 'description', 'applied', 'status', 'monthlySavings',
+          'originalItemId', 'originalItemName', 'originalPrice', 'originalPackageSize', 'originalPackageUnit',
+          'substituteName', 'substitutePrice', 'substitutePackageSize', 'substitutePackageUnit', 'monthlyQuantity',
+          'qualitativeTradeoff', 'resourceName', 'resourceCategory', 'unit', 'tariffPerUnit',
+          'fixedFee', 'extraCharges', 'tariffSource', 'tariffDate', 'tieredTariffNote',
+          'currentConsumption', 'targetConsumption', 'currentSpend', 'progressPercent', 'notes',
+          'initialCapital', 'monthlyInvestment', 'termMonths', 'nominalAnnualRate', 'expectedAnnualInflation',
+          'realAnnualYield', 'projection12Months', 'projection24Months', 'projection36Months',
+          'productType', 'compoundingFrequency', 'depositTiming', 'taxMode', 'manualTaxRate',
+          'adminFeeAnnual', 'custodyFeeAnnual', 'useLinkedSavings',
           'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.id) &&
@@ -218,28 +262,49 @@ service cloud.firestore {
         isBoundedString(data.title, 1, 200) &&
         (!('description' in data) || isBoundedString(data.description, 0, 600)) &&
         data.applied is bool &&
-        isNonNegativeNumber(data.monthlySavings) &&
+        (!('status' in data) || data.status in ['potencial', 'simulada', 'planejada', 'realizada']) &&
+        isBoundedNumber(data.monthlySavings, -1000000000, 10000000000) &&
         (!('originalItemId' in data) || isBoundedString(data.originalItemId, 0, 128)) &&
         (!('originalItemName' in data) || isBoundedString(data.originalItemName, 0, 200)) &&
         (!('originalPrice' in data) || isNonNegativeNumber(data.originalPrice)) &&
+        (!('originalPackageSize' in data) || isNonNegativeNumber(data.originalPackageSize)) &&
+        (!('originalPackageUnit' in data) || isBoundedString(data.originalPackageUnit, 0, 40)) &&
         (!('substituteName' in data) || isBoundedString(data.substituteName, 0, 200)) &&
         (!('substitutePrice' in data) || isNonNegativeNumber(data.substitutePrice)) &&
+        (!('substitutePackageSize' in data) || isNonNegativeNumber(data.substitutePackageSize)) &&
+        (!('substitutePackageUnit' in data) || isBoundedString(data.substitutePackageUnit, 0, 40)) &&
+        (!('monthlyQuantity' in data) || isNonNegativeNumber(data.monthlyQuantity)) &&
         (!('qualitativeTradeoff' in data) || isBoundedString(data.qualitativeTradeoff, 0, 600)) &&
         (!('resourceName' in data) || isBoundedString(data.resourceName, 0, 200)) &&
+        (!('resourceCategory' in data) || data.resourceCategory in ['energia', 'agua', 'combustivel', 'gas', 'internet', 'outros']) &&
         (!('unit' in data) || isBoundedString(data.unit, 0, 40)) &&
         (!('tariffPerUnit' in data) || isNonNegativeNumber(data.tariffPerUnit)) &&
+        (!('fixedFee' in data) || isNonNegativeNumber(data.fixedFee)) &&
+        (!('extraCharges' in data) || isNonNegativeNumber(data.extraCharges)) &&
+        (!('tariffSource' in data) || isBoundedString(data.tariffSource, 0, 160)) &&
+        (!('tariffDate' in data) || isBoundedString(data.tariffDate, 0, 32)) &&
+        (!('tieredTariffNote' in data) || isBoundedString(data.tieredTariffNote, 0, 250)) &&
         (!('currentConsumption' in data) || isNonNegativeNumber(data.currentConsumption)) &&
         (!('targetConsumption' in data) || isNonNegativeNumber(data.targetConsumption)) &&
         (!('currentSpend' in data) || isNonNegativeNumber(data.currentSpend)) &&
         (!('progressPercent' in data) || isBoundedNumber(data.progressPercent, 0, 100)) &&
         (!('notes' in data) || isBoundedString(data.notes, 0, 600)) &&
+        (!('initialCapital' in data) || isNonNegativeNumber(data.initialCapital)) &&
         (!('monthlyInvestment' in data) || isNonNegativeNumber(data.monthlyInvestment)) &&
+        (!('termMonths' in data) || isBoundedNumber(data.termMonths, 1, 600)) &&
         (!('nominalAnnualRate' in data) || isBoundedNumber(data.nominalAnnualRate, 0, 10000)) &&
         (!('expectedAnnualInflation' in data) || isBoundedNumber(data.expectedAnnualInflation, 0, 10000)) &&
         (!('realAnnualYield' in data) || isBoundedNumber(data.realAnnualYield, -100, 10000)) &&
         (!('projection12Months' in data) || isNonNegativeNumber(data.projection12Months)) &&
         (!('projection24Months' in data) || isNonNegativeNumber(data.projection24Months)) &&
         (!('projection36Months' in data) || isNonNegativeNumber(data.projection36Months)) &&
+        (!('productType' in data) || data.productType in ['poupanca', 'cdb', 'tesouro_selic', 'tesouro_prefixado', 'tesouro_ipca', 'fundos', 'outros']) &&
+        (!('compoundingFrequency' in data) || data.compoundingFrequency in ['mensal', 'diaria', 'anual']) &&
+        (!('depositTiming' in data) || data.depositTiming in ['fim', 'inicio']) &&
+        (!('taxMode' in data) || data.taxMode in ['automatica', 'manual', 'isento', 'bruto']) &&
+        (!('manualTaxRate' in data) || isBoundedNumber(data.manualTaxRate, 0, 100)) &&
+        (!('adminFeeAnnual' in data) || isBoundedNumber(data.adminFeeAnnual, 0, 100)) &&
+        (!('custodyFeeAnnual' in data) || isBoundedNumber(data.custodyFeeAnnual, 0, 100)) &&
         (!('useLinkedSavings' in data) || data.useLinkedSavings is bool) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
@@ -333,9 +398,12 @@ service cloud.firestore {
           incoming().createdAt == existing().createdAt &&
           incoming().updatedAt == request.time &&
           incoming().diff(existing()).affectedKeys().hasOnly([
-            'name', 'description', 'group', 'classification', 'monthlySpend',
+            'name', 'description', 'group', 'subcategory', 'classification', 'monthlySpend',
             'oldPrice', 'currentPrice', 'oldPriceDate', 'currentPriceDate',
-            'unit', 'notes', 'active', 'isArchived', 'updatedAt'
+            'unit', 'quantity', 'baseQuantity', 'packageSize', 'packageUnit',
+            'consumptionFrequency', 'frequencyDays', 'expenseNature', 'recurrenceType',
+            'accountingType', 'comparabilityBroken', 'comparabilityReason', 'dataOrigin',
+            'notes', 'active', 'isArchived', 'updatedAt'
           ]);
         allow delete: if isOwner(userId) && isValidId(itemId) && userExists(userId);
       }
@@ -361,7 +429,8 @@ service cloud.firestore {
           incoming().createdAt == existing().createdAt &&
           incoming().updatedAt == request.time &&
           incoming().diff(existing()).affectedKeys().hasOnly([
-            'price', 'referenceDate', 'unit', 'source', 'notes', 'updatedAt'
+            'price', 'referenceDate', 'unit', 'source', 'origin', 'region',
+            'packageSize', 'packageUnit', 'dataOrigin', 'comparabilityBroken', 'notes', 'updatedAt'
           ]);
         allow delete: if isOwner(userId) && isValidId(priceId) && userExists(userId);
       }
@@ -387,7 +456,9 @@ service cloud.firestore {
           incoming().createdAt == existing().createdAt &&
           incoming().updatedAt == request.time &&
           incoming().diff(existing()).affectedKeys().hasOnly([
-            'referenceDate', 'nominalIncome', 'source', 'notes', 'updatedAt'
+            'referenceDate', 'nominalIncome', 'source', 'notes',
+            'grossIncome', 'netIncome', 'incomeType', 'debtObligations', 'financialApplications',
+            'transfers', 'availableReserve', 'workingDaysPerMonth', 'updatedAt'
           ]);
         allow delete: if isOwner(userId) && isValidId(incomeId) && userExists(userId);
       }
@@ -438,12 +509,16 @@ service cloud.firestore {
           incoming().createdAt == existing().createdAt &&
           incoming().updatedAt == request.time &&
           incoming().diff(existing()).affectedKeys().hasOnly([
-            'title', 'description', 'applied', 'monthlySavings',
-            'originalItemId', 'originalItemName', 'originalPrice', 'substituteName', 'substitutePrice',
-            'qualitativeTradeoff', 'resourceName', 'unit', 'tariffPerUnit', 'currentConsumption',
-            'targetConsumption', 'currentSpend', 'progressPercent', 'notes', 'monthlyInvestment',
-            'nominalAnnualRate', 'expectedAnnualInflation', 'realAnnualYield',
-            'projection12Months', 'projection24Months', 'projection36Months', 'useLinkedSavings', 'updatedAt'
+            'title', 'description', 'applied', 'status', 'monthlySavings',
+            'originalItemId', 'originalItemName', 'originalPrice', 'originalPackageSize', 'originalPackageUnit',
+            'substituteName', 'substitutePrice', 'substitutePackageSize', 'substitutePackageUnit', 'monthlyQuantity',
+            'qualitativeTradeoff', 'resourceName', 'resourceCategory', 'unit', 'tariffPerUnit',
+            'fixedFee', 'extraCharges', 'tariffSource', 'tariffDate', 'tieredTariffNote',
+            'currentConsumption', 'targetConsumption', 'currentSpend', 'progressPercent', 'notes',
+            'initialCapital', 'monthlyInvestment', 'termMonths', 'nominalAnnualRate', 'expectedAnnualInflation',
+            'realAnnualYield', 'projection12Months', 'projection24Months', 'projection36Months',
+            'productType', 'compoundingFrequency', 'depositTiming', 'taxMode', 'manualTaxRate',
+            'adminFeeAnnual', 'custodyFeeAnnual', 'useLinkedSavings', 'updatedAt'
           ]);
         allow delete: if isOwner(userId) && isValidId(strategyId) && userExists(userId);
       }

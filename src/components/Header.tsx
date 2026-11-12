@@ -22,6 +22,7 @@ export interface HeaderProps {
   onSwitchToDemoBasket?: () => void;
   isDemo?: boolean;
   userAvatarUrl?: string;
+  onOpenMobileMenu?: () => void;
 }
 
 interface DynamicAlert {
@@ -56,6 +57,7 @@ export const Header: React.FC<HeaderProps> = ({
   onSelectTimeframe = () => {},
   isDemo = false,
   userAvatarUrl,
+  onOpenMobileMenu,
 }) => {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showIBGEMetadata, setShowIBGEMetadata] = useState(false);
@@ -170,13 +172,20 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <>
-      <header
-        className={`fixed top-0 right-0 h-16 bg-[#f8f9ff]/85 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)] z-40 flex items-center justify-between px-6 transition-all duration-300 ${
-          isSidebarCollapsed ? 'left-20' : 'left-72'
-        }`}
-      >
-        {/* Left: Selectors & IBGE Tag */}
-        <div className="flex items-center gap-3">
+      <header className="sticky top-0 z-30 h-16 w-full bg-[#f8f9ff]/85 backdrop-blur-xl border-b border-[#eff4ff] flex items-center justify-between px-4 sm:px-6 transition-all">
+        {/* Left: Mobile trigger, Selectors & IBGE Tag */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          {onOpenMobileMenu && (
+            <button
+              type="button"
+              onClick={onOpenMobileMenu}
+              aria-label="Abrir menu de navegação"
+              className="md:hidden w-9 h-9 rounded-lg flex items-center justify-center text-[#45464d] hover:bg-[#eff4ff] hover:text-[#0b1c30] transition-colors cursor-pointer mr-1"
+            >
+              <span className="material-symbols-outlined text-[22px]">menu</span>
+            </button>
+          )}
+
           {/* Profile Switcher */}
           <div className="relative">
             <button
@@ -257,11 +266,11 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="relative hidden sm:block">
             <button
               onClick={() => toggleMenu('timeframe')}
-              className="flex items-center gap-2 bg-[#eff4ff] hover:bg-[#e5eeff] px-3 py-1.5 rounded-lg cursor-pointer transition-colors"
+              className="flex items-center gap-2 bg-[#eff4ff] hover:bg-[#e5eeff] px-3 py-1.5 rounded-lg cursor-pointer transition-colors h-[50.5px]"
               type="button"
             >
               <span className="material-symbols-outlined text-[18px] text-[#45464d]">calendar_today</span>
-              <span className="text-[13px] font-mono text-[#0b1c30] font-medium">{currentLabel}</span>
+              <span className="text-[13px] font-mono text-[#0b1c30] font-medium w-[66.6094px]">{currentLabel}</span>
               <span className="material-symbols-outlined text-[16px] text-[#45464d]">expand_more</span>
             </button>
 
@@ -296,7 +305,7 @@ export const Header: React.FC<HeaderProps> = ({
               setShowNotifications(false);
               setShowIBGEMetadata(true);
             }}
-            className="hidden xl:flex items-center gap-2 bg-[#dce9ff] hover:bg-[#d3e4fe] px-3 py-1 rounded-full cursor-pointer transition-colors"
+            className="hidden xl:flex items-center gap-2 bg-[#dce9ff] hover:bg-[#d3e4fe] px-3 py-1 rounded-full cursor-pointer transition-colors h-[55px]"
             type="button"
             title="Clique para auditar a série oficial do IBGE"
           >
@@ -307,7 +316,7 @@ export const Header: React.FC<HeaderProps> = ({
                   : 'bg-[#497cff]'
               }`}
             />
-            <span className="font-mono text-[12px] text-[#497cff] font-semibold">
+            <span className="font-mono text-[12px] text-[#497cff] font-semibold w-[90.5938px]">
               {ibgeHeaderText}
             </span>
             <span className="material-symbols-outlined text-[14px] text-[#497cff]">info</span>
@@ -325,7 +334,7 @@ export const Header: React.FC<HeaderProps> = ({
               onChange={(e) => onSearchChange(e.target.value)}
               placeholder="Buscar na cesta familiar..."
               aria-label="Buscar na cesta familiar"
-              className="h-9 pl-9 pr-8 w-64 rounded-lg bg-[#eff4ff] text-[#0b1c30] placeholder:text-[#45464d] text-sm focus:outline-none focus:bg-[#ffffff] focus:ring-1 focus:ring-[#006a61] transition-all"
+              className="h-[33px] pl-9 pr-8 w-[224px] rounded-lg bg-[#eff4ff] text-[#0b1c30] placeholder:text-[#45464d] text-sm focus:outline-none focus:bg-[#ffffff] focus:ring-1 focus:ring-[#006a61] transition-all"
             />
             {searchTerm && (
               <button

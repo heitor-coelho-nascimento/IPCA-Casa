@@ -22,6 +22,10 @@ export const BLUEPRINT_LIMITS = {
   ICON_MAX: 64,
   STRATEGY_TITLE_MAX: 200,
   STRATEGY_TEXT_MAX: 600,
+  SUBCATEGORY_MAX: 120,
+  REASON_MAX: 250,
+  INCOME_TYPE_MAX: 60,
+  TARIFF_SOURCE_MAX: 160,
 } as const;
 
 export function isFirebaseConfigured(): boolean {

@@ -47,8 +47,8 @@ export const INITIAL_PROFILES: FamilyProfile[] = [
     referenceRegion: 'Brasil',
     currency: 'BRL',
     isDemo: true,
-    createdAt: '2023-03-01T00:00:00.000Z',
-    updatedAt: '2024-03-15T12:00:00.000Z',
+    createdAt: '2025-11-01T00:00:00.000Z',
+    updatedAt: '2026-11-12T12:00:00.000Z',
   },
   {
     id: USER_DEFAULT_PROFILE_ID,
@@ -57,8 +57,8 @@ export const INITIAL_PROFILES: FamilyProfile[] = [
     referenceRegion: 'Brasil',
     currency: 'BRL',
     isDemo: false,
-    createdAt: '2024-01-01T00:00:00.000Z',
-    updatedAt: '2024-01-01T00:00:00.000Z',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-11-12T12:00:00.000Z',
   },
 ];
 
@@ -77,13 +77,13 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     monthlySpend: 1537.90,
     oldPrice: 3100.00,
     currentPrice: 3385.20,
-    oldPriceDate: '2023-03-01',
-    currentPriceDate: '2024-03-01',
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
     unit: 'mensalidade',
     notes: 'Reajuste anual pelo IGP-M/IPCA negociado',
     active: true,
-    createdAt: '2023-03-01',
-    updatedAt: '2024-03-01',
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
   },
   {
     id: 'item-02',
@@ -95,13 +95,13 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     monthlySpend: 1250.00,
     oldPrice: 1090.00,
     currentPrice: 1250.00,
-    oldPriceDate: '2023-03-01',
-    currentPriceDate: '2024-03-01',
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
     unit: 'mensalidade',
     notes: 'Reajuste regulado pela ANS + faixa etária',
     active: true,
-    createdAt: '2023-03-01',
-    updatedAt: '2024-03-01',
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
   },
   {
     id: 'item-03',
@@ -113,13 +113,13 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     monthlySpend: 680.00,
     oldPrice: 5.20,
     currentPrice: 5.85,
-    oldPriceDate: '2023-03-01',
-    currentPriceDate: '2024-03-01',
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
     unit: 'litro',
     notes: 'Posto habitual da Av. Jabaquara',
     active: true,
-    createdAt: '2023-03-01',
-    updatedAt: '2024-03-01',
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
   },
   {
     id: 'item-04',
@@ -131,13 +131,13 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     monthlySpend: 718.25,
     oldPrice: 1550.00,
     currentPrice: 1644.55,
-    oldPriceDate: '2023-03-01',
-    currentPriceDate: '2024-03-01',
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
     unit: 'mensalidade',
     notes: 'Rematrícula e apostilas didáticas',
     active: true,
-    createdAt: '2023-03-01',
-    updatedAt: '2024-03-01',
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
   },
   {
     id: 'item-05',
@@ -149,13 +149,13 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     monthlySpend: 410.00,
     oldPrice: 0.78,
     currentPrice: 0.89,
-    oldPriceDate: '2023-03-01',
-    currentPriceDate: '2024-03-01',
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
     unit: 'kWh',
     notes: 'Incidência de bandeira amarela nos últimos ciclos',
     active: true,
-    createdAt: '2023-03-01',
-    updatedAt: '2024-03-01',
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
   },
   {
     id: 'item-06',
@@ -167,13 +167,13 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     monthlySpend: 490.10,
     oldPrice: 42.00,
     currentPrice: 47.96,
-    oldPriceDate: '2023-03-01',
-    currentPriceDate: '2024-03-01',
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
     unit: 'kg',
     notes: 'Acém, patinho e coxão mole',
     active: true,
-    createdAt: '2023-03-01',
-    updatedAt: '2024-03-01',
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
   },
   {
     id: 'item-07',
@@ -185,13 +185,13 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     monthlySpend: 456.30,
     oldPrice: 780.00,
     currentPrice: 826.80,
-    oldPriceDate: '2023-03-01',
-    currentPriceDate: '2024-03-01',
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
     unit: 'mensalidade',
     notes: 'Dissídio coletivo dos porteiros e zelador',
     active: true,
-    createdAt: '2023-03-01',
-    updatedAt: '2024-03-01',
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
   },
   {
     id: 'item-08',
@@ -203,13 +203,13 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     monthlySpend: 48.00,
     oldPrice: 29.90,
     currentPrice: 46.90,
-    oldPriceDate: '2023-03-01',
-    currentPriceDate: '2024-03-01',
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
     unit: 'unidade',
     notes: 'Choque de safra e seca na bacia do Mediterrâneo',
     active: true,
-    createdAt: '2023-03-01',
-    updatedAt: '2024-03-01',
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
   },
   {
     id: 'item-09',
@@ -221,13 +221,13 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     monthlySpend: 43.80,
     oldPrice: 16.80,
     currentPrice: 21.90,
-    oldPriceDate: '2023-03-01',
-    currentPriceDate: '2024-03-01',
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
     unit: 'unidade',
     notes: 'Alta mundial da saca do grão conilon e arábica',
     active: true,
-    createdAt: '2023-03-01',
-    updatedAt: '2024-03-01',
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
   },
   {
     id: 'item-10',
@@ -239,13 +239,13 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     monthlySpend: 63.80,
     oldPrice: 24.50,
     currentPrice: 31.90,
-    oldPriceDate: '2023-03-01',
-    currentPriceDate: '2024-03-01',
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
     unit: 'unidade',
     notes: 'Pressão climática e exportações',
     active: true,
-    createdAt: '2023-03-01',
-    updatedAt: '2024-03-01',
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
   },
   {
     id: 'item-11',
@@ -257,13 +257,13 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     monthlySpend: 63.48,
     oldPrice: 5.80,
     currentPrice: 5.29,
-    oldPriceDate: '2023-03-01',
-    currentPriceDate: '2024-03-01',
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
     unit: 'litro',
     notes: 'Queda de safra e importação do Mercosul (deflação alívio)',
     active: true,
-    createdAt: '2023-03-01',
-    updatedAt: '2024-03-01',
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
   },
   {
     id: 'item-12',
@@ -275,13 +275,13 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     monthlySpend: 150.00,
     oldPrice: 145.00,
     currentPrice: 150.00,
-    oldPriceDate: '2023-03-01',
-    currentPriceDate: '2024-03-01',
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
     unit: 'mensalidade',
     notes: 'Reajuste anual contratual',
     active: true,
-    createdAt: '2023-03-01',
-    updatedAt: '2024-03-01',
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
   },
   {
     id: 'item-13',
@@ -293,13 +293,13 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     monthlySpend: 165.00,
     oldPrice: 150.00,
     currentPrice: 165.00,
-    oldPriceDate: '2023-03-01',
-    currentPriceDate: '2024-03-01',
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
     unit: 'm³',
     notes: 'Tarifa básica + excedente esgoto',
     active: true,
-    createdAt: '2023-03-01',
-    updatedAt: '2024-03-01',
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
   },
   {
     id: 'item-14',
@@ -311,13 +311,13 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     monthlySpend: 112.00,
     oldPrice: 104.00,
     currentPrice: 112.00,
-    oldPriceDate: '2023-03-01',
-    currentPriceDate: '2024-03-01',
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
     unit: 'm³',
     notes: 'Fatura mensal de consumo de gás',
     active: true,
-    createdAt: '2023-03-01',
-    updatedAt: '2024-03-01',
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
   },
   {
     id: 'item-15',
@@ -329,13 +329,13 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     monthlySpend: 1395.00,
     oldPrice: 1300.00,
     currentPrice: 1395.00,
-    oldPriceDate: '2023-03-01',
-    currentPriceDate: '2024-03-01',
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
     unit: 'cesta',
     notes: 'Feira livre e supermercado quinzenal',
     active: true,
-    createdAt: '2023-03-01',
-    updatedAt: '2024-03-01',
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
   },
   {
     id: 'item-16',
@@ -347,13 +347,13 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     monthlySpend: 230.00,
     oldPrice: 215.00,
     currentPrice: 230.00,
-    oldPriceDate: '2023-03-01',
-    currentPriceDate: '2024-03-01',
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
     unit: 'mês',
     notes: 'Reajuste anual de medicamentos CMED',
     active: true,
-    createdAt: '2023-03-01',
-    updatedAt: '2024-03-01',
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
   },
   {
     id: 'item-17',
@@ -365,13 +365,13 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     monthlySpend: 110.00,
     oldPrice: 95.00,
     currentPrice: 110.00,
-    oldPriceDate: '2023-03-01',
-    currentPriceDate: '2024-03-01',
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
     unit: 'mensalidade',
     notes: 'Ajuste de assinaturas de entretenimento',
     active: true,
-    createdAt: '2023-03-01',
-    updatedAt: '2024-03-01',
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
   },
   {
     id: 'item-18',
@@ -383,13 +383,13 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     monthlySpend: 480.00,
     oldPrice: 440.00,
     currentPrice: 480.00,
-    oldPriceDate: '2023-03-01',
-    currentPriceDate: '2024-03-01',
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
     unit: 'mês',
     notes: 'Restaurantes e deliverys',
     active: true,
-    createdAt: '2023-03-01',
-    updatedAt: '2024-03-01',
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
   },
   {
     id: 'item-19',
@@ -401,13 +401,13 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     monthlySpend: 280.00,
     oldPrice: 260.00,
     currentPrice: 280.00,
-    oldPriceDate: '2023-03-01',
-    currentPriceDate: '2024-03-01',
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
     unit: 'mensalidade',
     notes: 'Renovação apólice anual',
     active: true,
-    createdAt: '2023-03-01',
-    updatedAt: '2024-03-01',
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
   },
   {
     id: 'item-20',
@@ -419,13 +419,13 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     monthlySpend: 215.37,
     oldPrice: 200.00,
     currentPrice: 215.37,
-    oldPriceDate: '2023-03-01',
-    currentPriceDate: '2024-03-01',
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
     unit: 'mês',
     notes: 'Compras sazonais',
     active: true,
-    createdAt: '2023-03-01',
-    updatedAt: '2024-03-01',
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
   },
 ];
 
@@ -551,7 +551,21 @@ export const safeStorage = {
   },
   clear: (): void => {
     if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.clear();
+      try {
+        const keysToRemove: string[] = [];
+        const knownKeys = new Set(Object.values(STORAGE_KEYS));
+        for (let i = 0; i < window.localStorage.length; i++) {
+          const k = window.localStorage.key(i);
+          if (k && (k.startsWith('ipca_casa_') || k.startsWith('ipcacasa_') || knownKeys.has(k as any))) {
+            keysToRemove.push(k);
+          }
+        }
+        for (const k of keysToRemove) {
+          window.localStorage.removeItem(k);
+        }
+      } catch {
+        // ignora falhas de acesso a storage
+      }
     }
     memoryStore.clear();
   },
@@ -796,15 +810,25 @@ export class StorageService {
 
     safeStorage.setItem(STORAGE_KEYS.BASKET_ITEMS, JSON.stringify(allItems));
 
-    // Grava também no histórico de preços para rastreabilidade com data segura
+    // Grava no histórico apenas se ainda não houver leitura idêntica na mesma data e preço
     if (Number.isFinite(savedItem.currentPrice) && savedItem.currentPrice > 0) {
-      this.recordPrice({
-        itemId: savedItem.id,
-        price: savedItem.currentPrice,
-        referenceDate: extractIsoDatePrefix(savedItem.currentPriceDate) || getTodayIsoDate(),
-        unit: savedItem.unit,
-        source: savedItem.notes || 'Atualização da Cesta',
-      });
+      const refDate = extractIsoDatePrefix(savedItem.currentPriceDate) || getTodayIsoDate();
+      const alreadyRecorded = this.getPriceHistory(savedItem.id).some(
+        (p) => p.referenceDate === refDate && Math.abs(p.price - savedItem.currentPrice) < 0.0001
+      );
+      if (!alreadyRecorded) {
+        this.recordPrice({
+          itemId: savedItem.id,
+          price: savedItem.currentPrice,
+          referenceDate: refDate,
+          unit: savedItem.unit,
+          packageSize: savedItem.packageSize,
+          packageUnit: savedItem.packageUnit,
+          dataOrigin: savedItem.dataOrigin || 'usuario',
+          comparabilityBroken: savedItem.comparabilityBroken,
+          source: savedItem.notes || 'Atualização da Cesta',
+        });
+      }
     }
 
     return savedItem;
@@ -875,20 +899,57 @@ export class StorageService {
     return newRecord;
   }
 
+  private static resyncItemPriceFromHistory(itemId: string): void {
+    const prices = safeParseArray<PriceRecord>(safeStorage.getItem(STORAGE_KEYS.PRICE_HISTORY))
+      .filter((p) => p.itemId === itemId && p.comparabilityBroken !== true && Number.isFinite(p.price) && p.price > 0)
+      .sort((a, b) => {
+        const cmp = b.referenceDate.localeCompare(a.referenceDate);
+        if (cmp !== 0) return cmp;
+        return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+      });
+    if (prices.length === 0) return;
+
+    const latest = prices[0];
+    const allItems = this.getAllStoredItems();
+    const itemIdx = allItems.findIndex((i) => i.id === itemId);
+    if (itemIdx >= 0) {
+      allItems[itemIdx].currentPrice = latest.price;
+      allItems[itemIdx].currentPriceDate = latest.referenceDate;
+      allItems[itemIdx].updatedAt = new Date().toISOString();
+      safeStorage.setItem(STORAGE_KEYS.BASKET_ITEMS, JSON.stringify(allItems));
+    }
+  }
+
   static addPriceRecord(record: {
     itemId: string;
     price: number;
     referenceDate: string;
     unit?: string;
     origin?: string;
+    source?: string;
+    region?: string;
+    packageSize?: number;
+    packageUnit?: string;
+    dataOrigin?: PriceRecord['dataOrigin'];
+    comparabilityBroken?: boolean;
+    notes?: string;
   }): PriceRecord {
-    return this.recordPrice({
+    const created = this.recordPrice({
       itemId: record.itemId,
       price: record.price,
       referenceDate: record.referenceDate,
       unit: record.unit,
-      source: record.origin,
+      source: record.source || record.origin,
+      origin: record.origin,
+      region: record.region,
+      packageSize: record.packageSize,
+      packageUnit: record.packageUnit,
+      dataOrigin: record.dataOrigin || 'usuario',
+      comparabilityBroken: record.comparabilityBroken,
+      notes: record.notes,
     });
+    this.resyncItemPriceFromHistory(record.itemId);
+    return created;
   }
 
   static updatePriceRecord(id: string, updated: Partial<PriceRecord>): PriceRecord | null {
@@ -896,24 +957,9 @@ export class StorageService {
     const idx = prices.findIndex((p) => p.id === id);
     if (idx < 0) return null;
 
-    prices[idx] = { ...prices[idx], ...updated };
+    prices[idx] = { ...prices[idx], ...updated, updatedAt: new Date().toISOString() };
     safeStorage.setItem(STORAGE_KEYS.PRICE_HISTORY, JSON.stringify(prices));
-
-    // Se o preço alterado for o mais recente do item, sincroniza a cesta
-    const itemId = prices[idx].itemId;
-    const itemPrices = prices
-      .filter((p) => p.itemId === itemId)
-      .sort((a, b) => b.referenceDate.localeCompare(a.referenceDate));
-    if (itemPrices[0]?.id === id && updated.price !== undefined) {
-      const allItems = this.getAllStoredItems();
-      const itemIdx = allItems.findIndex((i) => i.id === itemId);
-      if (itemIdx >= 0) {
-        allItems[itemIdx].currentPrice = updated.price;
-        if (updated.referenceDate) allItems[itemIdx].currentPriceDate = updated.referenceDate;
-        allItems[itemIdx].updatedAt = new Date().toISOString();
-        safeStorage.setItem(STORAGE_KEYS.BASKET_ITEMS, JSON.stringify(allItems));
-      }
-    }
+    this.resyncItemPriceFromHistory(prices[idx].itemId);
 
     return prices[idx];
   }
@@ -921,8 +967,12 @@ export class StorageService {
   static deletePriceRecord(id: string): void {
     const prices = safeParseArray<PriceRecord>(safeStorage.getItem(STORAGE_KEYS.PRICE_HISTORY));
     if (prices.length === 0) return;
+    const target = prices.find((p) => p.id === id);
     const filtered = prices.filter((p) => p.id !== id);
     safeStorage.setItem(STORAGE_KEYS.PRICE_HISTORY, JSON.stringify(filtered));
+    if (target?.itemId) {
+      this.resyncItemPriceFromHistory(target.itemId);
+    }
   }
 
   // ==========================================
@@ -946,15 +996,15 @@ export class StorageService {
         {
           id: 'inc-1',
           profileId: DEMO_PROFILE_ID,
-          referenceDate: '2023-03-01',
+          referenceDate: '2025-11-01',
           nominalIncome: 10000,
           source: 'Salário CLT',
-          notes: 'Salário base março/2023',
+          notes: 'Salário base novembro/2025',
         },
         {
           id: 'inc-2',
           profileId: DEMO_PROFILE_ID,
-          referenceDate: '2024-03-01',
+          referenceDate: '2026-11-01',
           nominalIncome: 10500,
           source: 'Salário CLT',
           notes: 'Ajuste de dissídio coletivo (+5%)',
@@ -1007,6 +1057,14 @@ export class StorageService {
       profileId?: string;
       initialDate?: string;
       finalDate?: string;
+      grossIncome?: number;
+      netIncome?: number;
+      incomeType?: string;
+      debtObligations?: number;
+      financialApplications?: number;
+      transfers?: number;
+      availableReserve?: number;
+      workingDaysPerMonth?: number;
     }
   ): IncomeRecord | void {
     if (typeof initialOrRecord === 'number') {
@@ -1037,6 +1095,14 @@ export class StorageService {
           referenceDate: finalDate,
           nominalIncome: final,
           notes: 'Salário após reajustes',
+          grossIncome: options?.grossIncome,
+          netIncome: options?.netIncome,
+          incomeType: options?.incomeType,
+          debtObligations: options?.debtObligations,
+          financialApplications: options?.financialApplications,
+          transfers: options?.transfers,
+          availableReserve: options?.availableReserve,
+          workingDaysPerMonth: options?.workingDaysPerMonth,
         },
       ];
       safeStorage.setItem(STORAGE_KEYS.INCOME_HISTORY, JSON.stringify(records));
@@ -1132,10 +1198,12 @@ export class StorageService {
     if (
       'profileId' in parsed &&
       typeof parsed.profileId === 'string' &&
+      parsed.profileId &&
       'nominalAnnualRate' in parsed
     ) {
       const legacy = parsed as unknown as OpportunityPlanC;
-      return { [legacy.profileId]: legacy };
+      const pid = legacy.profileId || 'default';
+      return { [pid]: { ...legacy, profileId: pid } };
     }
 
     const result: Record<string, OpportunityPlanC> = {};
@@ -1226,15 +1294,15 @@ export class StorageService {
       {
         id: 'inc-1',
         profileId: DEMO_PROFILE_ID,
-        referenceDate: '2023-03-01',
+        referenceDate: '2025-11-01',
         nominalIncome: 10000,
         source: 'Salário CLT',
-        notes: 'Salário base março/2023',
+        notes: 'Salário base novembro/2025',
       },
       {
         id: 'inc-2',
         profileId: DEMO_PROFILE_ID,
-        referenceDate: '2024-03-01',
+        referenceDate: '2026-11-01',
         nominalIncome: 10500,
         source: 'Salário CLT',
         notes: 'Ajuste de dissídio coletivo (+5%)',

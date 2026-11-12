@@ -1,6 +1,0 @@
-{
-  "summary": "Plano completo de arquitetura e implementação da lógica do IPCA-Casa, cobrindo modelo relacional MySQL/SQL, fórmulas econômicas de Laspeyres, poder de compra real, integração ao SIDRA/IBGE, planos de economia (A, B e C), relatórios e testes automatizados.",
-  "updatedAt": "2026-10-18T21:03:52.467320631Z",
-  "requestFeedback": true,
-  "userFacing": true
-}
