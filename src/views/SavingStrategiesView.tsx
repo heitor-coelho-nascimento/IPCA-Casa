@@ -4,6 +4,7 @@ import {
   SubstitutePlanA,
   EfficiencyPlanB,
   OpportunityPlanC,
+  ProfileMode,
 } from '../types';
 import {
   DEMO_PLANS_A,
@@ -17,11 +18,13 @@ import {
 } from '../services/economics';
 import { ConfirmModal } from '../components/ConfirmModal';
 import type { NavTab } from '../components/Sidebar';
+import { getProfileModeCopy } from '../utils/profileMode';
 
 interface SavingStrategiesViewProps {
   summary: EconomicCalculationSummary;
   isDemo: boolean;
   activeProfileId?: string;
+  profileMode?: ProfileMode;
   plansA?: SubstitutePlanA[];
   plansB?: EfficiencyPlanB[];
   planC?: OpportunityPlanC;
@@ -88,6 +91,7 @@ export const SavingStrategiesView: React.FC<SavingStrategiesViewProps> = ({
   summary,
   isDemo,
   activeProfileId,
+  profileMode = 'pessoal',
   plansA: propPlansA,
   plansB: propPlansB,
   planC: propPlanC,
@@ -99,6 +103,8 @@ export const SavingStrategiesView: React.FC<SavingStrategiesViewProps> = ({
   onDeletePlanC,
   onNavigateTab,
 }) => {
+  const modeCopy = getProfileModeCopy(profileMode);
+  const isBiz = modeCopy.mode === 'negocio';
   const targetProfId = activeProfileId || 'default';
 
   const [plansA, setPlansA] = useState<SubstitutePlanA[]>(() =>
@@ -598,13 +604,15 @@ export const SavingStrategiesView: React.FC<SavingStrategiesViewProps> = ({
             <div className="flex flex-col gap-1 max-w-2xl">
               <div className="flex items-center gap-2 text-[#497cff] font-mono text-xs uppercase tracking-wider font-semibold">
                 <span className="material-symbols-outlined text-[18px]">balance</span>
-                <span>Otimização Orçamentária & Elasticidade</span>
+                <span>{modeCopy.badgeLabel} • Economia Prática</span>
               </div>
               <h1 className="text-3xl font-bold text-[#0b1c30] tracking-tight">
-                Estratégias de Economia Familiar
+                {isBiz ? 'Estratégias de Redução de Custos' : 'Estratégias de Economia'}
               </h1>
               <p className="text-xs text-[#45464d] leading-relaxed">
-                Matriz tática de rebalanceamento da cesta de consumo para neutralização dos picos inflacionários domésticos.
+                {isBiz
+                  ? 'Compare troca de fornecedores ou marcas de insumos, metas de consumo de energia/água e reserva do negócio.'
+                  : 'Simule trocas de produtos por preço unitário equivalente, metas de economia nas contas e quanto rende investir a diferença.'}
               </p>
             </div>
 
@@ -718,10 +726,12 @@ export const SavingStrategiesView: React.FC<SavingStrategiesViewProps> = ({
             <div className="md:col-span-4 bg-[#ffffff] rounded-xl p-6 shadow-sm flex flex-col justify-between border border-[#eff4ff]">
               <div className="flex flex-col gap-2">
                 <div className="flex items-center justify-between">
-                  <span className="font-mono text-xs text-[#45464d] uppercase tracking-wider font-semibold">Cesta Familiar</span>
+                  <span className="font-mono text-xs text-[#45464d] uppercase tracking-wider font-semibold">
+                    {isBiz ? 'Estrutura de Custos' : 'Cesta de Gastos'}
+                  </span>
                   <span className="w-2 h-2 rounded-full bg-[#006a61]" />
                 </div>
-                <span className="text-base font-bold text-[#0b1c30]">Sensibilidade de Preços</span>
+                <span className="text-base font-bold text-[#0b1c30]">Onde Focar Primeiro</span>
                 <p className="text-xs text-[#45464d] leading-relaxed">
                   {topBudgetGroup ? (
                     <>
@@ -729,16 +739,16 @@ export const SavingStrategiesView: React.FC<SavingStrategiesViewProps> = ({
                       <strong className="text-[#0b1c30]">
                         {topBudgetGroup.weightPercent.toFixed(1).replace('.', ',')}%
                       </strong>{' '}
-                      do orçamento total da sua cesta cadastrada.
+                      do total cadastrado no seu perfil.
                     </>
                   ) : (
-                    'Cadastre itens em Minha Cesta Familiar para identificar onde estão os maiores pesos do seu orçamento.'
+                    `Cadastre itens em ${modeCopy.basketNavLabel} para identificar onde estão os maiores pesos do orçamento.`
                   )}
                 </p>
               </div>
               <div className="mt-4 p-3 bg-[#eff4ff] rounded-lg flex items-center justify-between">
                 <div className="flex flex-col">
-                  <span className="text-[11px] font-mono text-[#76777d]">IPCA Família Atual</span>
+                  <span className="text-[11px] font-mono text-[#76777d]">{modeCopy.inflationLabel}</span>
                   <span
                     className={`text-lg font-bold font-mono ${
                       summary.ipcaCasa12M < 0 ? 'text-[#006a61]' : 'text-[#ba1a1a]'

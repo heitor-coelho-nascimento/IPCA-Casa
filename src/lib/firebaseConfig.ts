@@ -26,6 +26,8 @@ export const BLUEPRINT_LIMITS = {
   REASON_MAX: 250,
   INCOME_TYPE_MAX: 60,
   TARIFF_SOURCE_MAX: 160,
+  MONTH_KEY_MAX: 10,
+  CLOSURE_LABEL_MAX: 32,
 } as const;
 
 export function isFirebaseConfigured(): boolean {

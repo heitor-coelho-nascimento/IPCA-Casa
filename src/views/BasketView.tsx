@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { BasketItem, CalculatedItem, EconomicCalculationSummary, ConsumptionGroup } from '../types';
+import { BasketItem, CalculatedItem, EconomicCalculationSummary, ConsumptionGroup, ProfileMode } from '../types';
 import { StorageService } from '../services/storage';
 import { CategoryManagerModal } from '../components/CategoryManagerModal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { formatIsoDateBR, getTodayIsoDate } from '../utils/dates';
+import { getProfileModeCopy } from '../utils/profileMode';
 
 interface BasketViewProps {
   summary: EconomicCalculationSummary;
@@ -21,6 +22,7 @@ interface BasketViewProps {
   ) => { success: boolean; message: string } | Promise<{ success: boolean; message: string }>;
   externalSearchTerm?: string;
   onExternalSearchChange?: (term: string) => void;
+  profileMode?: ProfileMode;
 }
 
 function formatMoneyBR(val: number): string {
@@ -52,7 +54,10 @@ export const BasketView: React.FC<BasketViewProps> = ({
   onDeleteGroup,
   externalSearchTerm,
   onExternalSearchChange,
+  profileMode = 'pessoal',
 }) => {
+  const modeCopy = getProfileModeCopy(profileMode);
+  const isBiz = modeCopy.mode === 'negocio';
   const [searchTerm, setSearchTerm] = useState(externalSearchTerm ?? '');
   const [selectedGroup, setSelectedGroup] = useState<string>('ALL');
   const [selectedClass, setSelectedClass] = useState<string>('ALL');
@@ -174,18 +179,20 @@ export const BasketView: React.FC<BasketViewProps> = ({
             </span>
             <div className="flex items-center gap-1.5 flex-wrap text-xs">
               <span className="font-mono uppercase font-bold text-[#0b1c30]">
-                {isDemo ? 'Modo demonstração' : 'Cesta Familiar Ativa'}
+                {isDemo ? 'Modo demonstração' : modeCopy.basketHeading}
               </span>
               <span className="text-[#76777d]">—</span>
               <span className="text-[#45464d]">
                 {isDemo
                   ? 'Dados de demonstração — valores fictícios, não representam estatísticas oficiais.'
-                  : 'Sua cesta familiar está sincronizada com armazenamento seguro.'}
+                  : isBiz
+                  ? 'Cadastre seus insumos, ingredientes e contas operacionais. O sistema calcula pesos e altas automaticamente.'
+                  : 'Cadastre seus itens e despesas mensais uma única vez; o sistema calcula pesos e variação automaticamente.'}
               </span>
             </div>
           </div>
           <div className="hidden md:flex items-center font-mono text-xs text-[#76777d]">
-            <span>Cesta Atualizada: {formatIsoDateBR(getTodayIsoDate())}</span>
+            <span>Atualizado em: {formatIsoDateBR(getTodayIsoDate())}</span>
           </div>
         </div>
 
@@ -194,7 +201,7 @@ export const BasketView: React.FC<BasketViewProps> = ({
           {/* Card 1 */}
           <div className="bg-[#ffffff] rounded-xl p-5 shadow-sm flex flex-col justify-between border border-[#eff4ff]">
             <div className="flex items-center justify-between">
-              <span className="font-mono text-xs uppercase text-[#45464d] font-semibold">Orçamento Total Cesta</span>
+              <span className="font-mono text-xs uppercase text-[#45464d] font-semibold">{modeCopy.spendLabel}</span>
               <span className="material-symbols-outlined text-[#006a61] text-[20px]">account_balance_wallet</span>
             </div>
             <div className="mt-3">
@@ -210,7 +217,7 @@ export const BasketView: React.FC<BasketViewProps> = ({
           {/* Card 2 */}
           <div className="bg-[#ffffff] rounded-xl p-5 shadow-sm flex flex-col justify-between border border-[#eff4ff]">
             <div className="flex items-center justify-between">
-              <span className="font-mono text-xs uppercase text-[#45464d] font-semibold">Total de Itens Monitorados</span>
+              <span className="font-mono text-xs uppercase text-[#45464d] font-semibold">Itens Monitorados</span>
               <span className="material-symbols-outlined text-[#497cff] text-[20px]">inventory_2</span>
             </div>
             <div className="mt-3">
@@ -220,14 +227,14 @@ export const BasketView: React.FC<BasketViewProps> = ({
             </div>
             <div className="mt-2 text-xs text-[#76777d]">
               <span>{essentialCount} Essenciais</span> <span className="text-[#c6c6cd]">•</span>{' '}
-              <span>{superfluousCount} Supérfluos</span>
+              <span>{superfluousCount} {isBiz ? 'Opcionais' : 'Supérfluos'}</span>
             </div>
           </div>
 
           {/* Card 3 */}
           <div className="bg-[#ffffff] rounded-xl p-5 shadow-sm flex flex-col justify-between border border-[#eff4ff]">
             <div className="flex items-center justify-between">
-              <span className="font-mono text-xs uppercase text-[#45464d] font-semibold">IPCA-Casa Acumulado</span>
+              <span className="font-mono text-xs uppercase text-[#45464d] font-semibold">{modeCopy.inflationLabel}</span>
               <span
                 className={`material-symbols-outlined text-[20px] ${
                   ipcaCasa12M > 0 ? 'text-[#ba1a1a]' : ipcaCasa12M < 0 ? 'text-[#006a61]' : 'text-[#45464d]'
@@ -287,7 +294,11 @@ export const BasketView: React.FC<BasketViewProps> = ({
                 type="text"
                 value={searchTerm}
                 onChange={(e) => handleSearchChange(e.target.value)}
-                placeholder="Buscar por produto, marca, serviço ou categoria..."
+                placeholder={
+                  isBiz
+                    ? 'Buscar por insumo, ingrediente, fornecedor ou categoria...'
+                    : 'Buscar por produto, marca, serviço ou categoria...'
+                }
                 className="w-full h-10 pl-10 pr-10 rounded-lg bg-[#eff4ff] text-[#0b1c30] placeholder:text-[#76777d] text-sm focus:outline-none focus:bg-[#ffffff] focus:ring-1 focus:ring-[#006a61] transition-all"
               />
               {searchTerm && (
@@ -424,10 +435,12 @@ export const BasketView: React.FC<BasketViewProps> = ({
                             shopping_basket
                           </span>
                           <span className="text-sm font-bold text-[#0b1c30]">
-                            Sua cesta familiar ainda está vazia
+                            {isBiz ? 'Sua lista de insumos e custos está vazia' : 'Sua cesta de gastos ainda está vazia'}
                           </span>
                           <span className="text-xs text-[#45464d]">
-                            Adicione os produtos e despesas fixas da sua casa para calcular seu IPCA-Casa pessoal.
+                            {isBiz
+                              ? 'Adicione seus ingredientes, embalagens e contas operacionais para acompanhar a variação dos seus custos.'
+                              : 'Adicione os produtos e despesas fixas da sua casa para calcular o seu custo de vida real.'}
                           </span>
                           <div className="flex items-center gap-2 mt-1">
                             <button

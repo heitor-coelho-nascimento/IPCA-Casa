@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { IBGESeriesMetadata, fetchOfficialIPCA } from '../services/ibge';
+import { IBGESeriesMetadata, fetchOfficialIPCA, getOfficialBenchmarkForTimeframe } from '../services/ibge';
 import { IBGEHistoricalPoint } from '../types';
 import { trackViewIpca } from '../services/analytics';
 import { formatIsoDateBR } from '../utils/dates';
@@ -25,12 +25,14 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
   const [selectedRegion, setSelectedRegion] = useState<string>('1'); // '1' = Brasil
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
-  const loadData = async (force = false) => {
+  const scopeForRegion = (regionId: string) => (regionId === '1' ? 'N1[all]' : regionId);
+
+  const loadData = async (force = false, regionId = selectedRegion) => {
     if (force) setRefreshing(true);
     else setLoading(true);
 
     try {
-      const data = await fetchOfficialIPCA('N1[all]', force);
+      const data = await fetchOfficialIPCA(scopeForRegion(regionId), force);
       setMetadata(data);
       trackViewIpca({
         surface: analyticsSurface,
@@ -41,7 +43,7 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
         if (data.sourceMode === 'live' && !data.isContingencyData) {
           setFeedbackMessage(
             data.lastErrorMessage ||
-              'Dados oficiais do IBGE sincronizados com sucesso diretamente via SIDRA!'
+              `Dados oficiais do IBGE sincronizados com sucesso para ${data.coverage}!`
           );
         } else if (data.sourceMode === 'cached_live') {
           setFeedbackMessage(
@@ -49,7 +51,7 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
           );
         } else {
           setFeedbackMessage(
-            `Consulta externa ao IBGE indisponível no momento. Exibindo dados em cache de contingência (Ref. ${data.latestMonthLabel}).`
+            `Consulta externa ao IBGE indisponível no momento. Exibindo dados de contingência offline (Ref. ${data.latestMonthLabel}).`
           );
         }
         setTimeout(() => setFeedbackMessage(null), 5000);
@@ -57,7 +59,7 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
     } catch (err) {
       console.error('Falha ao carregar IBGE:', err);
       setFeedbackMessage(
-        'Não foi possível obter dados em tempo real. Exibindo dados oficiais em cache.'
+        'Não foi possível obter dados em tempo real. Exibindo referência offline de contingência.'
       );
     } finally {
       setLoading(false);
@@ -66,8 +68,8 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
   };
 
   useEffect(() => {
-    loadData(false);
-  }, []);
+    loadData(false, selectedRegion);
+  }, [selectedRegion]);
 
   if (loading && !metadata) {
     return (
@@ -91,15 +93,17 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
     ...filteredHistory.map((p) => (Number.isFinite(p.monthlyRate) ? Math.abs(p.monthlyRate) : 0))
   );
 
-  // Região selecionada para exibição
+  // Região selecionada para exibição e checagem de completude de períodos
   const activeRegional = meta.regionals.find((r) => r.id === selectedRegion) || meta.regionals[0];
+  const benchmark12M = getOfficialBenchmarkForTimeframe(meta, '12M');
+  const benchmarkYtd = getOfficialBenchmarkForTimeframe(meta, 'YTD');
 
   const sourceBannerText =
     meta.sourceMode === 'live' && !meta.isContingencyData
-      ? 'Conexão em Tempo Real com API SIDRA / IBGE'
+      ? `Conexão em Tempo Real com API SIDRA / IBGE (${meta.coverage})`
       : meta.sourceMode === 'cached_live'
       ? `Cache Local do Último Retorno Real (SIDRA) — Referência ${meta.latestMonthLabel}`
-      : `Dados em Cache de Contingência Offline — Referência ${meta.latestMonthLabel}`;
+      : `Dados em Contingência Offline — Referência ${meta.latestMonthLabel}`;
 
   const sourceDotClass =
     meta.sourceMode === 'live' && !meta.isContingencyData
@@ -122,19 +126,29 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
           <span>Ref: {meta.latestMonthLabel}</span>
           <span className="text-[#c6c6cd]">•</span>
           <span>
-            {meta.isContingencyData ? 'Cache desde:' : 'Sincronizado:'}{' '}
-            {meta.cachedFromAt
-              ? formatIsoDateBR(meta.cachedFromAt)
-              : new Date(meta.consultedAt).toLocaleString('pt-BR')}
+            {meta.sourceMode === 'cached_live' && meta.cachedFromAt
+              ? `Cache de: ${formatIsoDateBR(meta.cachedFromAt)}`
+              : meta.isContingencyData
+              ? `Contingência (consultado ${formatIsoDateBR(meta.consultedAt)})`
+              : `Sincronizado: ${new Date(meta.consultedAt).toLocaleString('pt-BR')}`}
           </span>
         </div>
       </div>
 
-      {meta.isContingencyData && meta.lastErrorMessage && (
+      {meta.isContingencyData && (
         <div className="p-3 bg-[#ffdad6]/30 border border-[#ba1a1a]/25 rounded-xl text-xs font-mono text-[#93000a] flex items-center gap-2">
           <span className="material-symbols-outlined text-[18px] shrink-0">cloud_off</span>
           <span>
-            API SIDRA indisponível no momento ({meta.lastErrorMessage}). Exibindo referência armazenada em cache ({meta.latestMonthLabel}).
+            Consulta oficial ao SIDRA falhou{meta.lastErrorMessage ? ` (${meta.lastErrorMessage})` : ''}. Exibindo série histórica de contingência offline ({meta.latestMonthLabel}) — não corresponde a uma consulta atualizada em tempo real.
+          </span>
+        </div>
+      )}
+
+      {(benchmark12M.completenessNote || benchmarkYtd.completenessNote) && (
+        <div className="p-3 bg-[#eff4ff] border border-[#dce9ff] rounded-xl text-xs font-mono text-[#45464d] flex items-center gap-2">
+          <span className="material-symbols-outlined text-[18px] text-[#497cff] shrink-0">info</span>
+          <span>
+            {benchmark12M.completenessNote || benchmarkYtd.completenessNote}
           </span>
         </div>
       )}
@@ -169,7 +183,7 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => loadData(true)}
+            onClick={() => loadData(true, selectedRegion)}
             disabled={refreshing}
             className="h-9 px-4 rounded-lg bg-[#000000] text-[#ffffff] hover:bg-[#213145] text-xs font-mono font-semibold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
           >
@@ -474,6 +488,11 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
                   {activeRegional.state}
                 </span>
               </div>
+              {activeRegional.isEstimatedFromNational && (
+                <span className="text-[11px] font-mono text-[#93000a] bg-[#ffdad6]/40 px-2 py-1 rounded">
+                  Série regional offline não disponível: valor exibido reflete a média nacional de contingência.
+                </span>
+              )}
               <div className="flex items-baseline justify-between">
                 <span className="text-xs text-[#45464d]">Variação do Mês:</span>
                 <span className="text-xl font-bold font-mono text-[#0b1c30]">

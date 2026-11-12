@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { EconomicCalculationSummary } from '../types';
+import { EconomicCalculationSummary, ProfileMode } from '../types';
 import {
   formatDateRangeLabel,
   formatMonthYearLabel,
@@ -8,6 +8,7 @@ import {
   isValidIsoDate,
   parseIsoDateToLocalTimestamp,
 } from '../utils/dates';
+import { getProfileModeCopy } from '../utils/profileMode';
 
 interface PurchasingPowerViewProps {
   summary: EconomicCalculationSummary;
@@ -17,6 +18,7 @@ interface PurchasingPowerViewProps {
     dates?: { initialDate?: string; finalDate?: string }
   ) => void | Promise<void>;
   isDemo: boolean;
+  profileMode?: ProfileMode;
 }
 
 function formatSignedPercent(value: number, decimals = 2): string {
@@ -35,7 +37,10 @@ export const PurchasingPowerView: React.FC<PurchasingPowerViewProps> = ({
   summary,
   onUpdateIncome,
   isDemo,
+  profileMode = 'pessoal',
 }) => {
+  const modeCopy = getProfileModeCopy(profileMode);
+  const isBiz = modeCopy.mode === 'negocio';
   const { ipcaCasa12M, ipcaIBGE12M, spreadPP, purchasingPower } = summary;
 
   // Estado do simulador interativo de reajuste necessário (sem defaults fictícios)
@@ -309,13 +314,15 @@ export const PurchasingPowerView: React.FC<PurchasingPowerViewProps> = ({
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <span className="font-mono text-xs uppercase tracking-widest text-[#006a61] bg-[#86f2e4]/30 px-2.5 py-0.5 rounded-full font-semibold">
-                Análise Temporal Consolidada
+                {modeCopy.badgeLabel}
               </span>
               <span className="font-mono text-xs text-[#76777d]">{dateRangeText}</span>
             </div>
-            <h1 className="text-3xl font-bold text-[#0b1c30] tracking-tight mt-1">Renda e Poder de Compra</h1>
+            <h1 className="text-3xl font-bold text-[#0b1c30] tracking-tight mt-1">{modeCopy.incomeHeading}</h1>
             <p className="text-xs text-[#45464d] max-w-2xl mt-1 leading-relaxed">
-              Avaliação da defasagem inflacionária sobre o rendimento familiar no ciclo analisado. O índice afere a variação real do poder aquisitivo ponderada pela sua cesta do domicílio.
+              {isBiz
+                ? 'Compare a evolução do faturamento ou sobra mensal com a alta dos seus insumos e custos operacionais para saber se a margem está acompanhando os preços.'
+                : 'Compare a evolução da sua renda com a variação dos seus gastos para saber se seu dinheiro está comprando mais ou menos do que antes.'}
             </p>
           </div>
 
@@ -1089,7 +1096,7 @@ export const PurchasingPowerView: React.FC<PurchasingPowerViewProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
               <div className="flex flex-col gap-1">
                 <label className="font-mono text-xs uppercase text-[#0b1c30] font-bold">
-                  Quanto você recebe por mês atualmente? *
+                  {modeCopy.incomeFieldLabel}? *
                 </label>
                 <div className="relative flex items-center">
                   <span className="absolute left-3 text-[#76777d] font-mono text-xs font-semibold">R$</span>
@@ -1107,12 +1114,14 @@ export const PurchasingPowerView: React.FC<PurchasingPowerViewProps> = ({
                     className="w-full h-10 pl-9 pr-3 rounded-lg bg-[#eff4ff] text-[#0b1c30] font-mono text-sm focus:outline-none focus:bg-[#ffffff] focus:ring-1 focus:ring-[#006a61]"
                   />
                 </div>
-                <span className="text-[11px] text-[#76777d]">Renda líquida familiar atual</span>
+                <span className="text-[11px] text-[#76777d]">
+                  {isBiz ? 'Faturamento líquido ou sobra mensal atual' : 'Renda líquida familiar atual'}
+                </span>
               </div>
 
               <div className="flex flex-col gap-1">
                 <label className="font-mono text-xs uppercase text-[#45464d] font-semibold">
-                  Quanto recebia há 1 ano? (Renda Base)
+                  {isBiz ? 'Quanto faturava no início? (Base)' : 'Quanto recebia há 1 ano? (Renda Base)'}
                 </label>
                 <div className="relative flex items-center">
                   <span className="absolute left-3 text-[#76777d] font-mono text-xs font-semibold">R$</span>

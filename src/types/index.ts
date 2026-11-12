@@ -112,9 +112,13 @@ export interface AuthSession {
   expiresAt?: string;
 }
 
+export type ProfileMode = 'pessoal' | 'negocio';
+
 export interface FamilyProfile {
   id: string;
   name: string;
+  profileMode?: ProfileMode;
+  priceAlertThresholdPercent?: number;
   membersCount: number;
   referenceRegion: string;
   currency: 'BRL' | string;
@@ -611,3 +615,62 @@ export interface ReportExportPayload {
   limitations: string[];
   sources: string[];
 }
+
+export interface MonthlyClosure {
+  id: string;
+  profileId: string;
+  monthKey: string; // 'YYYY-MM'
+  monthLabel: string; // 'Nov/26'
+  profileMode?: ProfileMode;
+  totalMonthlySpend: number;
+  comparableBaseCost: number;
+  ipcaCasaPercent: number;
+  ipcaOficialPercent: number;
+  spreadPP: number;
+  itemsCount: number;
+  eligibleItemsCount: number;
+  monthlyIncome?: number | null;
+  monthlyBalance?: number | null;
+  topCategory?: string;
+  topDriverName?: string;
+  topDriverChangePercent?: number | null;
+  priceEffectReais?: number;
+  quantityEffectReais?: number;
+  mixEffectReais?: number;
+  ibgeSourceMode?: 'live' | 'cached_live' | 'contingency';
+  ibgeReferenceMonth?: string;
+  dataOrigin?: DataOrigin;
+  notes?: string;
+  closedAt: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ComparablePriceAlert {
+  itemId: string;
+  itemName: string;
+  group: string;
+  unit: string;
+  oldPrice: number;
+  currentPrice: number;
+  absoluteChangeReais: number;
+  percentChange: number;
+  monthlyImpactReais: number;
+  thresholdUsed: number;
+  isEstimatedConversion?: boolean;
+}
+
+export interface StructuredRecommendation {
+  id: string;
+  driverType: 'preco' | 'quantidade' | 'composicao' | 'equilibrio' | 'insuficiente';
+  title: string;
+  summary: string;
+  effectDetail: string;
+  itemName?: string;
+  categoryName?: string;
+  amountReais?: number;
+  percentValue?: number;
+  actionLabel?: string;
+  targetTab?: string;
+}
+

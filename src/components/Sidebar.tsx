@@ -1,4 +1,6 @@
 import React, { useEffect } from 'react';
+import { ProfileMode } from '../types';
+import { getProfileModeCopy } from '../utils/profileMode';
 
 export type NavTab =
   | 'visao-geral'
@@ -26,6 +28,7 @@ export interface SidebarProps {
   authProvider?: 'local' | 'google' | 'password' | 'email';
   isMobileOpen?: boolean;
   onCloseMobile?: () => void;
+  profileMode?: ProfileMode;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -41,8 +44,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   authProvider,
   isMobileOpen = false,
   onCloseMobile,
+  profileMode = 'pessoal',
 }) => {
   const effectiveTab = activeTab || currentTab || 'visao-geral';
+  const modeCopy = getProfileModeCopy(profileMode);
 
   // Bloqueio de scroll do body e suporte a Escape quando o drawer mobile estiver aberto
   useEffect(() => {
@@ -67,12 +72,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'visao-geral' as NavTab, label: 'Visão geral', icon: 'grid_view' },
     { id: 'impacto-no-bolso' as NavTab, label: 'Impacto no seu Bolso', icon: 'payments', highlight: true },
     { id: 'ipca-oficial' as NavTab, label: 'IPCA Oficial (IBGE)', icon: 'public' },
-    { id: 'minha-cesta-familiar' as NavTab, label: 'Minha cesta familiar', icon: 'shopping_basket' },
+    { id: 'minha-cesta-familiar' as NavTab, label: modeCopy.basketNavLabel, icon: 'shopping_basket' },
     { id: 'precos-e-historico' as NavTab, label: 'Preços e histórico', icon: 'stacked_line_chart' },
     { id: 'analise-da-inflacao' as NavTab, label: 'Análise da inflação', icon: 'finance_mode' },
-    { id: 'renda-e-poder-de-compra' as NavTab, label: 'Renda e poder de compra', icon: 'price_change' },
+    { id: 'renda-e-poder-de-compra' as NavTab, label: modeCopy.incomeNavLabel, icon: 'price_change' },
     { id: 'estrategias-de-economia' as NavTab, label: 'Estratégias de economia', icon: 'lightbulb' },
-    { id: 'relatorios' as NavTab, label: 'Relatórios executivos', icon: 'article' },
+    { id: 'relatorios' as NavTab, label: 'Fechamentos e relatórios', icon: 'article' },
     { id: 'configuracoes' as NavTab, label: 'Configurações', icon: 'tune' },
   ];
 
@@ -195,7 +200,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     IPCA-Casa
                   </span>
                   <span className="text-[11px] font-mono uppercase tracking-wider text-[#45464d] mt-0.5">
-                    Índice Familiar Real
+                    {modeCopy.badgeLabel}
                   </span>
                 </div>
               )}
@@ -262,7 +267,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       IPCA-Casa
                     </span>
                     <span className="text-[11px] font-mono uppercase tracking-wider text-[#45464d] mt-0.5">
-                      Índice Familiar Real
+                      {modeCopy.badgeLabel}
                     </span>
                   </div>
                 </div>

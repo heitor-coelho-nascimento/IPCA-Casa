@@ -1,21 +1,25 @@
 import React, { useEffect, useState } from 'react';
-import { FamilyProfile, UserAccount } from '../types';
+import { FamilyProfile, MonthlyClosure, ProfileMode, UserAccount } from '../types';
 import { StorageService } from '../services/storage';
 import { IBGESeriesMetadata, IBGEService } from '../services/ibge';
 import { trackExportData } from '../services/analytics';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { formatIsoDateBR, getTodayIsoDate } from '../utils/dates';
+import { getProfileModeCopy, resolveProfileMode } from '../utils/profileMode';
 
 interface SettingsViewProps {
   activeProfile: FamilyProfile;
   profiles?: FamilyProfile[];
   ibgeData?: IBGESeriesMetadata | null;
+  monthlyClosures?: MonthlyClosure[];
   onUpdateProfile: (profile: FamilyProfile) => void | Promise<void>;
   onSelectProfile?: (profileId: string) => void;
   onCreateProfile?: (params: {
     name: string;
     membersCount: number;
     referenceRegion: string;
+    profileMode?: ProfileMode;
+    priceAlertThresholdPercent?: number;
   }) => void | Promise<void>;
   onDeleteProfile?: (profileId: string) => void | Promise<void>;
   onWipeAllUserData?: () => void | Promise<void>;
@@ -54,6 +58,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   activeProfile,
   profiles = [],
   ibgeData = null,
+  monthlyClosures,
   onUpdateProfile,
   onSelectProfile,
   onCreateProfile,
@@ -71,17 +76,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [profileName, setProfileName] = useState(activeProfile.name);
   const [region, setRegion] = useState(activeProfile.referenceRegion);
   const [membersCount, setMembersCount] = useState(activeProfile.membersCount);
+  const [profileMode, setProfileMode] = useState<ProfileMode>(() =>
+    resolveProfileMode(activeProfile.profileMode)
+  );
+  const [alertThreshold, setAlertThreshold] = useState<number>(
+    activeProfile.priceAlertThresholdPercent ?? 10
+  );
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileFeedback, setProfileFeedback] = useState<{
     type: 'success' | 'error';
     text: string;
   } | null>(null);
 
-  // Novo perfil familiar
+  // Novo perfil
   const [showCreateProfile, setShowCreateProfile] = useState(false);
   const [newProfileName, setNewProfileName] = useState('');
   const [newProfileMembers, setNewProfileMembers] = useState(2);
   const [newProfileRegion, setNewProfileRegion] = useState('Brasil');
+  const [newProfileMode, setNewProfileMode] = useState<ProfileMode>('pessoal');
   const [isCreatingProfile, setIsCreatingProfile] = useState(false);
 
   // Confirmação para excluir perfil ou limpar dados (LGPD)
@@ -97,8 +109,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setProfileName(activeProfile.name);
     setRegion(activeProfile.referenceRegion);
     setMembersCount(activeProfile.membersCount);
+    setProfileMode(resolveProfileMode(activeProfile.profileMode));
+    setAlertThreshold(activeProfile.priceAlertThresholdPercent ?? 10);
     setProfileFeedback(null);
-  }, [activeProfile.id, activeProfile.name, activeProfile.referenceRegion, activeProfile.membersCount]);
+  }, [
+    activeProfile.id,
+    activeProfile.name,
+    activeProfile.referenceRegion,
+    activeProfile.membersCount,
+    activeProfile.profileMode,
+    activeProfile.priceAlertThresholdPercent,
+  ]);
+
+  const modeCopy = getProfileModeCopy(profileMode);
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -109,11 +132,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       return;
     }
 
+    const safeThreshold = Number.isFinite(alertThreshold)
+      ? Math.max(1, Math.min(100, Math.round(alertThreshold * 10) / 10))
+      : 10;
+
     const updated: FamilyProfile = {
       ...activeProfile,
       name: trimmedName,
       referenceRegion: region,
       membersCount: Math.max(1, Math.min(50, Math.round(membersCount) || 1)),
+      profileMode,
+      priceAlertThresholdPercent: safeThreshold,
       updatedAt: new Date().toISOString(),
     };
 
@@ -122,7 +151,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       await onUpdateProfile(updated);
       setProfileFeedback({
         type: 'success',
-        text: 'Configurações do perfil familiar salvas com sucesso!',
+        text: 'Configurações do perfil salvas com sucesso!',
       });
     } catch {
       setProfileFeedback({
@@ -147,13 +176,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         name: newProfileName.trim(),
         membersCount: newProfileMembers,
         referenceRegion: newProfileRegion,
+        profileMode: newProfileMode,
+        priceAlertThresholdPercent: 10,
       });
       setNewProfileName('');
       setNewProfileMembers(2);
       setNewProfileRegion('Brasil');
+      setNewProfileMode('pessoal');
       setShowCreateProfile(false);
     } catch {
-      onNotify?.('error', 'Não foi possível criar o novo perfil familiar.');
+      onNotify?.('error', 'Não foi possível criar o novo perfil.');
     } finally {
       setIsCreatingProfile(false);
     }
@@ -208,11 +240,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           items: StorageService.getAllStoredItems(),
           prices: StorageService.getAllPrices(),
           income: StorageService.getAllStoredIncome(),
+          monthlyClosures:
+            monthlyClosures ?? StorageService.getMonthlyClosures(activeProfile.id),
           plansA: StorageService.getPlansA(),
           plansB: StorageService.getPlansB(),
           planC: StorageService.getPlanC(),
           exportedAt: new Date().toISOString(),
-          version: '3.2.0',
+          version: '3.3.0',
         };
 
     const dataStr =
@@ -229,22 +263,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const visibleProfiles = profiles.length > 0 ? profiles : [activeProfile];
   const ibgeBadgeConfig =
-    ibgeData?.sourceMode === 'live'
+    ibgeData?.sourceMode === 'live' && !ibgeData.isContingencyData
       ? {
           bg: 'bg-[#86f2e4]/30 text-[#006a61]',
           dot: 'bg-[#006a61]',
-          label: 'SIDRA Tempo Real',
+          label: 'SIDRA Ao Vivo',
         }
-      : ibgeData?.sourceMode === 'cached_live'
+      : ibgeData?.sourceMode === 'cached_live' && !ibgeData.isContingencyData
       ? {
           bg: 'bg-[#fef3c7] text-[#92400e]',
           dot: 'bg-[#d97706]',
-          label: 'Cache Recente',
+          label: 'Cache SIDRA',
         }
       : {
           bg: 'bg-[#eff4ff] text-[#45464d]',
           dot: 'bg-[#76777d]',
-          label: ibgeData ? 'Ref. Offline' : 'Aguardando',
+          label: ibgeData ? 'Contingência Offline' : 'Aguardando',
         };
 
   return (
@@ -412,6 +446,31 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       title="Número de integrantes"
                     />
                   </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-mono text-[#45464d]">Tipo:</span>
+                    <button
+                      type="button"
+                      onClick={() => setNewProfileMode('pessoal')}
+                      className={`px-2.5 py-1 rounded-lg font-mono text-[11px] font-semibold cursor-pointer ${
+                        newProfileMode === 'pessoal'
+                          ? 'bg-[#000000] text-[#ffffff]'
+                          : 'bg-[#ffffff] text-[#45464d] border border-[#c6c6cd]'
+                      }`}
+                    >
+                      Pessoal / Familiar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewProfileMode('negocio')}
+                      className={`px-2.5 py-1 rounded-lg font-mono text-[11px] font-semibold cursor-pointer ${
+                        newProfileMode === 'negocio'
+                          ? 'bg-[#000000] text-[#ffffff]'
+                          : 'bg-[#ffffff] text-[#45464d] border border-[#c6c6cd]'
+                      }`}
+                    >
+                      Negócio / Pequena Empresa
+                    </button>
+                  </div>
                   <div className="flex items-center justify-between gap-2">
                     <select
                       value={newProfileRegion}
@@ -438,6 +497,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <div className="flex flex-col gap-2">
                 {visibleProfiles.map((prof) => {
                   const isActive = prof.id === activeProfile.id;
+                  const profCopy = getProfileModeCopy(prof.profileMode);
                   const canDelete =
                     Boolean(onDeleteProfile) && visibleProfiles.length > 1 && !prof.isDemo;
                   return (
@@ -454,8 +514,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         onClick={() => onSelectProfile?.(prof.id)}
                         className="flex-1 text-left cursor-pointer min-w-0"
                       >
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-xs font-bold text-[#0b1c30] truncate">{prof.name}</span>
+                          <span className="px-2 py-0.5 rounded bg-[#eff4ff] text-[#45464d] font-mono text-[10px]">
+                            {profCopy.badgeLabel}
+                          </span>
                           {isActive && (
                             <span className="px-2 py-0.5 rounded bg-[#006a61] text-[#ffffff] font-mono text-[10px] font-semibold">
                               Ativo
@@ -502,9 +565,49 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
 
             <form onSubmit={handleSaveProfile} className="flex flex-col gap-4">
+              {/* Seletor de Modo Pessoal vs Negócio */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-mono text-[#45464d] font-medium">
-                  Nome do Perfil Familiar:
+                  Como você usa este perfil?
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setProfileMode('pessoal')}
+                    className={`p-3 rounded-xl border-2 text-left transition-all cursor-pointer ${
+                      profileMode === 'pessoal'
+                        ? 'border-[#000000] bg-[#eff4ff]/60'
+                        : 'border-[#eff4ff] hover:border-[#c6c6cd]'
+                    }`}
+                  >
+                    <div className="text-xs font-bold text-[#0b1c30]">Pessoal / Familiar</div>
+                    <div className="text-[11px] text-[#45464d] mt-0.5">
+                      Compras da casa, contas e salário mensal.
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setProfileMode('negocio')}
+                    className={`p-3 rounded-xl border-2 text-left transition-all cursor-pointer ${
+                      profileMode === 'negocio'
+                        ? 'border-[#000000] bg-[#eff4ff]/60'
+                        : 'border-[#eff4ff] hover:border-[#c6c6cd]'
+                    }`}
+                  >
+                    <div className="text-xs font-bold text-[#0b1c30]">Negócio / Pequena Empresa</div>
+                    <div className="text-[11px] text-[#45464d] mt-0.5">
+                      Insumos, fornecedores e custos operacionais.
+                    </div>
+                  </button>
+                </div>
+                <span className="text-[11px] text-[#76777d]">
+                  {modeCopy.modeDescription}
+                </span>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-mono text-[#45464d] font-medium">
+                  {profileMode === 'negocio' ? 'Nome do Negócio ou Perfil:' : 'Nome do Perfil Familiar:'}
                 </label>
                 <input
                   type="text"
@@ -515,7 +618,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="flex flex-col gap-1.5">
                   <label className="text-xs font-mono text-[#45464d] font-medium">
                     Região de Referência:
@@ -535,7 +638,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
                 <div className="flex flex-col gap-1.5">
                   <label className="text-xs font-mono text-[#45464d] font-medium">
-                    Integrantes da Família:
+                    {modeCopy.membersLabel}:
                   </label>
                   <input
                     type="number"
@@ -543,6 +646,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     max="50"
                     value={membersCount}
                     onChange={(e) => setMembersCount(parseInt(e.target.value, 10) || 1)}
+                    className="h-10 px-3.5 rounded-lg border border-[#c6c6cd] text-xs font-mono text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-mono text-[#45464d] font-medium">
+                    Alerta de aumento (%):
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    step="0.5"
+                    value={alertThreshold}
+                    onChange={(e) => setAlertThreshold(parseFloat(e.target.value) || 10)}
                     className="h-10 px-3.5 rounded-lg border border-[#c6c6cd] text-xs font-mono text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
                   />
                 </div>

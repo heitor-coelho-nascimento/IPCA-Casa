@@ -308,6 +308,9 @@ export function getOfficialBenchmarkForTimeframe(
   subtitle: string;
   monthsIncludedLabel: string;
   isExactPeriodMatch: boolean;
+  expectedMonthsCount?: number;
+  availableMonthsCount?: number;
+  completenessNote?: string;
 } {
   if (!ibgeData) {
     return {
@@ -316,10 +319,14 @@ export function getOfficialBenchmarkForTimeframe(
       subtitle: 'Série IBGE não disponível',
       monthsIncludedLabel: 'Sem série carregada',
       isExactPeriodMatch: false,
+      expectedMonthsCount: timeframe === '1M' ? 1 : timeframe === '12M' ? 12 : undefined,
+      availableMonthsCount: 0,
+      completenessNote: 'Série oficial do IBGE ainda não carregada.',
     };
   }
 
   if (timeframe === '1M') {
+    const hasMonth = Boolean(ibgeData.latestMonthCode && Number.isFinite(ibgeData.latestMonthlyRate));
     return {
       rate: Number.isFinite(ibgeData.latestMonthlyRate) ? ibgeData.latestMonthlyRate : 0,
       unitLabel: 'no mês',
@@ -327,23 +334,35 @@ export function getOfficialBenchmarkForTimeframe(
         ? `Variação Mensal (${ibgeData.latestMonthLabel})`
         : 'Último Mês Publicado',
       monthsIncludedLabel: ibgeData.latestMonthLabel || 'Último mês oficial',
-      isExactPeriodMatch: true,
+      isExactPeriodMatch: hasMonth,
+      expectedMonthsCount: 1,
+      availableMonthsCount: hasMonth ? 1 : 0,
+      completenessNote: hasMonth ? undefined : 'Última competência mensal do IBGE indisponível.',
     };
   }
 
   if (timeframe === 'YTD') {
-    const latestYear = ibgeData.latestMonthCode?.slice(0, 4);
+    const latestCode = ibgeData.latestMonthCode || '';
+    const latestYear = latestCode.slice(0, 4);
+    const expectedMonths = /^\d{6}$/.test(latestCode) ? Math.max(1, parseInt(latestCode.slice(4, 6), 10)) : 0;
     const ytdMonths = (ibgeData.history || []).filter((h) => {
       const code = isoDateToMonthCode(h);
       return latestYear ? code.startsWith(latestYear) : false;
     });
     const ytdCalc = computeGeometricPeriodAccumulated(ytdMonths);
+    const hasCompleteYtd =
+      expectedMonths > 0 &&
+      ytdCalc.valid &&
+      ytdCalc.isCompleteSeries &&
+      ytdMonths.length === expectedMonths &&
+      isoDateToMonthCode(ytdMonths[0]) === `${latestYear}01`;
+
     const resolvedYtd =
       ibgeData.accumulatedYearRate !== null &&
       ibgeData.accumulatedYearRate !== undefined &&
       Number.isFinite(ibgeData.accumulatedYearRate)
         ? ibgeData.accumulatedYearRate
-        : ytdCalc.rate ?? ibgeData.accumulated12MRate;
+        : ytdCalc.rate ?? 0;
 
     return {
       rate: resolvedYtd,
@@ -353,7 +372,13 @@ export function getOfficialBenchmarkForTimeframe(
         ytdMonths.length > 0
           ? `${ytdMonths[0].label} até ${ytdMonths[ytdMonths.length - 1].label} (${ytdMonths.length}m)`
           : 'Acumulado ano SIDRA',
-      isExactPeriodMatch: true,
+      isExactPeriodMatch: hasCompleteYtd || (ibgeData.accumulatedYearRate !== null && ibgeData.accumulatedYearRate !== undefined),
+      expectedMonthsCount: expectedMonths || undefined,
+      availableMonthsCount: ytdMonths.length,
+      completenessNote:
+        !hasCompleteYtd && ytdMonths.length < expectedMonths
+          ? `Janela YTD possui ${ytdMonths.length} de ${expectedMonths} meses na série local (usando acumulado oficial publicado quando disponível).`
+          : undefined,
     };
   }
 
@@ -378,27 +403,40 @@ export function getOfficialBenchmarkForTimeframe(
           calc.monthsUsed[calc.monthsUsed.length - 1].label
         }`,
         isExactPeriodMatch: calc.isCompleteSeries,
+        availableMonthsCount: calc.monthsUsed.length,
+        completenessNote: !calc.isCompleteSeries
+          ? 'Série do recorte possui lacuna entre meses publicados.'
+          : undefined,
       };
     }
     return {
       rate: ibgeData.accumulated12MRate,
       unitLabel: 'ref. 12M',
-      subtitle: 'Recorte fora da janela SIDRA em cache — exibindo 12M',
+      subtitle: 'Recorte fora da janela SIDRA disponível — exibindo 12M',
       monthsIncludedLabel: calc.reason || 'Fora da janela disponível',
       isExactPeriodMatch: false,
+      availableMonthsCount: 0,
+      completenessNote: calc.reason || 'Período solicitado fora da série histórica IBGE carregada.',
     };
   }
 
   const last12 = (ibgeData.history || []).slice(-12);
+  const last12Calc = computeGeometricPeriodAccumulated(last12);
+  const isComplete12 = last12.length === 12 && last12Calc.valid && last12Calc.isCompleteSeries;
   return {
     rate: Number.isFinite(ibgeData.accumulated12MRate) ? ibgeData.accumulated12MRate : 0,
     unitLabel: 'a.a.',
     subtitle: 'Acumulado 12 Meses (IBGE)',
     monthsIncludedLabel:
       last12.length >= 2
-        ? `${last12[0].label} até ${last12[last12.length - 1].label}`
+        ? `${last12[0].label} até ${last12[last12.length - 1].label}${last12.length < 12 ? ` (${last12.length}/12m)` : ''}`
         : ibgeData.latestMonthLabel || '12 meses',
-    isExactPeriodMatch: true,
+    isExactPeriodMatch: isComplete12,
+    expectedMonthsCount: 12,
+    availableMonthsCount: last12.length,
+    completenessNote: !isComplete12
+      ? `Série local contém ${last12.length} de 12 meses contínuos.`
+      : undefined,
   };
 }
 
@@ -496,15 +534,21 @@ interface CachedSidraWrapper {
 const serverMemoryCache = new Map<string, { timestamp: number; data: IBGESeriesMetadata }>();
 
 function buildStorageKey(scope?: string): string {
-  const clean = (scope || 'N1_all').replace(/[^a-zA-Z0-9]/g, '_');
-  return `${IBGE_CACHE_KEY}_${clean}`;
+  const parsed = parseIBGERegion(scope || 'N1[all]');
+  if (parsed.isNational) {
+    return `${IBGE_CACHE_KEY}_n1_all`;
+  }
+  return `${IBGE_CACHE_KEY}_${parsed.level}_${parsed.code}`;
 }
 
 function readCachedSidra(scope?: string): CachedSidraWrapper | null {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return null;
+    const parsedRegion = parseIBGERegion(scope || 'N1[all]');
     const key = buildStorageKey(scope);
-    const raw = window.localStorage.getItem(key) || window.localStorage.getItem(IBGE_CACHE_KEY);
+    const raw =
+      window.localStorage.getItem(key) ||
+      (parsedRegion.isNational ? window.localStorage.getItem(IBGE_CACHE_KEY) : null);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CachedSidraWrapper;
     if (
@@ -527,13 +571,16 @@ function readCachedSidra(scope?: string): CachedSidraWrapper | null {
 function writeCachedSidra(data: IBGESeriesMetadata, scope?: string): void {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return;
+    const parsedRegion = parseIBGERegion(scope || 'N1[all]');
     const key = buildStorageKey(scope);
     const payload: CachedSidraWrapper = {
       timestamp: Date.now(),
       data,
     };
     window.localStorage.setItem(key, JSON.stringify(payload));
-    window.localStorage.setItem(IBGE_CACHE_KEY, JSON.stringify(payload));
+    if (parsedRegion.isNational) {
+      window.localStorage.setItem(IBGE_CACHE_KEY, JSON.stringify(payload));
+    }
   } catch {
     // ignora erros de quota de storage
   }

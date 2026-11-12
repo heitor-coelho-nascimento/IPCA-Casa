@@ -20,9 +20,13 @@ import {
   simulatePlanB,
   simulatePlanC,
   calculateWorkingDaysEquivalence,
+  detectComparablePriceAlerts,
+  generateStructuredRecommendations,
+  buildMonthlyClosureSnapshot,
+  compareMonthlyClosures,
 } from '../src/services/economics';
 import { compareNormalizedUnitPrices, areUnitsCompatible, frequencyToMonthlyMultiplier } from '../src/services/units';
-import { CalculatedItem, BasketItem } from '../src/types';
+import { CalculatedItem, BasketItem, PriceRecord } from '../src/types';
 
 describe('Testes Obrigatórios de Regras Econômicas (IPCA-Casa)', () => {
   // Teste A — Preço estável
@@ -338,6 +342,167 @@ describe('Testes Obrigatórios de Regras Econômicas (IPCA-Casa)', () => {
       expenseAmount: 600,
     });
     expect(invalidWorkDays.valid).toBe(false);
+  });
+
+  // Teste T — Alertas de aumento comparáveis por unidade
+  it('Teste T — detectComparablePriceAlerts filtra itens acima do limite e rejeita unidades incompatíveis', () => {
+    const items: BasketItem[] = [
+      {
+        id: 'a1',
+        profileId: 'p1',
+        name: 'Farinha de Trigo 5kg',
+        group: 'Alimentação e bebidas',
+        classification: 'Essencial',
+        monthlySpend: 500,
+        oldPrice: 20,
+        currentPrice: 25, // +25%
+        oldPriceDate: '2026-01-01',
+        currentPriceDate: '2026-10-01',
+        unit: 'kg',
+        packageSize: 5,
+        packageUnit: 'kg',
+        active: true,
+        createdAt: '2026-01-01',
+        updatedAt: '2026-10-01',
+      },
+      {
+        id: 'a2',
+        profileId: 'p1',
+        name: 'Item Incompatível',
+        group: 'Alimentação e bebidas',
+        classification: 'Essencial',
+        monthlySpend: 200,
+        oldPrice: 0,
+        currentPrice: 20,
+        oldPriceDate: '2026-01-01',
+        currentPriceDate: '2026-10-01',
+        unit: 'l',
+        packageSize: 1,
+        packageUnit: 'l',
+        active: true,
+        createdAt: '2026-01-01',
+        updatedAt: '2026-10-01',
+      },
+    ];
+
+    const priceHistory: PriceRecord[] = [
+      {
+        id: 'ph-a2-1',
+        profileId: 'p1',
+        itemId: 'a2',
+        price: 10,
+        referenceDate: '2026-01-01',
+        unit: 'kg',
+        packageSize: 1,
+        packageUnit: 'kg',
+      },
+      {
+        id: 'ph-a2-2',
+        profileId: 'p1',
+        itemId: 'a2',
+        price: 20,
+        referenceDate: '2026-10-01',
+        unit: 'l',
+        packageSize: 1,
+        packageUnit: 'l',
+      },
+    ];
+
+    const alerts10 = detectComparablePriceAlerts(items, priceHistory, 10);
+    expect(alerts10.length).toBe(1);
+    expect(alerts10[0].itemId).toBe('a1');
+    expect(alerts10[0].percentChange).toBeCloseTo(25, 1);
+
+    const alerts30 = detectComparablePriceAlerts(items, priceHistory, 30);
+    expect(alerts30.length).toBe(0);
+  });
+
+  // Teste U — Decomposição exata e Recomendações Explicadas
+  it('Teste U — Decomposição algébrica reconcilia gasto e generateStructuredRecommendations separa efeitos', () => {
+    const items: BasketItem[] = [
+      {
+        id: 'd1',
+        profileId: 'p1',
+        name: 'Queijo Mussarela',
+        group: 'Alimentação e bebidas',
+        classification: 'Essencial',
+        monthlySpend: 600,
+        oldPrice: 40,
+        currentPrice: 50,
+        baseQuantity: 10,
+        quantity: 12,
+        oldPriceDate: '2026-01-01',
+        currentPriceDate: '2026-10-01',
+        unit: 'kg',
+        active: true,
+        createdAt: '2026-01-01',
+        updatedAt: '2026-10-01',
+      },
+    ];
+
+    const summary = processBasketEconomics(items, 4.5, 5000, 5200, '2026-01-01', '2026-10-01', '12M');
+    expect(summary.budgetDecomposition.reconcilesExact).toBe(true);
+    expect(summary.budgetDecomposition.priceEffectReais).toBeCloseTo(100, 1); // (50-40)*10
+    expect(summary.budgetDecomposition.quantityEffectReais).toBeCloseTo(80, 1); // (12-10)*40
+    expect(summary.budgetDecomposition.mixEffectReais).toBeCloseTo(20, 1); // (50-40)*(12-10)
+
+    const recs = generateStructuredRecommendations({ summary, profileMode: 'negocio' });
+    expect(recs.hasSufficientData).toBe(true);
+    const driverTypes = recs.recommendations.map((r) => r.driverType);
+    expect(driverTypes).toContain('preco');
+    expect(driverTypes).toContain('quantidade');
+    expect(driverTypes).toContain('composicao');
+    expect(driverTypes).toContain('equilibrio');
+  });
+
+  // Teste V — Snapshots de Fechamento Mensal e comparação mês contra mês
+  it('Teste V — buildMonthlyClosureSnapshot e compareMonthlyClosures produzem comparativo exato', () => {
+    const items: BasketItem[] = [
+      {
+        id: 'm1',
+        profileId: 'prof-1',
+        name: 'Café 500g',
+        group: 'Alimentação e bebidas',
+        classification: 'Essencial',
+        monthlySpend: 300,
+        oldPrice: 20,
+        currentPrice: 24,
+        oldPriceDate: '2026-01-01',
+        currentPriceDate: '2026-10-01',
+        unit: 'un',
+        active: true,
+        createdAt: '2026-01-01',
+        updatedAt: '2026-10-01',
+      },
+    ];
+    const summaryOct = processBasketEconomics(items, 4.3, 4000, 4200, '2026-01-01', '2026-10-01', '12M');
+    const octClosure = buildMonthlyClosureSnapshot({
+      profileId: 'prof-1',
+      monthKey: '2026-10',
+      summary: summaryOct,
+      ibgeData: { sourceMode: 'live', latestMonthLabel: 'Out/26' },
+      profileMode: 'pessoal',
+      isDemo: false,
+    });
+    expect(octClosure.monthLabel).toBe('Out/26');
+    expect(octClosure.totalMonthlySpend).toBe(300);
+
+    const sepClosure = {
+      ...octClosure,
+      id: 'cls_prof-1_2026-09',
+      monthKey: '2026-09',
+      monthLabel: 'Set/26',
+      totalMonthlySpend: 250,
+      ipcaCasaPercent: 12,
+      spreadPP: 7.7,
+    };
+
+    const diff = compareMonthlyClosures(octClosure, sepClosure);
+    expect(diff.spendDiffReais).toBe(50);
+    expect(diff.spendDiffPercent).toBe(20);
+    expect(diff.ipcaCasaDiffPP).toBeCloseTo(8, 2);
+    expect(diff.summaryText).toContain('Set/26');
+    expect(diff.summaryText).toContain('Out/26');
   });
 });
 

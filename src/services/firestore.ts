@@ -37,8 +37,10 @@ import type {
   IncomeRecord,
   InvestmentProductType,
   ItemClassification,
+  MonthlyClosure,
   OpportunityPlanC,
   PriceRecord,
+  ProfileMode,
   RecurrenceType,
   StrategyStatus,
   SubstitutePlanA,
@@ -228,6 +230,11 @@ function timestampToIso(value: unknown): string {
   return new Date().toISOString();
 }
 
+function sanitizeProfileMode(value: unknown): ProfileMode | undefined {
+  if (value === 'pessoal' || value === 'negocio') return value;
+  return undefined;
+}
+
 export function buildProfileWritePayload(
   profile: FamilyProfile,
   userId: string,
@@ -242,6 +249,22 @@ export function buildProfileWritePayload(
     updatedAt: serverTimestamp(),
   };
 
+  const mode = sanitizeProfileMode(profile.profileMode);
+  if (mode) {
+    base.profileMode = mode;
+  }
+  if (
+    typeof profile.priceAlertThresholdPercent === 'number' &&
+    Number.isFinite(profile.priceAlertThresholdPercent)
+  ) {
+    base.priceAlertThresholdPercent = boundedNumber(
+      profile.priceAlertThresholdPercent,
+      0.1,
+      500,
+      10
+    );
+  }
+
   if (isCreate) {
     return {
       id,
@@ -252,6 +275,118 @@ export function buildProfileWritePayload(
     };
   }
   return base;
+}
+
+export function buildMonthlyClosureWritePayload(
+  closure: MonthlyClosure,
+  userId: string,
+  isCreate: boolean
+): Record<string, unknown> {
+  const closureId = sanitizeFirestoreId(
+    closure.id || `cls_${closure.profileId}_${closure.monthKey}`,
+    'cls'
+  );
+  const profileId = sanitizeFirestoreId(closure.profileId, 'prof');
+  const rawMonthKey = String(closure.monthKey || '').trim().slice(0, 7);
+  const monthKey = /^\d{4}-\d{2}$/.test(rawMonthKey)
+    ? rawMonthKey
+    : getTodayIsoDate().slice(0, 7);
+
+  const mutable: Record<string, unknown> = {
+    monthLabel: clampString(closure.monthLabel || monthKey, BLUEPRINT_LIMITS.CLOSURE_LABEL_MAX, monthKey),
+    totalMonthlySpend: nonNegativeNumber(closure.totalMonthlySpend, 0),
+    comparableBaseCost: nonNegativeNumber(closure.comparableBaseCost, 0),
+    ipcaCasaPercent: boundedNumber(closure.ipcaCasaPercent, -100, 100000, 0),
+    ipcaOficialPercent: boundedNumber(closure.ipcaOficialPercent, -100, 100000, 0),
+    spreadPP: boundedNumber(closure.spreadPP, -100000, 100000, 0),
+    itemsCount: Math.round(boundedNumber(closure.itemsCount, 0, 10000, 0)),
+    eligibleItemsCount: Math.round(boundedNumber(closure.eligibleItemsCount, 0, 10000, 0)),
+    closedAt: clampString(
+      extractIsoDatePrefix(closure.closedAt) || getTodayIsoDate(),
+      BLUEPRINT_LIMITS.DATE_MAX
+    ),
+    updatedAt: serverTimestamp(),
+  };
+
+  const mode = sanitizeProfileMode(closure.profileMode);
+  if (mode) mutable.profileMode = mode;
+  if (typeof closure.monthlyIncome === 'number' && Number.isFinite(closure.monthlyIncome)) {
+    mutable.monthlyIncome = nonNegativeNumber(closure.monthlyIncome, 0);
+  }
+  if (typeof closure.monthlyBalance === 'number' && Number.isFinite(closure.monthlyBalance)) {
+    mutable.monthlyBalance = boundedNumber(
+      closure.monthlyBalance,
+      MIN_FIRESTORE_SAVINGS,
+      MAX_FIRESTORE_NUMBER,
+      0
+    );
+  }
+  if (typeof closure.topCategory === 'string') {
+    mutable.topCategory = clampString(closure.topCategory, BLUEPRINT_LIMITS.GROUP_NAME_MAX);
+  }
+  if (typeof closure.topDriverName === 'string') {
+    mutable.topDriverName = clampString(closure.topDriverName, BLUEPRINT_LIMITS.ITEM_NAME_MAX);
+  }
+  if (
+    typeof closure.topDriverChangePercent === 'number' &&
+    Number.isFinite(closure.topDriverChangePercent)
+  ) {
+    mutable.topDriverChangePercent = boundedNumber(closure.topDriverChangePercent, -100, 100000, 0);
+  }
+  if (typeof closure.priceEffectReais === 'number' && Number.isFinite(closure.priceEffectReais)) {
+    mutable.priceEffectReais = boundedNumber(
+      closure.priceEffectReais,
+      MIN_FIRESTORE_SAVINGS,
+      MAX_FIRESTORE_NUMBER,
+      0
+    );
+  }
+  if (
+    typeof closure.quantityEffectReais === 'number' &&
+    Number.isFinite(closure.quantityEffectReais)
+  ) {
+    mutable.quantityEffectReais = boundedNumber(
+      closure.quantityEffectReais,
+      MIN_FIRESTORE_SAVINGS,
+      MAX_FIRESTORE_NUMBER,
+      0
+    );
+  }
+  if (typeof closure.mixEffectReais === 'number' && Number.isFinite(closure.mixEffectReais)) {
+    mutable.mixEffectReais = boundedNumber(
+      closure.mixEffectReais,
+      MIN_FIRESTORE_SAVINGS,
+      MAX_FIRESTORE_NUMBER,
+      0
+    );
+  }
+  if (
+    closure.ibgeSourceMode === 'live' ||
+    closure.ibgeSourceMode === 'cached_live' ||
+    closure.ibgeSourceMode === 'contingency'
+  ) {
+    mutable.ibgeSourceMode = closure.ibgeSourceMode;
+  }
+  if (typeof closure.ibgeReferenceMonth === 'string') {
+    mutable.ibgeReferenceMonth = clampString(closure.ibgeReferenceMonth, BLUEPRINT_LIMITS.DATE_MAX);
+  }
+  const origin = sanitizeDataOrigin(closure.dataOrigin);
+  if (origin) mutable.dataOrigin = origin;
+  if (typeof closure.notes === 'string') {
+    mutable.notes = clampString(closure.notes, BLUEPRINT_LIMITS.PRICE_NOTES_MAX);
+  }
+
+  if (isCreate) {
+    return {
+      id: closureId,
+      userId,
+      profileId,
+      monthKey,
+      ...mutable,
+      createdAt: serverTimestamp(),
+    };
+  }
+  return mutable;
 }
 
 export function buildBasketItemWritePayload(
@@ -899,6 +1034,7 @@ export class FirestoreService {
         plansC: OpportunityPlanC[];
         planC?: OpportunityPlanC;
       }) => void;
+      onMonthlyClosures?: (closures: MonthlyClosure[]) => void;
     }
   ): () => void {
     if (!db) return () => {};
@@ -915,6 +1051,11 @@ export class FirestoreService {
             return {
               id: raw.id || d.id,
               name: String(raw.name || 'Meu Orçamento Familiar'),
+              profileMode: sanitizeProfileMode(raw.profileMode),
+              priceAlertThresholdPercent:
+                typeof raw.priceAlertThresholdPercent === 'number'
+                  ? raw.priceAlertThresholdPercent
+                  : undefined,
               membersCount: finiteNumber(raw.membersCount, 1),
               referenceRegion: String(raw.referenceRegion || 'Brasil'),
               currency: String(raw.currency || 'BRL'),
@@ -1181,6 +1322,72 @@ export class FirestoreService {
       )
     );
 
+    if (handlers.onMonthlyClosures) {
+      const closuresPath = `users/${uid}/monthlyClosures`;
+      unsubs.push(
+        onSnapshot(
+          query(collection(db, closuresPath), where('userId', '==', uid)),
+          (snapshot) => {
+            const closures: MonthlyClosure[] = snapshot.docs
+              .map((d) => {
+                const raw = d.data();
+                return {
+                  id: raw.id || d.id,
+                  profileId: String(raw.profileId || ''),
+                  monthKey: String(raw.monthKey || ''),
+                  monthLabel: String(raw.monthLabel || raw.monthKey || ''),
+                  profileMode: sanitizeProfileMode(raw.profileMode),
+                  totalMonthlySpend: finiteNumber(raw.totalMonthlySpend, 0),
+                  comparableBaseCost: finiteNumber(raw.comparableBaseCost, 0),
+                  ipcaCasaPercent: finiteNumber(raw.ipcaCasaPercent, 0),
+                  ipcaOficialPercent: finiteNumber(raw.ipcaOficialPercent, 0),
+                  spreadPP: finiteNumber(raw.spreadPP, 0),
+                  itemsCount: Math.round(finiteNumber(raw.itemsCount, 0)),
+                  eligibleItemsCount: Math.round(finiteNumber(raw.eligibleItemsCount, 0)),
+                  monthlyIncome:
+                    typeof raw.monthlyIncome === 'number' ? raw.monthlyIncome : null,
+                  monthlyBalance:
+                    typeof raw.monthlyBalance === 'number' ? raw.monthlyBalance : null,
+                  topCategory: typeof raw.topCategory === 'string' ? raw.topCategory : undefined,
+                  topDriverName:
+                    typeof raw.topDriverName === 'string' ? raw.topDriverName : undefined,
+                  topDriverChangePercent:
+                    typeof raw.topDriverChangePercent === 'number'
+                      ? raw.topDriverChangePercent
+                      : null,
+                  priceEffectReais:
+                    typeof raw.priceEffectReais === 'number' ? raw.priceEffectReais : undefined,
+                  quantityEffectReais:
+                    typeof raw.quantityEffectReais === 'number'
+                      ? raw.quantityEffectReais
+                      : undefined,
+                  mixEffectReais:
+                    typeof raw.mixEffectReais === 'number' ? raw.mixEffectReais : undefined,
+                  ibgeSourceMode:
+                    raw.ibgeSourceMode === 'live' ||
+                    raw.ibgeSourceMode === 'cached_live' ||
+                    raw.ibgeSourceMode === 'contingency'
+                      ? raw.ibgeSourceMode
+                      : undefined,
+                  ibgeReferenceMonth:
+                    typeof raw.ibgeReferenceMonth === 'string'
+                      ? raw.ibgeReferenceMonth
+                      : undefined,
+                  dataOrigin: sanitizeDataOrigin(raw.dataOrigin),
+                  notes: typeof raw.notes === 'string' ? raw.notes : undefined,
+                  closedAt: String(raw.closedAt || ''),
+                  createdAt: raw.createdAt ? timestampToIso(raw.createdAt) : undefined,
+                  updatedAt: raw.updatedAt ? timestampToIso(raw.updatedAt) : undefined,
+                };
+              })
+              .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+            handlers.onMonthlyClosures?.(closures);
+          },
+          (error) => handleFirestoreError(error, OperationType.LIST, closuresPath)
+        )
+      );
+    }
+
     return () => {
       for (const unsub of unsubs) {
         unsub();
@@ -1208,6 +1415,46 @@ export class FirestoreService {
     }
   }
 
+  static async saveMonthlyClosure(userId: string, closure: MonthlyClosure): Promise<void> {
+    if (!db) return;
+    const uid = sanitizeFirestoreId(userId, 'usr');
+    const profileId = sanitizeFirestoreId(closure.profileId, 'prof');
+    const closureId = sanitizeFirestoreId(
+      closure.id || `cls_${profileId}_${closure.monthKey}`,
+      'cls'
+    );
+    const path = `users/${uid}/monthlyClosures/${closureId}`;
+    const ref = doc(db, path);
+
+    try {
+      const snap = await getDoc(ref);
+      const payload = buildMonthlyClosureWritePayload(
+        { ...closure, id: closureId, profileId },
+        uid,
+        !snap.exists()
+      );
+      if (snap.exists()) {
+        await updateDoc(ref, payload);
+      } else {
+        await setDoc(ref, payload);
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  }
+
+  static async deleteMonthlyClosure(userId: string, closureId: string): Promise<void> {
+    if (!db) return;
+    const uid = sanitizeFirestoreId(userId, 'usr');
+    const cleanId = sanitizeFirestoreId(closureId, 'cls');
+    const path = `users/${uid}/monthlyClosures/${cleanId}`;
+    try {
+      await deleteDoc(doc(db, path));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  }
+
   static async deleteProfile(userId: string, profileId: string): Promise<void> {
     if (!db) return;
     const firestore = db;
@@ -1215,11 +1462,12 @@ export class FirestoreService {
     const cleanProfileId = sanitizeFirestoreId(profileId, 'prof');
 
     try {
-      const [itemsSnap, pricesSnap, incomeSnap, strategiesSnap] = await Promise.all([
+      const [itemsSnap, pricesSnap, incomeSnap, strategiesSnap, closuresSnap] = await Promise.all([
         getDocs(query(collection(firestore, `users/${uid}/basketItems`), where('userId', '==', uid))),
         getDocs(query(collection(firestore, `users/${uid}/priceHistory`), where('userId', '==', uid))),
         getDocs(query(collection(firestore, `users/${uid}/incomeHistory`), where('userId', '==', uid))),
         getDocs(query(collection(firestore, `users/${uid}/strategies`), where('userId', '==', uid))),
+        getDocs(query(collection(firestore, `users/${uid}/monthlyClosures`), where('userId', '==', uid))),
       ]);
 
       const matchingItemDocs = itemsSnap.docs.filter((d) => d.data().profileId === cleanProfileId);
@@ -1233,12 +1481,16 @@ export class FirestoreService {
       const matchingStrategyDocs = strategiesSnap.docs.filter(
         (d) => d.data().profileId === cleanProfileId
       );
+      const matchingClosureDocs = closuresSnap.docs.filter(
+        (d) => d.data().profileId === cleanProfileId
+      );
 
       const childOps: Array<(batch: WriteBatch) => void> = [];
       for (const d of matchingPriceDocs) childOps.push((batch) => batch.delete(d.ref));
       for (const d of matchingItemDocs) childOps.push((batch) => batch.delete(d.ref));
       for (const d of matchingIncomeDocs) childOps.push((batch) => batch.delete(d.ref));
       for (const d of matchingStrategyDocs) childOps.push((batch) => batch.delete(d.ref));
+      for (const d of matchingClosureDocs) childOps.push((batch) => batch.delete(d.ref));
       await commitInChunks(childOps);
 
       await deleteDoc(doc(firestore, `users/${uid}/profiles/${cleanProfileId}`));
@@ -1253,21 +1505,30 @@ export class FirestoreService {
     const uid = sanitizeFirestoreId(userId, 'usr');
 
     try {
-      const [pricesSnap, itemsSnap, incomeSnap, strategiesSnap, groupsSnap, profilesSnap] =
-        await Promise.all([
-          getDocs(query(collection(firestore, `users/${uid}/priceHistory`), where('userId', '==', uid))),
-          getDocs(query(collection(firestore, `users/${uid}/basketItems`), where('userId', '==', uid))),
-          getDocs(query(collection(firestore, `users/${uid}/incomeHistory`), where('userId', '==', uid))),
-          getDocs(query(collection(firestore, `users/${uid}/strategies`), where('userId', '==', uid))),
-          getDocs(query(collection(firestore, `users/${uid}/consumptionGroups`), where('userId', '==', uid))),
-          getDocs(query(collection(firestore, `users/${uid}/profiles`), where('userId', '==', uid))),
-        ]);
+      const [
+        pricesSnap,
+        itemsSnap,
+        incomeSnap,
+        strategiesSnap,
+        closuresSnap,
+        groupsSnap,
+        profilesSnap,
+      ] = await Promise.all([
+        getDocs(query(collection(firestore, `users/${uid}/priceHistory`), where('userId', '==', uid))),
+        getDocs(query(collection(firestore, `users/${uid}/basketItems`), where('userId', '==', uid))),
+        getDocs(query(collection(firestore, `users/${uid}/incomeHistory`), where('userId', '==', uid))),
+        getDocs(query(collection(firestore, `users/${uid}/strategies`), where('userId', '==', uid))),
+        getDocs(query(collection(firestore, `users/${uid}/monthlyClosures`), where('userId', '==', uid))),
+        getDocs(query(collection(firestore, `users/${uid}/consumptionGroups`), where('userId', '==', uid))),
+        getDocs(query(collection(firestore, `users/${uid}/profiles`), where('userId', '==', uid))),
+      ]);
 
       const childDeleteOps: Array<(batch: WriteBatch) => void> = [];
       for (const d of pricesSnap.docs) childDeleteOps.push((batch) => batch.delete(d.ref));
       for (const d of itemsSnap.docs) childDeleteOps.push((batch) => batch.delete(d.ref));
       for (const d of incomeSnap.docs) childDeleteOps.push((batch) => batch.delete(d.ref));
       for (const d of strategiesSnap.docs) childDeleteOps.push((batch) => batch.delete(d.ref));
+      for (const d of closuresSnap.docs) childDeleteOps.push((batch) => batch.delete(d.ref));
       for (const d of groupsSnap.docs) childDeleteOps.push((batch) => batch.delete(d.ref));
       await commitInChunks(childDeleteOps);
 

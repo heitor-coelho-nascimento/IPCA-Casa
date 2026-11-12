@@ -12,6 +12,7 @@ import {
   CalculatedItem,
   CalculationTrace,
   ChainedSeriesPoint,
+  ComparablePriceAlert,
   CompoundingFrequency,
   DataCompletenessState,
   DataOrigin,
@@ -27,15 +28,18 @@ import {
   InvestmentProductType,
   LaspeyresResult,
   MonetaryCorrectionResult,
+  MonthlyClosure,
   NormalizedQuoteStats,
   OpportunityPlanC,
   PlanCScheduleRow,
   PlanCSimulationResult,
   PocketImpactBreakdown,
   PriceRecord,
+  ProfileMode,
   PurchasingPowerAnalysis,
   ReportExportPayload,
   SensitivityCell,
+  StructuredRecommendation,
   SubstitutePlanA,
   TaxMode,
   TimeframeWindow,
@@ -483,9 +487,11 @@ export function calculateChainedMonthlyIndex(
       const item = itemById.get(itemId)!;
       const effSpend = resolveEffectiveMonthlySpend(item).monthlySpend;
       const explicitQ = Number(item.baseQuantity ?? item.quantity);
+      const freqMult = frequencyToMonthlyMultiplier(item.consumptionFrequency, item.frequencyDays);
+      const monthlyFactorQ = freqMult.valid ? freqMult.multiplierToMonthly : 1;
       const qRef =
         Number.isFinite(explicitQ) && explicitQ > 0
-          ? explicitQ
+          ? explicitQ * monthlyFactorQ
           : effSpend > 0
           ? effSpend / prevEntry.price
           : 1;
@@ -1397,7 +1403,9 @@ export function calculateObservedBasketDifference(items: BasketItem[]): number {
     }
     const explicitQ0 = Number(item.baseQuantity ?? item.quantity);
     if (Number.isFinite(explicitQ0) && explicitQ0 > 0) {
-      return acc + (p1 - p0) * explicitQ0;
+      const freqMult = frequencyToMonthlyMultiplier(item.consumptionFrequency, item.frequencyDays);
+      const monthlyQ0 = explicitQ0 * (freqMult.valid ? freqMult.multiplierToMonthly : 1);
+      return acc + (p1 - p0) * monthlyQ0;
     }
     if (effSpend > 0 && p1 > 0) {
       const q0 = effSpend / p1;
@@ -1812,10 +1820,12 @@ export function processBasketEconomics(
       p0Raw > 0 &&
       p1Raw >= 0;
 
-    // Quantidade-base explícita vs implícita
-    const explicitQ0 = Number(item.baseQuantity ?? item.quantity);
-    const explicitQ1 = Number(item.quantity ?? item.baseQuantity);
-    const hasExplicitQ0 = Number.isFinite(explicitQ0) && explicitQ0 > 0;
+    // Quantidade-base explícita vs implícita (com escala de periodicidade mensal quando aplicável)
+    const freqInfo = frequencyToMonthlyMultiplier(item.consumptionFrequency, item.frequencyDays);
+    const freqFactor = freqInfo.valid ? freqInfo.multiplierToMonthly : 1;
+    const rawExplicitQ0 = Number(item.baseQuantity ?? item.quantity);
+    const rawExplicitQ1 = Number(item.quantity ?? item.baseQuantity);
+    const hasExplicitQ0 = Number.isFinite(rawExplicitQ0) && rawExplicitQ0 > 0;
 
     let q0 = 0;
     let q1 = 0;
@@ -1825,17 +1835,14 @@ export function processBasketEconomics(
 
     if (isComparable) {
       if (hasExplicitQ0) {
-        q0 = explicitQ0;
-        q1 = Number.isFinite(explicitQ1) && explicitQ1 > 0 ? explicitQ1 : q0;
+        q0 = rawExplicitQ0 * freqFactor;
+        q1 =
+          Number.isFinite(rawExplicitQ1) && rawExplicitQ1 > 0
+            ? rawExplicitQ1 * freqFactor
+            : q0;
         baseCostReais = p0Raw * q0;
         currentCostOfBaseReais = p1Raw * q0;
-        // Se o gasto atual informado diferir por periodicidade ou for explícito, preserva spend; se usar p1*q1 puro, coincide
-        currentActualSpendReais =
-          monthlySpend > 0 && item.quantity === undefined && item.baseQuantity === undefined
-            ? monthlySpend
-            : Number.isFinite(item.monthlySpend) && item.monthlySpend > 0 && isMonthlyEquivalence
-            ? monthlySpend
-            : p1Raw * q1;
+        currentActualSpendReais = p1Raw * q1;
       } else {
         // Metodologia simplificada a partir do gasto atual informado (Q constante implícito = G_atual / P1)
         const p1Safe = p1Raw > 0 ? p1Raw : p0Raw;
@@ -2473,3 +2480,382 @@ export function buildReportExportData(params: {
     ],
   };
 }
+
+/**
+ * 50. Detecta alertas de aumento de preço apenas quando há comparabilidade real de unidade/especificação.
+ * Calcula tanto o aumento percentual (%) quanto a diferença absoluta (R$) no preço unitário e no orçamento mensal.
+ */
+export function detectComparablePriceAlerts(
+  items: Array<BasketItem | CalculatedBasketItem>,
+  priceHistory: PriceRecord[] = [],
+  thresholdPercent = 10
+): ComparablePriceAlert[] {
+  const safeThreshold = Number.isFinite(thresholdPercent) && thresholdPercent > 0 ? thresholdPercent : 10;
+  const alerts: ComparablePriceAlert[] = [];
+
+  for (const item of items || []) {
+    if (!item.active || item.isArchived || item.comparabilityBroken) continue;
+    if (!isConsumptionAccountingType(item.accountingType)) continue;
+
+    // Primeiro verifica se há >= 2 cotações compatíveis recentes no histórico para comparação entre registros
+    const itemQuotes = (priceHistory || [])
+      .filter(
+        (rec) =>
+          rec.itemId === item.id &&
+          !rec.comparabilityBroken &&
+          Number.isFinite(rec.price) &&
+          rec.price > 0 &&
+          areUnitsCompatible(item.packageUnit || item.unit || 'un', rec.packageUnit || rec.unit || item.unit || 'un')
+      )
+      .map((rec) => ({
+        rec,
+        iso: extractIsoDatePrefix(rec.referenceDate || rec.date) || '',
+      }))
+      .filter((x) => x.iso !== '')
+      .sort((a, b) => a.iso.localeCompare(b.iso));
+
+    let refOldPrice = Number(item.oldPrice);
+    let refCurrentPrice = Number(item.currentPrice);
+    let refOldUnit = item.packageUnit || item.unit || 'un';
+    let refCurrentUnit = item.packageUnit || item.unit || 'un';
+    let refOldSize = item.packageSize && item.packageSize > 0 ? item.packageSize : 1;
+    let refCurrentSize = item.packageSize && item.packageSize > 0 ? item.packageSize : 1;
+
+    if (itemQuotes.length >= 2) {
+      const prevQ = itemQuotes[itemQuotes.length - 2].rec;
+      const currQ = itemQuotes[itemQuotes.length - 1].rec;
+      // Só substitui se os preços base P0->P1 no item não mostrarem variação ainda maior ou se P0 não existir
+      const normHistory = calculateNormalizedPriceVariation({
+        oldPrice: prevQ.price,
+        currentPrice: currQ.price,
+        oldPackageSize: prevQ.packageSize,
+        oldPackageUnit: prevQ.packageUnit || prevQ.unit || item.unit,
+        currentPackageSize: currQ.packageSize,
+        currentPackageUnit: currQ.packageUnit || currQ.unit || item.unit,
+      });
+      if (
+        normHistory.comparable &&
+        normHistory.variationPercent !== null &&
+        normHistory.variationPercent >= safeThreshold &&
+        (!(refOldPrice > 0) || normHistory.variationPercent >= (calculatePriceVariation(refOldPrice, refCurrentPrice) ?? 0))
+      ) {
+        refOldPrice = prevQ.price;
+        refCurrentPrice = currQ.price;
+        refOldUnit = prevQ.packageUnit || prevQ.unit || item.unit || 'un';
+        refCurrentUnit = currQ.packageUnit || currQ.unit || item.unit || 'un';
+        refOldSize = prevQ.packageSize && prevQ.packageSize > 0 ? prevQ.packageSize : 1;
+        refCurrentSize = currQ.packageSize && currQ.packageSize > 0 ? currQ.packageSize : 1;
+      }
+    }
+
+    const norm = calculateNormalizedPriceVariation({
+      oldPrice: refOldPrice,
+      currentPrice: refCurrentPrice,
+      oldPackageSize: refOldSize,
+      oldPackageUnit: refOldUnit,
+      currentPackageSize: refCurrentSize,
+      currentPackageUnit: refCurrentUnit,
+      comparabilityBroken: item.comparabilityBroken,
+    });
+
+    if (!norm.comparable || norm.variationPercent === null || norm.variationPercent < safeThreshold) {
+      continue;
+    }
+
+    const absChange =
+      norm.normalizedCurrentUnitPrice !== null && norm.normalizedOldUnitPrice !== null
+        ? normalizeZero(norm.normalizedCurrentUnitPrice - norm.normalizedOldUnitPrice)
+        : normalizeZero(refCurrentPrice - refOldPrice);
+
+    const eff = resolveEffectiveMonthlySpend(item);
+    const monthlySpend = eff.monthlySpend;
+    const monthlyImpactReais =
+      monthlySpend > 0 && norm.variationPercent > -100
+        ? normalizeZero(monthlySpend - monthlySpend / (1 + norm.variationPercent / 100))
+        : Math.max(0, absChange);
+
+    alerts.push({
+      itemId: item.id,
+      itemName: item.name,
+      group: item.group || 'Outros',
+      unit: norm.canonicalUnit || item.unit || 'un',
+      oldPrice: norm.normalizedOldUnitPrice ?? refOldPrice,
+      currentPrice: norm.normalizedCurrentUnitPrice ?? refCurrentPrice,
+      absoluteChangeReais: absChange,
+      percentChange: normalizeZero(norm.variationPercent),
+      monthlyImpactReais,
+      thresholdUsed: safeThreshold,
+      isEstimatedConversion: eff.isMonthlyEquivalence,
+    });
+  }
+
+  return alerts.sort((a, b) => b.monthlyImpactReais - a.monthlyImpactReais || b.percentChange - a.percentChange);
+}
+
+/**
+ * 51. Recomendações explicadas em linguagem simples, separando Efeito Preço, Efeito Quantidade,
+ * Composição por Categoria e Equilíbrio Financeiro (Personal/Business friendly, sem recomendações genéricas inventadas).
+ */
+export function generateStructuredRecommendations(params: {
+  summary: EconomicCalculationSummary;
+  closures?: MonthlyClosure[];
+  profileMode?: ProfileMode;
+}): {
+  hasSufficientData: boolean;
+  insufficientReason?: string;
+  recommendations: StructuredRecommendation[];
+} {
+  const { summary, closures = [], profileMode = 'pessoal' } = params;
+  const isBiz = profileMode === 'negocio';
+
+  if (!summary || summary.totalMonthlySpend <= 0 || summary.eligibleItemsCount === 0) {
+    return {
+      hasSufficientData: false,
+      insufficientReason:
+        summary?.totalMonthlySpend > 0
+          ? 'Os itens cadastrados ainda não têm preço anterior para comparação. Informe o preço anterior de pelo menos 1 item para destravar as recomendações explicadas.'
+          : isBiz
+          ? 'Cadastre seus primeiros insumos ou custos operacionais com preço anterior e atual para gerar recomendações baseadas nos seus números.'
+          : 'Cadastre seus primeiros gastos com preço anterior e atual para receber recomendações claras sobre seu orçamento.',
+      recommendations: [
+        {
+          id: 'rec-insufficient',
+          driverType: 'insuficiente',
+          title: 'Complete os preços de comparação para ver diagnósticos',
+          summary:
+            summary?.totalMonthlySpend > 0
+              ? 'Já sabemos quanto você gasta no mês, mas falta o preço anterior para separar o que subiu de preço do que mudou por quantidade.'
+              : isBiz
+              ? 'Adicione seus principais insumos e custos fixos com preço anterior e atual.'
+              : 'Adicione seus principais gastos da casa com preço anterior e atual.',
+          effectDetail: 'Sem dados suficientes de comparação temporal.',
+          actionLabel: isBiz ? 'Ir para Insumos e Custos' : 'Ir para Minha Cesta',
+          targetTab: 'minha-cesta-familiar',
+        },
+      ],
+    };
+  }
+
+  const recommendations: StructuredRecommendation[] = [];
+
+  // 1. Efeito Preço (item comparável que mais pesou no aumento real em R$)
+  const topPriceItem = [...summary.calculatedItems]
+    .filter((i) => i.isComparable && i.priceEffectReais > 0)
+    .sort((a, b) => b.priceEffectReais - a.priceEffectReais)[0];
+
+  if (topPriceItem) {
+    const pctText = formatSignedPercent(topPriceItem.priceChangePercent ?? 0);
+    recommendations.push({
+      id: `rec-price-${topPriceItem.id}`,
+      driverType: 'preco',
+      title: `Aumento de preço em ${topPriceItem.name}`,
+      summary: isBiz
+        ? `Mesmo comprando a mesma quantidade, o custo unitário de ${topPriceItem.name} subiu ${pctText} e adicionou ${formatCurrencyBR(topPriceItem.priceEffectReais)}/mês na operação.`
+        : `Mesmo mantendo a mesma quantidade, a alta de preço de ${topPriceItem.name} (${pctText}) encareceu seu mês em ${formatCurrencyBR(topPriceItem.priceEffectReais)}.`,
+      effectDetail: `Efeito Preço puro: +${formatCurrencyBR(topPriceItem.priceEffectReais)}/mês (${topPriceItem.weightPercent.toFixed(1).replace('.', ',')}% do peso comparável).`,
+      itemName: topPriceItem.name,
+      categoryName: topPriceItem.group,
+      amountReais: topPriceItem.priceEffectReais,
+      percentValue: topPriceItem.priceChangePercent ?? undefined,
+      actionLabel: 'Avaliar substituição',
+      targetTab: 'estrategias-de-economia',
+    });
+  }
+
+  // 2. Efeito Quantidade / Volume (via decomposição algébrica ou comparação entre último fechamento mensal)
+  const sortedClosures = [...closures].sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+  const lastClosure = sortedClosures.length > 0 ? sortedClosures[sortedClosures.length - 1] : undefined;
+  const qtyEffect = summary.budgetDecomposition.quantityEffectReais;
+
+  if (Math.abs(qtyEffect) >= 1) {
+    const grewQty = qtyEffect > 0;
+    recommendations.push({
+      id: 'rec-qty-decomposition',
+      driverType: 'quantidade',
+      title: grewQty
+        ? isBiz
+          ? 'Aumento por volume consumido de insumos'
+          : 'Seu gasto cresceu também por aumento na quantidade consumida'
+        : isBiz
+        ? 'Redução de volume físico compensou parte da alta de preços'
+        : 'Redução de quantidade ajudou a segurar o gasto mensal',
+      summary: grewQty
+        ? `Além dos preços, a mudança nas quantidades informadas (Q₁ vs Q₀) elevou a despesa em ${formatCurrencyBR(qtyEffect)}/mês.`
+        : `Você reduziu o volume consumido em relação à base, gerando economia física de ${formatCurrencyBR(Math.abs(qtyEffect))}/mês independentemente dos preços.`,
+      effectDetail: `Efeito Quantidade separado do preço: ${qtyEffect >= 0 ? '+' : '-'}${formatCurrencyBR(Math.abs(qtyEffect))}/mês.`,
+      amountReais: qtyEffect,
+      actionLabel: 'Ajustar metas de consumo',
+      targetTab: 'estrategias-de-economia',
+    });
+  } else if (lastClosure && lastClosure.totalMonthlySpend > 0) {
+    const spendDelta = normalizeZero(summary.totalMonthlySpend - lastClosure.totalMonthlySpend);
+    if (Math.abs(spendDelta) >= 1) {
+      recommendations.push({
+        id: 'rec-qty-closure-diff',
+        driverType: 'quantidade',
+        title: `Diferença de ${formatCurrencyBR(Math.abs(spendDelta))} frente a ${lastClosure.monthLabel}`,
+        summary:
+          spendDelta > 0
+            ? `Frente ao fechamento de ${lastClosure.monthLabel} (${formatCurrencyBR(lastClosure.totalMonthlySpend)}), o gasto subiu ${formatCurrencyBR(spendDelta)}. Parte vem da inflação pura (${formatCurrencyBR(summary.budgetDecomposition.priceEffectReais)}) e o restante de novos itens ou quantidades.`
+            : `Frente ao fechamento de ${lastClosure.monthLabel} (${formatCurrencyBR(lastClosure.totalMonthlySpend)}), o gasto recuou ${formatCurrencyBR(Math.abs(spendDelta))}.`,
+        effectDetail: `Comparação mensal real vs. fechamento ${lastClosure.monthLabel}.`,
+        amountReais: spendDelta,
+        actionLabel: 'Ver fechamentos mensais',
+        targetTab: 'relatorios',
+      });
+    }
+  }
+
+  // 3. Concentração por Categoria (Efeito Composição / Peso)
+  const topCategory = summary.groupContributions[0];
+  if (topCategory && topCategory.weightPercent > 0) {
+    recommendations.push({
+      id: `rec-category-${topCategory.group}`,
+      driverType: 'composicao',
+      title: `${topCategory.group} concentra ${topCategory.weightPercent.toFixed(1).replace('.', ',')}% do orçamento`,
+      summary: isBiz
+        ? `A categoria "${topCategory.group}" responde por ${formatCurrencyBR(topCategory.totalSpend)}/mês${topCategory.groupInflationPercent !== null ? ` com variação média de ${formatSignedPercent(topCategory.groupInflationPercent)}` : ''}. Pequenos reajustes aqui movem todo o custo do negócio.`
+        : `A categoria "${topCategory.group}" soma ${formatCurrencyBR(topCategory.totalSpend)}/mês${topCategory.groupInflationPercent !== null ? ` e subiu ${formatSignedPercent(topCategory.groupInflationPercent)}` : ''}. É onde qualquer economia tem o maior efeito no bolso.`,
+      effectDetail: `Peso por Categoria: ${topCategory.weightPercent.toFixed(1).replace('.', ',')}% do gasto mensal total.`,
+      categoryName: topCategory.group,
+      amountReais: topCategory.totalSpend,
+      percentValue: topCategory.weightPercent,
+      actionLabel: 'Filtrar categoria',
+      targetTab: 'minha-cesta-familiar',
+    });
+  }
+
+  // 4. Equilíbrio Financeiro (Renda / Faturamento vs Gasto)
+  const indicators = summary.householdIndicators;
+  if (indicators.monthlyBalance !== null && indicators.netIncome !== null && indicators.netIncome > 0) {
+    const deficit = indicators.monthlyBalance < 0;
+    recommendations.push({
+      id: 'rec-balance',
+      driverType: 'equilibrio',
+      title: deficit
+        ? isBiz
+          ? 'Custos superam o faturamento informado'
+          : 'Gastos maiores que a renda informada'
+        : isBiz
+        ? `Margem mensal positiva de ${formatCurrencyBR(indicators.monthlyBalance)}`
+        : `Sobra mensal estimada de ${formatCurrencyBR(indicators.monthlyBalance)}`,
+      summary: deficit
+        ? `Os compromissos somam ${formatCurrencyBR(indicators.totalCommitments)} frente a ${formatCurrencyBR(indicators.netIncome)} de entrada (déficit de ${formatCurrencyBR(Math.abs(indicators.monthlyBalance))}/mês).`
+        : summary.purchasingPower.realPurchasingPowerChangePercent !== null &&
+          summary.purchasingPower.realPurchasingPowerChangePercent < 0
+        ? `Apesar da sobra de ${formatCurrencyBR(indicators.monthlyBalance)}, seu ganho de renda não acompanhou sua inflação (${formatSignedPercent(summary.purchasingPower.realPurchasingPowerChangePercent)} real).`
+        : `Seus gastos consomem ${(indicators.expenseToIncomePercent ?? 0).toFixed(1).replace('.', ',')}% da entrada mensal, preservando margem para reserva.`,
+      effectDetail: `Renda/Faturamento ${formatCurrencyBR(indicators.netIncome)} vs. Compromissos ${formatCurrencyBR(indicators.totalCommitments)}.`,
+      amountReais: indicators.monthlyBalance,
+      actionLabel: isBiz ? 'Ver Faturamento e Margem' : 'Ver Renda e Poder de Compra',
+      targetTab: 'renda-e-poder-de-compra',
+    });
+  }
+
+  return {
+    hasSufficientData: recommendations.length > 0,
+    recommendations,
+  };
+}
+
+const MONTHS_SHORT_PT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+
+export function formatMonthKeyLabel(monthKey: string): string {
+  const match = String(monthKey || '').match(/^(\d{4})-(\d{2})$/);
+  if (!match) return monthKey;
+  const yearShort = match[1].slice(-2);
+  const monthIdx = Math.max(0, Math.min(11, parseInt(match[2], 10) - 1));
+  return `${MONTHS_SHORT_PT[monthIdx]}/${yearShort}`;
+}
+
+export function buildMonthlyClosureSnapshot(params: {
+  profileId: string;
+  monthKey: string;
+  summary: EconomicCalculationSummary;
+  ibgeData?: { sourceMode?: 'live' | 'cached_live' | 'contingency'; latestMonthLabel?: string } | null;
+  profileMode?: ProfileMode;
+  isDemo?: boolean;
+  notes?: string;
+}): MonthlyClosure {
+  const cleanMonthKey = /^\d{4}-\d{2}$/.test(params.monthKey)
+    ? params.monthKey
+    : getTodayIsoDate().slice(0, 7);
+  const topCat = params.summary.groupContributions[0];
+  const topDriver = params.summary.topIncreases[0] || params.summary.topVillains[0];
+
+  return {
+    id: `cls_${params.profileId}_${cleanMonthKey}`.replace(/[^a-zA-Z0-9_-]/g, '_'),
+    profileId: params.profileId,
+    monthKey: cleanMonthKey,
+    monthLabel: formatMonthKeyLabel(cleanMonthKey),
+    profileMode: params.profileMode || 'pessoal',
+    totalMonthlySpend: params.summary.totalMonthlySpend,
+    comparableBaseCost: params.summary.budgetDecomposition.baseCostTotal,
+    ipcaCasaPercent: params.summary.ipcaCasa12M,
+    ipcaOficialPercent: params.summary.ipcaIBGE12M,
+    spreadPP: params.summary.spreadPP,
+    itemsCount: params.summary.totalItemsCount,
+    eligibleItemsCount: params.summary.eligibleItemsCount,
+    monthlyIncome: params.summary.householdIndicators.netIncome ?? undefined,
+    monthlyBalance: params.summary.householdIndicators.monthlyBalance ?? undefined,
+    topCategory: topCat?.group,
+    topDriverName: topDriver?.name,
+    topDriverChangePercent: topDriver?.priceChangePercent ?? undefined,
+    priceEffectReais: params.summary.budgetDecomposition.priceEffectReais,
+    quantityEffectReais: params.summary.budgetDecomposition.quantityEffectReais,
+    mixEffectReais: params.summary.budgetDecomposition.mixEffectReais,
+    ibgeSourceMode: params.ibgeData?.sourceMode,
+    ibgeReferenceMonth: params.ibgeData?.latestMonthLabel,
+    dataOrigin: params.isDemo ? 'demonstrativo' : 'usuario',
+    notes: params.notes,
+    closedAt: getTodayIsoDate(),
+  };
+}
+
+export function compareMonthlyClosures(
+  currentClosure: MonthlyClosure,
+  previousClosure: MonthlyClosure
+): {
+  spendDiffReais: number;
+  spendDiffPercent: number | null;
+  ipcaCasaDiffPP: number;
+  spreadDiffPP: number;
+  balanceDiffReais: number | null;
+  summaryText: string;
+} {
+  const spendDiffReais = normalizeZero(
+    currentClosure.totalMonthlySpend - previousClosure.totalMonthlySpend
+  );
+  const spendDiffPercent =
+    previousClosure.totalMonthlySpend > 0
+      ? normalizeZero((spendDiffReais / previousClosure.totalMonthlySpend) * 100)
+      : null;
+  const ipcaCasaDiffPP = normalizeZero(
+    currentClosure.ipcaCasaPercent - previousClosure.ipcaCasaPercent
+  );
+  const spreadDiffPP = normalizeZero(currentClosure.spreadPP - previousClosure.spreadPP);
+  const balanceDiffReais =
+    typeof currentClosure.monthlyBalance === 'number' &&
+    typeof previousClosure.monthlyBalance === 'number'
+      ? normalizeZero(currentClosure.monthlyBalance - previousClosure.monthlyBalance)
+      : null;
+
+  const direction =
+    spendDiffReais > 0
+      ? `aumento de ${formatCurrencyBR(spendDiffReais)}`
+      : spendDiffReais < 0
+      ? `redução de ${formatCurrencyBR(Math.abs(spendDiffReais))}`
+      : 'estabilidade';
+
+  const summaryText = `De ${previousClosure.monthLabel} para ${currentClosure.monthLabel}, o gasto mensal teve ${direction}${spendDiffPercent !== null ? ` (${formatSignedPercent(spendDiffPercent)})` : ''}, com variação do IPCA-Casa de ${formatSignedPP(ipcaCasaDiffPP)}.`;
+
+  return {
+    spendDiffReais,
+    spendDiffPercent,
+    ipcaCasaDiffPP,
+    spreadDiffPP,
+    balanceDiffReais,
+    summaryText,
+  };
+}
+

@@ -4,6 +4,7 @@ import {
   parseIBGERegion,
   OFFICIAL_IBGE_REGIONS,
   buildFallbackMetadata,
+  getOfficialBenchmarkForTimeframe,
 } from '../src/services/ibge';
 
 describe('Validação Rigorosa de Códigos de Região do IBGE/SIDRA', () => {
@@ -103,5 +104,30 @@ describe('Validação Rigorosa de Códigos de Região do IBGE/SIDRA', () => {
     expect(fallback.history.length).toBeGreaterThanOrEqual(24);
     expect(fallback.latestMonthCode).toBe('202610');
     expect(fallback.latestMonthLabel).toBe('Out/26');
+  });
+
+  it('Calcula benchmark oficial por janela (1M, YTD, 12M) e sinaliza séries incompletas ou ausentes', () => {
+    const emptyBench = getOfficialBenchmarkForTimeframe(null, '12M');
+    expect(emptyBench.isExactPeriodMatch).toBe(false);
+    expect(emptyBench.rate).toBe(0);
+    expect(emptyBench.completenessNote).toBeTruthy();
+
+    const fallback = buildFallbackMetadata('Offline');
+    const bench1M = getOfficialBenchmarkForTimeframe(fallback, '1M');
+    expect(bench1M.rate).toBe(fallback.latestMonthlyRate);
+    expect(bench1M.isExactPeriodMatch).toBe(true);
+
+    const bench12M = getOfficialBenchmarkForTimeframe(fallback, '12M');
+    expect(bench12M.isExactPeriodMatch).toBe(true);
+    expect(bench12M.availableMonthsCount).toBe(12);
+
+    const partialMeta = {
+      ...fallback,
+      history: fallback.history.slice(-4),
+    };
+    const benchIncomplete12M = getOfficialBenchmarkForTimeframe(partialMeta, '12M');
+    expect(benchIncomplete12M.isExactPeriodMatch).toBe(false);
+    expect(benchIncomplete12M.availableMonthsCount).toBe(4);
+    expect(benchIncomplete12M.completenessNote).toContain('4 de 12');
   });
 });

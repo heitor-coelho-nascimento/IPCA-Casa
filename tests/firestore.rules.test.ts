@@ -11,9 +11,10 @@ import {
   buildProfileWritePayload,
   buildBasketItemWritePayload,
   buildPriceRecordWritePayload,
+  buildMonthlyClosureWritePayload,
 } from '../src/services/firestore';
 import { handleFirestoreError, OperationType } from '../src/lib/firebase';
-import type { BasketItem, FamilyProfile } from '../src/types';
+import type { BasketItem, FamilyProfile, MonthlyClosure } from '../src/types';
 
 const ROOT_DIR = path.resolve(process.cwd());
 const RULES_TEXT = fs.readFileSync(path.join(ROOT_DIR, 'firestore.rules'), 'utf-8');
@@ -35,6 +36,7 @@ describe('Segurança Firestore, Blueprint e Guardrails Anti-Dirty-Dozen (IPCA-Ca
     expect(RULES_TEXT).toContain('match /incomeHistory/{incomeId}');
     expect(RULES_TEXT).toContain('match /consumptionGroups/{groupId}');
     expect(RULES_TEXT).toContain('match /strategies/{strategyId}');
+    expect(RULES_TEXT).toContain('match /monthlyClosures/{closureId}');
     expect(SECURITY_SPEC).toContain('Dirty Dozen');
   });
 
@@ -59,7 +61,7 @@ describe('Segurança Firestore, Blueprint e Guardrails Anti-Dirty-Dozen (IPCA-Ca
 
   it('Impõe Query Enforcer (sem get/exists em allow list) e integridade referencial nas subcoleções', () => {
     const listRules = RULES_TEXT.match(/allow list:[^\n]+/g) || [];
-    expect(listRules.length).toBe(8);
+    expect(listRules.length).toBe(9);
     for (const rule of listRules) {
       if (!rule.includes('if false;')) {
         expect(rule).toContain('isOwner(userId)');
@@ -168,6 +170,16 @@ describe('Segurança Firestore, Blueprint e Guardrails Anti-Dirty-Dozen (IPCA-Ca
     expect('userId' in updatePayload).toBe(false);
     expect('createdAt' in updatePayload).toBe(false);
     expect('isDemo' in updatePayload).toBe(false);
+
+    // Suporte a Modo Negócio e limite de alerta de aumento de preços
+    const bizProfile: FamilyProfile = {
+      ...dirtyProfile,
+      profileMode: 'negocio',
+      priceAlertThresholdPercent: 12.5,
+    };
+    const bizPayload = buildProfileWritePayload(bizProfile, 'uid_abc', true);
+    expect(bizPayload.profileMode).toBe('negocio');
+    expect(bizPayload.priceAlertThresholdPercent).toBe(12.5);
   });
 
   it('Constrói payloads seguros de BasketItem respeitando chaves permitidas em create/update', () => {
@@ -256,5 +268,56 @@ describe('Segurança Firestore, Blueprint e Guardrails Anti-Dirty-Dozen (IPCA-Ca
     expect(parsed.path).toBe('users/u1/basketItems/i1');
     expect(parsed.authInfo).toBeDefined();
     expect(Array.isArray(parsed.authInfo.providerInfo)).toBe(true);
+  });
+
+  it('Constrói payloads seguros de MonthlyClosure alinhados ao Blueprint e às chaves permitidas em firestore.rules', () => {
+    const closureSchema = BLUEPRINT_JSON.entities.MonthlyClosure;
+    const allowedKeys = Object.keys(closureSchema.properties);
+    const requiredKeys: string[] = closureSchema.required;
+
+    const closure: MonthlyClosure = {
+      id: 'cls_prof1_2026_10',
+      profileId: 'prof_1',
+      monthKey: '2026-10',
+      monthLabel: 'Out/26',
+      profileMode: 'negocio',
+      totalMonthlySpend: 4200,
+      comparableBaseCost: 3900,
+      ipcaCasaPercent: 7.69,
+      ipcaOficialPercent: 4.34,
+      spreadPP: 3.35,
+      itemsCount: 12,
+      eligibleItemsCount: 12,
+      monthlyIncome: 8500,
+      monthlyBalance: 4300,
+      topCategory: 'Alimentação e bebidas',
+      topDriverName: 'Farinha de Trigo',
+      topDriverChangePercent: 14.5,
+      priceEffectReais: 300,
+      quantityEffectReais: 0,
+      mixEffectReais: 0,
+      ibgeSourceMode: 'live',
+      ibgeReferenceMonth: 'Out/26',
+      dataOrigin: 'usuario',
+      notes: 'Fechamento da padaria',
+      closedAt: '2026-10-31',
+    };
+
+    const createPayload = buildMonthlyClosureWritePayload(closure, 'uid_1', true);
+    for (const reqKey of requiredKeys) {
+      expect(reqKey in createPayload).toBe(true);
+    }
+    for (const key of Object.keys(createPayload)) {
+      expect(allowedKeys).toContain(key);
+    }
+    expect(createPayload.profileMode).toBe('negocio');
+    expect(createPayload.monthKey).toBe('2026-10');
+
+    const updatePayload = buildMonthlyClosureWritePayload(closure, 'uid_1', false);
+    expect('id' in updatePayload).toBe(false);
+    expect('userId' in updatePayload).toBe(false);
+    expect('profileId' in updatePayload).toBe(false);
+    expect('monthKey' in updatePayload).toBe(false);
+    expect('createdAt' in updatePayload).toBe(false);
   });
 });

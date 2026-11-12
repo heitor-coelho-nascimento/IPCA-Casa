@@ -1,7 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { BasketItem, ItemClassification, ConsumptionGroup, ConsumptionFrequency } from '../types';
+import {
+  BasketItem,
+  ItemClassification,
+  ConsumptionGroup,
+  ConsumptionFrequency,
+  ProfileMode,
+} from '../types';
 import { StorageService } from '../services/storage';
+import { frequencyToMonthlyMultiplier } from '../services/units';
 import { getMonthsAgoIsoDate, getTodayIsoDate, isValidIsoDate } from '../utils/dates';
+import { getProfileModeCopy } from '../utils/profileMode';
 
 interface NewItemDrawerProps {
   isOpen: boolean;
@@ -10,6 +18,7 @@ interface NewItemDrawerProps {
   editingItem: BasketItem | null;
   totalMonthlySpend: number;
   groups?: ConsumptionGroup[];
+  profileMode?: ProfileMode;
 }
 
 type EntryMode = 'consumo' | 'fixo';
@@ -21,7 +30,11 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
   editingItem,
   totalMonthlySpend,
   groups: propGroups,
+  profileMode = 'pessoal',
 }) => {
+  const modeCopy = getProfileModeCopy(profileMode);
+  const isBiz = modeCopy.mode === 'negocio';
+
   const [entryMode, setEntryMode] = useState<EntryMode>('consumo');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -35,7 +48,7 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
   const [frequency, setFrequency] = useState<ConsumptionFrequency>('mensal');
   const [unit, setUnit] = useState('unidade');
 
-  // Permite ajuste manual explícito do gasto mensal caso o usuário prefira
+  // Permite ajuste manual explícito apenas quando realmente diferente do cálculo automático
   const [manualSpendOverride, setManualSpendOverride] = useState<number | ''>('');
   const [isManualSpendCustomized, setIsManualSpendCustomized] = useState(false);
 
@@ -83,15 +96,25 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
         setManualSpendOverride('');
         setIsManualSpendCustomized(false);
       } else {
+        const freq = editingItem.consumptionFrequency || 'mensal';
+        const qty = editingItem.quantity || 1;
+        const mult = frequencyToMonthlyMultiplier(freq, editingItem.frequencyDays).multiplierToMonthly;
+        const expectedAutoSpend =
+          Math.round((editingItem.currentPrice || 0) * qty * mult * 100) / 100;
+        const hasCustomOverride =
+          Number.isFinite(editingItem.monthlySpend) &&
+          editingItem.currentPrice > 0 &&
+          Math.abs(editingItem.monthlySpend - expectedAutoSpend) > 0.05;
+
         setEntryMode('consumo');
         setCurrentPrice(editingItem.currentPrice > 0 ? editingItem.currentPrice : '');
         setOldPrice(editingItem.oldPrice > 0 ? editingItem.oldPrice : '');
-        setQuantity(editingItem.quantity || 1);
-        setFrequency(editingItem.consumptionFrequency || 'mensal');
+        setQuantity(qty);
+        setFrequency(freq);
         setFixedCurrentSpend('');
         setFixedOldSpend('');
-        setManualSpendOverride(editingItem.monthlySpend);
-        setIsManualSpendCustomized(true);
+        setManualSpendOverride(hasCustomOverride ? editingItem.monthlySpend : '');
+        setIsManualSpendCustomized(hasCustomOverride);
       }
     } else {
       setEntryMode('consumo');
@@ -117,28 +140,15 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
     setSaving(false);
   }, [editingItem, isOpen, propGroups]);
 
-  // Multiplicador de frequência para conversão mensal
-  const getFrequencyMultiplier = (freq: ConsumptionFrequency): number => {
-    switch (freq) {
-      case 'semanal':
-        return 4.333; // ~52 / 12
-      case 'quinzenal':
-        return 2.0;
-      case 'diaria':
-        return 30.0;
-      case 'anual':
-        return 1 / 12;
-      case 'mensal':
-      default:
-        return 1.0;
-    }
-  };
+  // Multiplicador centralizado em src/services/units.ts (convenção explícita de 30 dias e ÷ 12 para anual)
+  const freqInfo = frequencyToMonthlyMultiplier(frequency);
 
   // Cálculo do gasto mensal automático
   const numCurrentPrice = currentPrice !== '' ? Number(currentPrice) : 0;
   const numOldPrice = oldPrice !== '' ? Number(oldPrice) : 0;
   const numQty = quantity !== '' ? Number(quantity) : 1;
-  const autoConsumptionMonthlySpend = Math.round(numCurrentPrice * numQty * getFrequencyMultiplier(frequency) * 100) / 100;
+  const autoConsumptionMonthlySpend =
+    Math.round(numCurrentPrice * numQty * freqInfo.multiplierToMonthly * 100) / 100;
 
   const numFixedCurrent = fixedCurrentSpend !== '' ? Number(fixedCurrentSpend) : 0;
   const numFixedOld = fixedOldSpend !== '' ? Number(fixedOldSpend) : 0;
@@ -168,7 +178,9 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
     if (saving) return;
 
     if (!name.trim()) {
-      setErrorMsg('Informe o nome do item ou serviço.');
+      setErrorMsg(
+        isBiz ? 'Informe o nome do insumo, produto ou custo.' : 'Informe o nome do item ou serviço.'
+      );
       return;
     }
 
@@ -246,10 +258,16 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
         <div className="p-6 bg-[#eff4ff] flex items-center justify-between border-b border-[#e5eeff]">
           <div className="flex flex-col">
             <span className="text-xl font-bold text-[#0b1c30]">
-              {editingItem ? 'Editar Gasto da Cesta' : 'Novo Gasto ou Produto'}
+              {editingItem
+                ? isBiz
+                  ? 'Editar Insumo ou Custo'
+                  : 'Editar Gasto da Cesta'
+                : isBiz
+                ? 'Novo Insumo ou Custo'
+                : 'Novo Gasto ou Produto'}
             </span>
             <span className="text-xs text-[#45464d] mt-0.5">
-              Informe os dados básicos — o sistema calcula o gasto mensal e a inflação automaticamente
+              Informe os dados uma única vez — o sistema calcula o total mensal e a variação automaticamente
             </span>
           </div>
           <button
@@ -286,7 +304,7 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
                 }`}
               >
                 <span className="material-symbols-outlined text-[16px]">shopping_cart</span>
-                <span>Produto (Preço × Qtd)</span>
+                <span>{isBiz ? 'Insumo (Preço × Qtd)' : 'Produto (Preço × Qtd)'}</span>
               </button>
               <button
                 type="button"
@@ -298,7 +316,7 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
                 }`}
               >
                 <span className="material-symbols-outlined text-[16px]">receipt_long</span>
-                <span>Conta ou Mensalidade</span>
+                <span>{isBiz ? 'Conta Fixa da Operação' : 'Conta ou Mensalidade'}</span>
               </button>
             </div>
           </div>
@@ -306,7 +324,13 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
           {/* Nome do Item */}
           <div className="flex flex-col gap-1">
             <label className="font-mono text-xs font-semibold text-[#0b1c30] uppercase tracking-wider">
-              {entryMode === 'consumo' ? 'O que você compra? *' : 'Qual é a conta ou despesa? *'}
+              {entryMode === 'consumo'
+                ? isBiz
+                  ? 'Qual insumo ou material? *'
+                  : 'O que você compra? *'
+                : isBiz
+                ? 'Qual é o custo fixo da operação? *'
+                : 'Qual é a conta ou despesa? *'}
             </label>
             <input
               type="text"
@@ -315,7 +339,11 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
               onChange={(e) => setName(e.target.value)}
               placeholder={
                 entryMode === 'consumo'
-                  ? 'Ex: Café em Grão 1kg, Leite, Carne Moída, Gasolina...'
+                  ? isBiz
+                    ? 'Ex: Farinha de Trigo 25kg, Manteiga, Café, Embalagem...'
+                    : 'Ex: Café em Grão 1kg, Leite, Carne Moída, Gasolina...'
+                  : isBiz
+                  ? 'Ex: Aluguel do ponto, Energia elétrica, Internet, Contador...'
                   : 'Ex: Aluguel, Condomínio, Internet, Escola, Plano de Saúde...'
               }
               className="h-10 px-3 bg-[#eff4ff] rounded-lg text-[#0b1c30] text-sm focus:outline-none focus:bg-[#ffffff] focus:ring-1 focus:ring-[#006a61] transition-all"
@@ -409,7 +437,7 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
                     type="text"
                     value={unit}
                     onChange={(e) => setUnit(e.target.value)}
-                    placeholder="un, kg, litro, pct..."
+                    placeholder="un, kg, L, pct..."
                     className="w-full h-10 px-3 bg-[#ffffff] rounded-lg text-[#0b1c30] text-sm border border-[#c6c6cd]/40 focus:outline-none focus:border-[#006a61]"
                   />
                 </div>
@@ -424,26 +452,50 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
                     className="w-full h-10 px-3 bg-[#ffffff] rounded-lg text-[#0b1c30] text-xs font-medium border border-[#c6c6cd]/40 focus:outline-none cursor-pointer"
                   >
                     <option value="mensal">Por mês (1x)</option>
-                    <option value="semanal">Por semana (~4x)</option>
+                    <option value="semanal">Por semana (~4,29x)</option>
                     <option value="quinzenal">A cada 15 dias (2x)</option>
                     <option value="diaria">Por dia (30x)</option>
+                    <option value="anual">Anual (equiv. ÷ 12)</option>
                   </select>
                 </div>
               </div>
 
+              {freqInfo.isEstimatedEquivalence && (
+                <div className="px-3 py-2 rounded-lg bg-[#ffffff] border border-[#dce9ff] text-[11px] text-[#45464d] flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[15px] text-[#497cff]">schedule</span>
+                  <span>{freqInfo.note}</span>
+                </div>
+              )}
+
               {/* Card de Cálculo Automático do Gasto */}
-              <div className="bg-[#e5eeff] rounded-xl p-3 flex items-center justify-between">
+              <div className="bg-[#e5eeff] rounded-xl p-3 flex items-center justify-between gap-3">
                 <div className="flex flex-col">
                   <span className="text-[11px] font-semibold text-[#45464d] uppercase font-mono">
-                    Gasto Mensal Calculado Automaticamente
+                    {isManualSpendCustomized
+                      ? 'Gasto Mensal Informado Manualmente'
+                      : isBiz
+                      ? 'Custo Mensal Calculado Automaticamente'
+                      : 'Gasto Mensal Calculado Automaticamente'}
                   </span>
-                  <span className="text-lg font-bold text-[#0b1c30] font-mono">
+                  <span className="text-lg font-bold text-[#0b1c30] font-mono tabular-nums">
                     R$ {resolvedMonthlySpend.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     <span className="text-xs font-normal text-[#45464d] ml-1">/mês</span>
                   </span>
+                  {isManualSpendCustomized && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsManualSpendCustomized(false);
+                        setManualSpendOverride('');
+                      }}
+                      className="text-[11px] text-[#006a61] underline text-left mt-0.5 cursor-pointer"
+                    >
+                      Voltar ao cálculo automático (R$ {autoConsumptionMonthlySpend.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                    </button>
+                  )}
                 </div>
                 {calculatedWeight > 0 && (
-                  <div className="text-right flex flex-col font-mono text-xs">
+                  <div className="text-right flex flex-col font-mono text-xs shrink-0">
                     <span className="text-[#45464d]">Peso na Cesta:</span>
                     <span className="font-bold text-[#006a61]">{calculatedWeight.toFixed(1).replace('.', ',')}%</span>
                   </div>
@@ -520,7 +572,7 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
             <div className="p-2.5 bg-[#f8faff] rounded-lg text-[11px] text-[#76777d] flex items-center gap-1.5">
               <span className="material-symbols-outlined text-[16px] text-[#497cff]">info</span>
               <span>
-                Preço anterior não informado: o gasto será registrado na cesta, mas a inflação deste item ficará pendente até o preenchimento.
+                Preço anterior não informado: o valor entrará no {isBiz ? 'custo mensal' : 'gasto mensal'}, mas a alta percentual ficará pendente até você informar o preço antigo.
               </span>
             </div>
           )}
@@ -528,7 +580,7 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
           {/* Classificação Essencial vs Supérfluo */}
           <div className="flex flex-col gap-1">
             <label className="font-mono text-xs font-semibold text-[#0b1c30] uppercase tracking-wider">
-              Importância no seu orçamento
+              {isBiz ? 'Importância na operação' : 'Importância no seu orçamento'}
             </label>
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -541,7 +593,7 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
                 }`}
               >
                 <span className="material-symbols-outlined text-[16px]">verified</span>
-                <span>Essencial (básico da casa)</span>
+                <span>{isBiz ? 'Essencial (produção/base)' : 'Essencial (básico da casa)'}</span>
               </button>
               <button
                 type="button"
@@ -553,7 +605,7 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
                 }`}
               >
                 <span className="material-symbols-outlined text-[16px]">star</span>
-                <span>Supérfluo / Opcional</span>
+                <span>{isBiz ? 'Opcional / Complementar' : 'Supérfluo / Opcional'}</span>
               </button>
             </div>
           </div>
@@ -607,7 +659,11 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
                     rows={2}
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Ex: Marca habitual comprada no mercado X..."
+                    placeholder={
+                      isBiz
+                        ? 'Ex: Fornecedor habitual, marca ou condição de entrega...'
+                        : 'Ex: Marca habitual comprada no mercado X...'
+                    }
                     className="p-2.5 bg-[#ffffff] rounded-lg text-[#0b1c30] text-xs border border-[#c6c6cd]/30 resize-none"
                   />
                 </div>
@@ -639,3 +695,4 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
     </div>
   );
 };
+

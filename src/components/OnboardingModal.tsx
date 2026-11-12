@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FamilyProfile, BasketItem } from '../types';
+import { FamilyProfile, BasketItem, ProfileMode } from '../types';
 import { DEMO_BASKET_ITEMS, StorageService } from '../services/storage';
 import { getMonthsAgoIsoDate, getTodayIsoDate } from '../utils/dates';
 
@@ -28,15 +28,16 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
 }) => {
   const [step, setStep] = useState<number>(1);
 
-  // Step 1: Perfil
+  // Step 1: Perfil e Modo
+  const [profileMode, setProfileMode] = useState<ProfileMode>('pessoal');
   const [profileName, setProfileName] = useState(`Orçamento de ${userDisplayName}`);
   const [membersCount, setMembersCount] = useState(3);
 
-  // Step 2: Renda
+  // Step 2: Renda / Faturamento
   const [initialIncome, setInitialIncome] = useState<number>(6000);
   const [currentIncome, setCurrentIncome] = useState<number>(6500);
 
-  // Step 3: Gastos principais rápidos
+  // Step 3: Gastos / Custos principais rápidos
   const [groceriesSpend, setGroceriesSpend] = useState<number>(1800);
   const [housingSpend, setHousingSpend] = useState<number>(2000);
   const [transportSpend, setTransportSpend] = useState<number>(800);
@@ -51,6 +52,8 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
 
   if (!isOpen) return null;
 
+  const isBiz = profileMode === 'negocio';
+
   const handleComplete = async () => {
     if (saving) return;
     setErrorMsg(null);
@@ -58,7 +61,11 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     const safeInitial = Number.isFinite(initialIncome) && initialIncome > 0 ? initialIncome : 0;
     const safeCurrent = Number.isFinite(currentIncome) && currentIncome >= 0 ? currentIncome : 0;
     if (safeInitial <= 0) {
-      setErrorMsg('Informe uma renda inicial maior que zero para calcular o poder de compra.');
+      setErrorMsg(
+        isBiz
+          ? 'Informe uma entrada mensal base maior que zero para acompanhar a margem.'
+          : 'Informe uma renda inicial maior que zero para calcular o poder de compra.'
+      );
       setStep(2);
       return;
     }
@@ -76,6 +83,8 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
         membersCount: Math.max(1, Math.min(20, Math.round(membersCount) || 1)),
         referenceRegion: region,
         currency: 'BRL',
+        profileMode,
+        priceAlertThresholdPercent: 10,
         isDemo: false,
         createdAt: nowIso,
         updatedAt: nowIso,
@@ -98,7 +107,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
           {
             id: `item-ob-1-${stamp}`,
             profileId,
-            name: 'Supermercado & Alimentação Básica',
+            name: isBiz ? 'Insumos e Matéria-Prima Principal' : 'Supermercado & Alimentação Básica',
             group: 'Alimentação e bebidas',
             classification: 'Essencial',
             monthlySpend: Math.max(0, groceriesSpend || 0),
@@ -107,6 +116,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             oldPriceDate: baseDateIso,
             currentPriceDate: currentDateIso,
             unit: 'mensal',
+            dataOrigin: 'estimado',
             active: true,
             createdAt: nowIso,
             updatedAt: nowIso,
@@ -114,7 +124,9 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
           {
             id: `item-ob-2-${stamp}`,
             profileId,
-            name: 'Habitação (Aluguel / Condomínio / Luz / Água)',
+            name: isBiz
+              ? 'Estrutura Física (Aluguel / Energia / Água)'
+              : 'Habitação (Aluguel / Condomínio / Luz / Água)',
             group: 'Habitação',
             classification: 'Essencial',
             monthlySpend: Math.max(0, housingSpend || 0),
@@ -123,6 +135,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             oldPriceDate: baseDateIso,
             currentPriceDate: currentDateIso,
             unit: 'mensal',
+            dataOrigin: 'estimado',
             active: true,
             createdAt: nowIso,
             updatedAt: nowIso,
@@ -130,7 +143,9 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
           {
             id: `item-ob-3-${stamp}`,
             profileId,
-            name: 'Transporte (Combustível / Transporte Público)',
+            name: isBiz
+              ? 'Logística, Entregas e Combustível'
+              : 'Transporte (Combustível / Transporte Público)',
             group: 'Transportes',
             classification: 'Essencial',
             monthlySpend: Math.max(0, transportSpend || 0),
@@ -139,6 +154,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             oldPriceDate: baseDateIso,
             currentPriceDate: currentDateIso,
             unit: 'mensal',
+            dataOrigin: 'estimado',
             active: true,
             createdAt: nowIso,
             updatedAt: nowIso,
@@ -200,18 +216,51 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
           )}
         </div>
 
-        {/* STEP 1: Perfil Familiar */}
+        {/* STEP 1: Perfil e Modo de Uso */}
         {step === 1 && (
           <div className="flex flex-col gap-4">
             <div>
-              <h2 className="text-xl font-bold text-[#0b1c30]">1. Identificação do seu Orçamento</h2>
+              <h2 className="text-xl font-bold text-[#0b1c30]">1. Como você vai usar o IPCA-Casa?</h2>
               <p className="text-xs text-[#45464d] mt-1">
-                Dê um nome ao seu plano de controle familiar e informe quantas pessoas compõem a residência.
+                Escolha o estilo de acompanhamento que faz mais sentido para sua rotina. Você pode mudar depois.
               </p>
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => setProfileMode('pessoal')}
+                className={`p-3 rounded-xl border-2 text-left transition-all cursor-pointer ${
+                  profileMode === 'pessoal'
+                    ? 'border-[#000000] bg-[#eff4ff]/70'
+                    : 'border-[#eff4ff] hover:border-[#c6c6cd]'
+                }`}
+              >
+                <span className="text-xs font-bold text-[#0b1c30] block">Uso Pessoal / Casa</span>
+                <span className="text-[11px] text-[#45464d] block mt-0.5 leading-snug">
+                  Compras do mês, contas da casa e quanto o salário rende.
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setProfileMode('negocio')}
+                className={`p-3 rounded-xl border-2 text-left transition-all cursor-pointer ${
+                  profileMode === 'negocio'
+                    ? 'border-[#000000] bg-[#eff4ff]/70'
+                    : 'border-[#eff4ff] hover:border-[#c6c6cd]'
+                }`}
+              >
+                <span className="text-xs font-bold text-[#0b1c30] block">Pequeno Negócio</span>
+                <span className="text-[11px] text-[#45464d] block mt-0.5 leading-snug">
+                  Insumos, ingredientes, custos operacionais e impacto na margem.
+                </span>
+              </button>
+            </div>
+
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono text-[#45464d]">Nome do Perfil Familiar:</label>
+              <label className="text-xs font-mono text-[#45464d]">
+                {isBiz ? 'Nome do Negócio ou Operação:' : 'Nome do Perfil Familiar:'}
+              </label>
               <input
                 type="text"
                 value={profileName}
@@ -221,7 +270,9 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono text-[#45464d]">Quantidade de Moradores / Integrantes:</label>
+              <label className="text-xs font-mono text-[#45464d]">
+                {isBiz ? 'Pessoas / Unidades envolvidas:' : 'Quantidade de Moradores / Integrantes:'}
+              </label>
               <input
                 type="number"
                 min="1"
@@ -234,18 +285,24 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
           </div>
         )}
 
-        {/* STEP 2: Renda Mensal */}
+        {/* STEP 2: Renda / Faturamento */}
         {step === 2 && (
           <div className="flex flex-col gap-4">
             <div>
-              <h2 className="text-xl font-bold text-[#0b1c30]">2. Renda Familiar e Salário</h2>
+              <h2 className="text-xl font-bold text-[#0b1c30]">
+                {isBiz ? '2. Faturamento Mensal de Referência' : '2. Renda Familiar e Salário'}
+              </h2>
               <p className="text-xs text-[#45464d] mt-1">
-                Fundamental para calcular o impacto em Reais e a variação real do seu poder de compra.
+                {isBiz
+                  ? 'Usamos esses valores para mostrar quanto da sua entrada mensal está sendo consumida pela alta dos insumos.'
+                  : 'Fundamental para calcular o impacto em Reais e a variação real do seu poder de compra.'}
               </p>
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono text-[#45464d]">Renda Mensal no Início do Período (R$):</label>
+              <label className="text-xs font-mono text-[#45464d]">
+                {isBiz ? 'Faturamento Mensal no Início do Período (R$):' : 'Renda Mensal no Início do Período (R$):'}
+              </label>
               <input
                 type="number"
                 step="100"
@@ -253,11 +310,15 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 onChange={(e) => setInitialIncome(parseFloat(e.target.value) || 0)}
                 className="h-10 px-3.5 rounded-lg border border-[#c6c6cd] text-xs font-mono text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
               />
-              <span className="text-[11px] text-[#76777d]">Salário líquido ou bruto de referência (ex: há 1 ano)</span>
+              <span className="text-[11px] text-[#76777d]">
+                {isBiz ? 'Entrada mensal de referência (ex.: há 1 ano)' : 'Salário líquido ou bruto de referência (ex: há 1 ano)'}
+              </span>
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono text-[#45464d]">Renda Mensal Atual (R$):</label>
+              <label className="text-xs font-mono text-[#45464d]">
+                {isBiz ? 'Faturamento Mensal Atual (R$):' : 'Renda Mensal Atual (R$):'}
+              </label>
               <input
                 type="number"
                 step="100"
@@ -265,23 +326,29 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 onChange={(e) => setCurrentIncome(parseFloat(e.target.value) || 0)}
                 className="h-10 px-3.5 rounded-lg border border-[#c6c6cd] text-xs font-mono text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
               />
-              <span className="text-[11px] text-[#76777d]">Salário atual para comparar reajuste vs inflação</span>
+              <span className="text-[11px] text-[#76777d]">
+                {isBiz ? 'Entrada atual para acompanhar a sobra após custos' : 'Salário atual para comparar reajuste vs inflação'}
+              </span>
             </div>
           </div>
         )}
 
-        {/* STEP 3: Principais Gastos */}
+        {/* STEP 3: Principais Gastos / Custos */}
         {step === 3 && (
           <div className="flex flex-col gap-4">
             <div>
-              <h2 className="text-xl font-bold text-[#0b1c30]">3. Principais Gastos Domésticos</h2>
+              <h2 className="text-xl font-bold text-[#0b1c30]">
+                {isBiz ? '3. Principais Custos da Operação' : '3. Principais Gastos Domésticos'}
+              </h2>
               <p className="text-xs text-[#45464d] mt-1">
-                Estime os valores aproximados das 3 categorias mais pesadas no orçamento.
+                Estime os valores aproximados das 3 categorias mais pesadas no mês.
               </p>
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono text-[#45464d]">Alimentação & Supermercado (R$/mês):</label>
+              <label className="text-xs font-mono text-[#45464d]">
+                {isBiz ? 'Insumos, Ingredientes e Mercadorias (R$/mês):' : 'Alimentação & Supermercado (R$/mês):'}
+              </label>
               <input
                 type="number"
                 step="50"
@@ -292,7 +359,11 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono text-[#45464d]">Habitação (Aluguel, Luz, Água, Condomínio) (R$/mês):</label>
+              <label className="text-xs font-mono text-[#45464d]">
+                {isBiz
+                  ? 'Aluguel do Ponto, Luz, Água e Gás (R$/mês):'
+                  : 'Habitação (Aluguel, Luz, Água, Condomínio) (R$/mês):'}
+              </label>
               <input
                 type="number"
                 step="50"
@@ -303,7 +374,9 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono text-[#45464d]">Transporte (Combustível, Transporte Público) (R$/mês):</label>
+              <label className="text-xs font-mono text-[#45464d]">
+                {isBiz ? 'Entregas, Frete e Combustível (R$/mês):' : 'Transporte (Combustível, Transporte Público) (R$/mês):'}
+              </label>
               <input
                 type="number"
                 step="50"
@@ -321,7 +394,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             <div>
               <h2 className="text-xl font-bold text-[#0b1c30]">4. Localidade para Comparação</h2>
               <p className="text-xs text-[#45464d] mt-1">
-                Permite contrastar a inflação da sua casa com os índices oficiais da sua região metropolitana.
+                Permite contrastar a variação dos seus custos com os índices oficiais da sua região.
               </p>
             </div>
 
@@ -353,9 +426,9 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
         {step === 5 && (
           <div className="flex flex-col gap-4">
             <div>
-              <h2 className="text-xl font-bold text-[#0b1c30]">5. Como prefere iniciar sua cesta?</h2>
+              <h2 className="text-xl font-bold text-[#0b1c30]">5. Como prefere iniciar?</h2>
               <p className="text-xs text-[#45464d] mt-1">
-                Você pode começar com itens de exemplo para ver análises imediatas ou começar do zero.
+                Você pode começar com itens de exemplo para explorar os gráficos ou usar apenas os 3 valores informados agora.
               </p>
             </div>
 
@@ -370,10 +443,10 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
               >
                 <div>
                   <span className="text-xs font-bold text-[#0b1c30] block">
-                    Copiar Cesta de Exemplo (Recomendado)
+                    Copiar Lista de Exemplo (Recomendado)
                   </span>
                   <span className="text-[11px] text-[#76777d]">
-                    Inclui {DEMO_BASKET_ITEMS.length} produtos e serviços comuns que você poderá editar, excluir e personalizar livremente.
+                    Inclui {DEMO_BASKET_ITEMS.length} itens demonstrativos que você poderá editar, excluir e personalizar livremente.
                   </span>
                 </div>
                 {basketChoice === 'copy-demo' && (
@@ -391,10 +464,10 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
               >
                 <div>
                   <span className="text-xs font-bold text-[#0b1c30] block">
-                    Iniciar com Cesta em Branco
+                    Iniciar apenas com os 3 itens básicos
                   </span>
                   <span className="text-[11px] text-[#76777d]">
-                    Cadastre do zero apenas os itens informados nos passos anteriores.
+                    Comece limpo usando os valores aproximados que você acabou de informar.
                   </span>
                 </div>
                 {basketChoice === 'empty' && (
@@ -450,3 +523,4 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     </div>
   );
 };
+

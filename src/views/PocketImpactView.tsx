@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { EconomicCalculationSummary, PocketImpactPerspective } from '../types';
+import { EconomicCalculationSummary, PocketImpactPerspective, ProfileMode } from '../types';
 import {
   calculateEstimatedMonthlyImpact,
   calculateEstimatedAnnualImpact,
@@ -13,6 +13,7 @@ import {
   getTodayIsoDate,
   isValidIsoDate,
 } from '../utils/dates';
+import { getProfileModeCopy } from '../utils/profileMode';
 
 interface PocketImpactViewProps {
   summary: EconomicCalculationSummary;
@@ -22,6 +23,7 @@ interface PocketImpactViewProps {
     dates?: { initialDate?: string; finalDate?: string }
   ) => void | Promise<void>;
   isDemo?: boolean;
+  profileMode?: ProfileMode;
 }
 
 function formatMoneyBR(value: number): string {
@@ -49,7 +51,10 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
   summary,
   onUpdateIncome,
   isDemo = false,
+  profileMode = 'pessoal',
 }) => {
+  const modeCopy = getProfileModeCopy(profileMode);
+  const isBiz = modeCopy.mode === 'negocio';
   const hasBasketItems = summary.calculatedItems.length > 0;
   const hasRegisteredIncome = summary.purchasingPower.hasIncomeData;
 
@@ -242,13 +247,15 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
         <div>
           <div className="flex items-center gap-2 text-[#006a61] font-mono text-xs uppercase tracking-wider font-semibold">
             <span className="material-symbols-outlined text-[18px]">account_balance_wallet</span>
-            <span>Inteligência Financeira Real</span>
+            <span>{modeCopy.badgeLabel}</span>
           </div>
           <h1 className="text-3xl lg:text-4xl font-bold text-[#0b1c30] tracking-tight mt-1">
-            Impacto no seu Bolso
+            {isBiz ? 'Impacto no Resultado em Reais' : 'Impacto no seu Bolso'}
           </h1>
           <p className="text-xs text-[#45464d] mt-1 max-w-3xl leading-relaxed">
-            A inflação não é apenas um percentual estatístico abstrato. Veja exatamente quantos <strong>Reais (R$)</strong> a alta de preços drena do seu orçamento todo mês e quanto seu salário precisa aumentar para manter seu padrão de vida.
+            {isBiz
+              ? 'Veja exatamente quantos Reais (R$) a alta de insumos e custos consome do seu resultado por mês e quanto seu faturamento ou receita precisa acompanhar.'
+              : 'Veja de forma simples quantos Reais (R$) a alta de preços tira do seu orçamento por mês e quanto sua renda precisa acompanhar para manter seu padrão de vida.'}
           </p>
         </div>
 
@@ -474,10 +481,12 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
               </div>
               <div>
                 <h3 className="text-base font-bold text-[#0b1c30]">
-                  Parâmetros Financeiros do seu Domicílio
+                  {isBiz ? 'Parâmetros de Faturamento e Custos' : 'Parâmetros Financeiros da Casa'}
                 </h3>
                 <p className="text-xs text-[#45464d]">
-                  Altere a renda e os gastos para simular o impacto financeiro em tempo real.
+                  {isBiz
+                    ? 'Informe faturamento inicial e atual para medir a pressão nos custos.'
+                    : 'Altere a renda e os gastos para simular o impacto financeiro em tempo real.'}
                 </p>
               </div>
             </div>
@@ -486,7 +495,7 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-mono text-[#45464d] font-medium">
-                Renda Mensal no Início do Período (R$):
+                {isBiz ? 'Faturamento / Sobra Inicial (R$):' : 'Renda Mensal no Início do Período (R$):'}
               </label>
               <input
                 type="number"
@@ -510,7 +519,7 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
 
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-mono text-[#45464d] font-medium">
-                Renda Mensal Atual (R$):
+                {modeCopy.incomeFieldLabel} (R$):
               </label>
               <input
                 type="number"

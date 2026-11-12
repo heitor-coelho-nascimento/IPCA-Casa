@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { EconomicCalculationSummary } from '../types';
+import { EconomicCalculationSummary, ProfileMode } from '../types';
 import { NavTab } from '../components/Sidebar';
 import { IBGESeriesMetadata } from '../services/ibge';
 import { calculateSpreadPP } from '../services/economics';
 import { formatDateRangeLabel } from '../utils/dates';
+import { getProfileModeCopy } from '../utils/profileMode';
 
 type AnalysisTimeframe = '12M' | 'YTD' | '1M';
 
@@ -14,6 +15,7 @@ interface InflationAnalysisViewProps {
   onSelectTimeframe?: (tf: AnalysisTimeframe) => void;
   onNavigateTab: (tab: NavTab) => void;
   isDemo: boolean;
+  profileMode?: ProfileMode;
 }
 
 function formatSignedPercent(value: number, decimals = 2): string {
@@ -40,8 +42,11 @@ export const InflationAnalysisView: React.FC<InflationAnalysisViewProps> = ({
   onSelectTimeframe,
   onNavigateTab,
   isDemo,
+  profileMode = 'pessoal',
 }) => {
-  const [showFormula, setShowFormula] = useState(true);
+  const modeCopy = getProfileModeCopy(profileMode);
+  const isBiz = modeCopy.mode === 'negocio';
+  const [showFormula, setShowFormula] = useState(false);
   const [filterGroup, setFilterGroup] = useState('ALL');
   const [filterText, setFilterText] = useState('');
   const [localTimeframe, setLocalTimeframe] = useState<AnalysisTimeframe>('12M');
@@ -105,11 +110,11 @@ export const InflationAnalysisView: React.FC<InflationAnalysisViewProps> = ({
   const effectiveSpreadPP = calculateSpreadPP(ipcaCasa12M, officialRate);
 
   const ibgeSourceStatusLabel =
-    ibgeData?.sourceMode === 'live'
+    ibgeData?.sourceMode === 'live' && !ibgeData.isContingencyData
       ? 'SIDRA Tempo Real'
       : ibgeData?.sourceMode === 'cached_live'
-      ? 'Cache Recente'
-      : 'Ref. Offline';
+      ? 'Cache SIDRA'
+      : 'Contingência Offline';
 
   const baseRangeLabel = formatDateRangeLabel(
     purchasingPower.initialDate,
@@ -241,16 +246,18 @@ export const InflationAnalysisView: React.FC<InflationAnalysisViewProps> = ({
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-2">
               <span className="font-mono text-xs uppercase tracking-widest text-[#497cff] font-semibold">
-                Decomposição Econométrica
+                {modeCopy.badgeLabel}
               </span>
               <span className="text-[#76777d]">•</span>
-              <span className="font-mono text-xs text-[#45464d]">{isDemo ? 'Cesta de Demonstração (Valores Fictícios)' : 'Orçamento Familiar'}</span>
+              <span className="font-mono text-xs text-[#45464d]">
+                {isDemo ? 'Cesta de Demonstração (Valores Fictícios)' : modeCopy.modeTitle}
+              </span>
             </div>
             <h1 className="text-3xl lg:text-4xl font-bold text-[#0b1c30] tracking-tight">
-              Análise da Inflação Real & Impacto Familiar
+              {isBiz ? 'O Que Puxou a Alta nos Custos' : 'O Que Puxou a Alta nos Seus Gastos'}
             </h1>
             <p className="text-xs text-[#45464d] max-w-2xl leading-relaxed">
-              Compreenda o impacto desproporcional dos preços na sua cesta de consumo doméstica ponderada pela fórmula de Índice de Laspeyres face ao Índice Oficial Nacional.
+              Veja quais itens e categorias mais pesaram no seu bolso comparados à média oficial do país, sem precisar fazer contas manuais.
             </p>
           </div>
 

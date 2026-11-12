@@ -13,8 +13,10 @@ import {
   EfficiencyPlanB,
   FamilyProfile,
   IncomeRecord,
+  MonthlyClosure,
   OpportunityPlanC,
   PriceRecord,
+  ProfileMode,
   SubstitutePlanA,
   ToastNotification,
   UserAccount,
@@ -22,10 +24,16 @@ import {
 import { DEFAULT_GROUPS, StorageService } from './services/storage';
 import { AuthService, LegacyLocalBundle, LegacyMigrationService } from './services/auth';
 import { processBasketEconomics } from './services/economics';
-import { IBGESeriesMetadata, IBGEService } from './services/ibge';
+import {
+  getOfficialBenchmarkForTimeframe,
+  IBGESeriesMetadata,
+  IBGEService,
+} from './services/ibge';
 import { PUBLIC_ROUTES, normalizeRoutePath } from './config/seo';
 import { trackLogin, trackSignUp, trackViewDashboard } from './services/analytics';
 import { getMonthsAgoIsoDate, getTodayIsoDate } from './utils/dates';
+import { buildDuplicateSignature } from './utils/csvImport';
+import { resolveProfileMode } from './utils/profileMode';
 
 // Code-splitting por rota e modal (Lazy loading)
 const HowItWorksPublicPage = lazy(() =>
@@ -286,6 +294,7 @@ export default function App() {
   const [cloudPlansA, setCloudPlansA] = useState<SubstitutePlanA[]>([]);
   const [cloudPlansB, setCloudPlansB] = useState<EfficiencyPlanB[]>([]);
   const [cloudPlansC, setCloudPlansC] = useState<OpportunityPlanC[]>([]);
+  const [cloudMonthlyClosures, setCloudMonthlyClosures] = useState<MonthlyClosure[]>([]);
 
   // Período selecionado
   const [selectedTimeframe, setSelectedTimeframe] = useState<'12M' | 'YTD' | '1M'>('12M');
@@ -423,6 +432,7 @@ export default function App() {
             setCloudPlansA([]);
             setCloudPlansB([]);
             setCloudPlansC([]);
+            setCloudMonthlyClosures([]);
             setCurrentUser(null);
             setPendingVerificationEmail(null);
             setIsAuthInitializing(false);
@@ -443,6 +453,7 @@ export default function App() {
             setCloudPlansA([]);
             setCloudPlansB([]);
             setCloudPlansC([]);
+            setCloudMonthlyClosures([]);
             setCurrentUser(null);
             setPendingVerificationEmail(firebaseUser.email);
             setIsAuthInitializing(false);
@@ -546,6 +557,9 @@ export default function App() {
             setCloudPlansB(plansB);
             setCloudPlansC(plansC);
           },
+          onMonthlyClosures: (remoteClosures) => {
+            setCloudMonthlyClosures(remoteClosures);
+          },
         });
       })
       .catch((err) => {
@@ -591,12 +605,57 @@ export default function App() {
     );
   }, [isAuthenticatedDashboard, isFirebaseMode, localActiveProfile, activeCloudProfileId, currentUser?.profileId, profiles]);
 
+  const activeProfileMode = resolveProfileMode(activeProfile.profileMode);
+  const alertThresholdPercent = activeProfile.priceAlertThresholdPercent ?? 10;
+
   // Itens da cesta efetivos (excluindo arquivados e filtrados pelo perfil ativo)
   const items = useMemo<BasketItem[]>(() => {
     if (!isAuthenticatedDashboard) return [];
     if (!isFirebaseMode) return localItems;
     return cloudItems.filter((item) => !item.isArchived && item.profileId === activeProfile.id);
   }, [isAuthenticatedDashboard, isFirebaseMode, localItems, cloudItems, activeProfile.id]);
+
+  // Histórico de preços efetivo do perfil ativo
+  const activePriceHistory = useMemo<PriceRecord[]>(() => {
+    if (!isAuthenticatedDashboard) return [];
+    const activeItemIds = new Set(items.map((it) => it.id));
+    if (isFirebaseMode) {
+      return cloudPriceHistory.filter((p) =>
+        p.profileId ? p.profileId === activeProfile.id : activeItemIds.has(p.itemId)
+      );
+    }
+    if (!localStateHydrated) return [];
+    return StorageService.getAllPrices().filter((p) => activeItemIds.has(p.itemId));
+  }, [
+    isAuthenticatedDashboard,
+    isFirebaseMode,
+    items,
+    cloudPriceHistory,
+    activeProfile.id,
+    localStateHydrated,
+    localRevision,
+  ]);
+
+  // Fechamentos mensais (snapshots) do perfil ativo
+  const activeMonthlyClosures = useMemo<MonthlyClosure[]>(() => {
+    if (!isAuthenticatedDashboard) return [];
+    if (isFirebaseMode) {
+      return cloudMonthlyClosures
+        .filter((c) => c.profileId === activeProfile.id)
+        .sort((a, b) => b.monthKey.localeCompare(a.monthKey));
+    }
+    if (!localStateHydrated) return [];
+    return [...StorageService.getMonthlyClosures(activeProfile.id)].sort((a, b) =>
+      b.monthKey.localeCompare(a.monthKey)
+    );
+  }, [
+    isAuthenticatedDashboard,
+    isFirebaseMode,
+    cloudMonthlyClosures,
+    activeProfile.id,
+    localStateHydrated,
+    localRevision,
+  ]);
 
   // Histórico de renda efetivo do perfil ativo (só carrega quando logado/demo)
   const activeIncomeHistory = useMemo<IncomeRecord[]>(() => {
@@ -674,25 +733,33 @@ export default function App() {
       activeIncomeHistory.length > 0
         ? activeIncomeHistory[activeIncomeHistory.length - 1].referenceDate
         : getTodayIsoDate();
-    const officialRate12M =
-      ibgeMetadata && Number.isFinite(ibgeMetadata.accumulated12MRate)
-        ? ibgeMetadata.accumulated12MRate
+    const officialBenchmark = getOfficialBenchmarkForTimeframe(ibgeMetadata, selectedTimeframe);
+    const officialRateForWindow =
+      ibgeMetadata && Number.isFinite(officialBenchmark.rate)
+        ? officialBenchmark.rate
         : 0;
     return processBasketEconomics(
       items,
-      officialRate12M,
+      officialRateForWindow,
       initialIncome,
       finalIncome,
       dateInitial,
       dateFinal,
-      selectedTimeframe
+      selectedTimeframe,
+      {
+        priceHistory: activePriceHistory,
+        incomeRecords: activeIncomeHistory,
+        isDemo,
+      }
     );
   }, [
     isAuthenticatedDashboard,
     items,
+    activePriceHistory,
     activeIncomeHistory,
     ibgeMetadata,
     selectedTimeframe,
+    isDemo,
   ]);
 
   // Navegação de abas dentro do painel
@@ -777,6 +844,7 @@ export default function App() {
     setCloudPlansA([]);
     setCloudPlansB([]);
     setCloudPlansC([]);
+    setCloudMonthlyClosures([]);
     setLocalItems([]);
     setLocalProfiles([SHELL_FALLBACK_PROFILE]);
     setLocalActiveProfile(SHELL_FALLBACK_PROFILE);
@@ -969,17 +1037,23 @@ export default function App() {
       price: number;
       referenceDate: string;
       unit?: string;
+      packageSize?: number;
+      packageUnit?: string;
       origin?: string;
     }) => {
       try {
         if (isFirebaseMode && firebaseUid) {
           const { FirestoreService } = await import('./services/firestore');
           await FirestoreService.addPriceRecord(firebaseUid, {
+            profileId: activeProfile.id,
             itemId: record.itemId,
             price: record.price,
             referenceDate: record.referenceDate,
             unit: record.unit,
+            packageSize: record.packageSize,
+            packageUnit: record.packageUnit,
             source: record.origin,
+            origin: record.origin,
           });
         } else {
           StorageService.addPriceRecord(record);
@@ -1330,33 +1404,115 @@ export default function App() {
     [handleSelectDashboardTab]
   );
 
-  // Importação de Itens
+  // Importação de Itens (com deduplicação tanto local quanto no Firestore)
   const handleImportItems = useCallback(
     async (imported: BasketItem[]) => {
       try {
         if (isFirebaseMode && firebaseUid) {
           const { FirestoreService } = await import('./services/firestore');
-          const stamped = imported.map((it, idx) => ({
-            ...it,
-            id: sanitizeFirestoreId(it.id || `item_${Date.now()}_${idx}`, 'item'),
-            profileId: activeProfile.id,
-            isArchived: false,
-            active: it.active !== false,
-          }));
-          await Promise.all(
-            stamped.map((it) => FirestoreService.saveBasketItem(firebaseUid, it, false))
-          );
+          const existingIds = new Set(items.map((it) => it.id));
+          const existingSignatures = new Set(items.map((it) => buildDuplicateSignature(it)));
+          const seenBatchSignatures = new Set<string>();
+          const uniqueToImport: BasketItem[] = [];
+          let skippedDuplicates = 0;
+
+          imported.forEach((it, idx) => {
+            const sig = buildDuplicateSignature(it);
+            const hasDup =
+              (it.id && existingIds.has(it.id)) ||
+              existingSignatures.has(sig) ||
+              seenBatchSignatures.has(sig);
+            if (hasDup) {
+              skippedDuplicates += 1;
+              return;
+            }
+            seenBatchSignatures.add(sig);
+            uniqueToImport.push({
+              ...it,
+              id: sanitizeFirestoreId(it.id || `item_${Date.now()}_${idx}`, 'item'),
+              profileId: activeProfile.id,
+              isArchived: false,
+              active: it.active !== false,
+            });
+          });
+
+          if (uniqueToImport.length > 0) {
+            await Promise.all(
+              uniqueToImport.map((it) => FirestoreService.saveBasketItem(firebaseUid, it, false))
+            );
+          }
+
+          if (skippedDuplicates > 0) {
+            addToast(
+              'info',
+              `${uniqueToImport.length} itens importados (${skippedDuplicates} duplicados ignorados).`
+            );
+          }
         } else {
-          StorageService.importItems(imported, activeProfile.id);
+          const result = StorageService.importItems(imported, activeProfile.id);
           setLocalItems(StorageService.getItems(activeProfile.id));
           bumpLocalRevision();
+          if (result.skippedDuplicates > 0) {
+            addToast(
+              'info',
+              `${result.importedCount} itens importados (${result.skippedDuplicates} duplicados ignorados).`
+            );
+          }
         }
       } catch (err) {
         addToast('error', 'Não foi possível concluir a importação dos itens.');
         throw err;
       }
     },
+    [activeProfile.id, isFirebaseMode, firebaseUid, items, bumpLocalRevision, addToast]
+  );
+
+  // Fechamentos Mensais (Snapshots)
+  const handleSaveMonthlyClosure = useCallback(
+    async (closure: MonthlyClosure, allowOverwrite = false) => {
+      const normalized: MonthlyClosure = {
+        ...closure,
+        profileId: activeProfile.id,
+      };
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          await FirestoreService.saveMonthlyClosure(firebaseUid, normalized);
+          addToast('success', `Fechamento de ${normalized.monthLabel} salvo no Cloud Firestore.`);
+        } else {
+          const res = StorageService.saveMonthlyClosure(normalized, allowOverwrite);
+          if (!res.success && res.requiresOverwriteConfirmation) {
+            addToast('info', 'Já existe fechamento para esta competência; confirme a substituição.');
+            return;
+          }
+          bumpLocalRevision();
+          addToast('success', `Fechamento de ${normalized.monthLabel} salvo com sucesso.`);
+        }
+      } catch (err) {
+        addToast('error', 'Não foi possível salvar o fechamento mensal.');
+        throw err;
+      }
+    },
     [activeProfile.id, isFirebaseMode, firebaseUid, bumpLocalRevision, addToast]
+  );
+
+  const handleDeleteMonthlyClosure = useCallback(
+    async (closureId: string) => {
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          await FirestoreService.deleteMonthlyClosure(firebaseUid, closureId);
+        } else {
+          StorageService.deleteMonthlyClosure(closureId);
+          bumpLocalRevision();
+        }
+        addToast('info', 'Fechamento mensal removido.');
+      } catch (err) {
+        addToast('error', 'Não foi possível excluir o fechamento mensal.');
+        throw err;
+      }
+    },
+    [isFirebaseMode, firebaseUid, bumpLocalRevision, addToast]
   );
 
   // Gerenciamento Multi-Perfil Familiar
@@ -1374,22 +1530,42 @@ export default function App() {
         }
         addToast('success', `Perfil "${updatedProfile.name}" atualizado.`);
       } catch (err) {
-        addToast('error', 'Erro ao atualizar perfil familiar.');
+        addToast('error', 'Erro ao atualizar perfil.');
         throw err;
       }
     },
     [isFirebaseMode, firebaseUid, bumpLocalRevision, addToast]
   );
 
+  const handleUpdateAlertThreshold = useCallback(
+    async (threshold: number) => {
+      const safeThreshold = Math.max(1, Math.min(100, Math.round(threshold * 10) / 10));
+      await handleUpdateProfile({
+        ...activeProfile,
+        priceAlertThresholdPercent: safeThreshold,
+        updatedAt: new Date().toISOString(),
+      });
+    },
+    [activeProfile, handleUpdateProfile]
+  );
+
   const handleCreateProfile = useCallback(
-    async (params: { name: string; membersCount: number; referenceRegion: string }) => {
+    async (params: {
+      name: string;
+      membersCount: number;
+      referenceRegion: string;
+      profileMode?: ProfileMode;
+      priceAlertThresholdPercent?: number;
+    }) => {
       const nowIso = new Date().toISOString();
       const newProfile: FamilyProfile = {
         id: sanitizeFirestoreId(`prof_${Date.now()}`, 'prof'),
-        name: params.name.trim() || 'Novo Perfil Familiar',
+        name: params.name.trim() || 'Novo Perfil',
         membersCount: Math.max(1, Math.min(50, Math.round(params.membersCount) || 2)),
         referenceRegion: params.referenceRegion || 'Brasil',
         currency: 'BRL',
+        profileMode: resolveProfileMode(params.profileMode),
+        priceAlertThresholdPercent: params.priceAlertThresholdPercent ?? 10,
         isDemo: false,
         createdAt: nowIso,
         updatedAt: nowIso,
@@ -1644,6 +1820,7 @@ export default function App() {
           onLogout={handleLogout}
           isMobileOpen={isMobileMenuOpen}
           onCloseMobile={() => setIsMobileMenuOpen(false)}
+          profileMode={activeProfileMode}
         />
       </Suspense>
 
@@ -1730,6 +1907,7 @@ export default function App() {
             onSwitchToDemoBasket={handleSwitchToDemoBasket}
             isDemo={isDemo}
             onOpenMobileMenu={() => setIsMobileMenuOpen(true)}
+            profileMode={activeProfileMode}
           />
         </Suspense>
 
@@ -1748,6 +1926,11 @@ export default function App() {
                 }}
                 onOpenQuickPrice={() => setIsQuickPriceOpen(true)}
                 isDemo={isDemo}
+                profileMode={activeProfileMode}
+                priceRecords={activePriceHistory}
+                monthlyClosures={activeMonthlyClosures}
+                alertThresholdPercent={alertThresholdPercent}
+                onUpdateAlertThreshold={handleUpdateAlertThreshold}
               />
             )}
 
@@ -1756,6 +1939,7 @@ export default function App() {
                 summary={effectiveSummary}
                 onUpdateIncome={handleUpdateIncome}
                 isDemo={isDemo}
+                profileMode={activeProfileMode}
               />
             )}
 
@@ -1789,6 +1973,7 @@ export default function App() {
                 onDeleteGroup={handleDeleteConsumptionGroup}
                 externalSearchTerm={globalSearchTerm}
                 onExternalSearchChange={setGlobalSearchTerm}
+                profileMode={activeProfileMode}
               />
             )}
 
@@ -1802,8 +1987,9 @@ export default function App() {
                   }
                 }}
                 isDemo={isDemo}
+                profileMode={activeProfileMode}
                 selectedItemForHistory={selectedItemForHistory}
-                priceRecords={isFirebaseMode ? cloudPriceHistory : undefined}
+                priceRecords={activePriceHistory}
                 onAddPriceRecord={handleAddPriceRecordFromView}
                 onUpdatePriceRecord={handleUpdatePriceRecord}
                 onDeletePriceRecord={handleDeletePriceRecord}
@@ -1818,6 +2004,7 @@ export default function App() {
                 onSelectTimeframe={setSelectedTimeframe}
                 onNavigateTab={handleSelectDashboardTab}
                 isDemo={isDemo}
+                profileMode={activeProfileMode}
               />
             )}
 
@@ -1826,6 +2013,7 @@ export default function App() {
                 summary={effectiveSummary}
                 onUpdateIncome={handleUpdateIncome}
                 isDemo={isDemo}
+                profileMode={activeProfileMode}
               />
             )}
 
@@ -1834,6 +2022,7 @@ export default function App() {
                 summary={effectiveSummary}
                 isDemo={isDemo}
                 activeProfileId={activeProfile.id}
+                profileMode={activeProfileMode}
                 plansA={activePlansA}
                 plansB={activePlansB}
                 planC={activePlanC}
@@ -1853,6 +2042,10 @@ export default function App() {
                 activeProfile={activeProfile}
                 ibgeData={ibgeMetadata}
                 isDemo={isDemo}
+                profileMode={activeProfileMode}
+                monthlyClosures={activeMonthlyClosures}
+                onSaveMonthlyClosure={handleSaveMonthlyClosure}
+                onDeleteMonthlyClosure={handleDeleteMonthlyClosure}
               />
             )}
 
@@ -1862,6 +2055,7 @@ export default function App() {
                 profiles={profiles}
                 currentUser={currentUser}
                 ibgeData={ibgeMetadata}
+                monthlyClosures={activeMonthlyClosures}
                 onUpdateProfile={handleUpdateProfile}
                 onSelectProfile={(profileId) => {
                   if (isFirebaseMode) {
@@ -1887,11 +2081,12 @@ export default function App() {
                         items,
                         prices: cloudPriceHistory,
                         income: activeIncomeHistory,
+                        monthlyClosures: activeMonthlyClosures,
                         plansA: activePlansA,
                         plansB: activePlansB,
                         planC: activePlanC,
                         exportedAt: new Date().toISOString(),
-                        version: '3.2.0-firebase',
+                        version: '3.3.0-firebase',
                       })
                     : undefined
                 }
@@ -1899,11 +2094,15 @@ export default function App() {
                   IBGEService.getMetadata('N1[all]', true)
                     .then((meta) => {
                       setIbgeMetadata(meta);
+                      const isLive = meta.sourceMode === 'live' && !meta.isContingencyData;
+                      const isCached = meta.sourceMode === 'cached_live' && !meta.isContingencyData;
                       addToast(
-                        meta.sourceMode === 'live' ? 'success' : 'info',
-                        meta.sourceMode === 'live'
+                        isLive ? 'success' : 'info',
+                        isLive
                           ? 'Série oficial IBGE atualizada em tempo real.'
-                          : 'IBGE indisponível no momento; exibindo dados em cache.'
+                          : isCached
+                          ? 'SIDRA instável no momento; exibindo dados oficiais em cache.'
+                          : 'SIDRA indisponível no momento; exibindo série de contingência offline.'
                       );
                     })
                     .catch(() => {
@@ -1934,6 +2133,7 @@ export default function App() {
             editingItem={editingItem}
             totalMonthlySpend={effectiveSummary.totalMonthlySpend}
             groups={cloudEffectiveGroups}
+            profileMode={activeProfileMode}
           />
         </Suspense>
       )}
@@ -1956,6 +2156,7 @@ export default function App() {
             onClose={() => setIsImportExportOpen(false)}
             items={items}
             activeProfileId={activeProfile.id}
+            profileMode={activeProfileMode}
             onImportItems={handleImportItems}
             onNotify={addToast}
           />

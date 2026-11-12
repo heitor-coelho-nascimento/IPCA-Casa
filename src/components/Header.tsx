@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { EconomicCalculationSummary, FamilyProfile } from '../types';
+import { EconomicCalculationSummary, FamilyProfile, ProfileMode } from '../types';
 import { IBGESeriesMetadata } from '../services/ibge';
 import { formatIsoDateBR } from '../utils/dates';
+import { getProfileModeCopy, resolveProfileMode } from '../utils/profileMode';
 
 export interface HeaderProps {
   isSidebarCollapsed: boolean;
@@ -23,6 +24,7 @@ export interface HeaderProps {
   isDemo?: boolean;
   userAvatarUrl?: string;
   onOpenMobileMenu?: () => void;
+  profileMode?: ProfileMode;
 }
 
 interface DynamicAlert {
@@ -58,7 +60,9 @@ export const Header: React.FC<HeaderProps> = ({
   isDemo = false,
   userAvatarUrl,
   onOpenMobileMenu,
+  profileMode,
 }) => {
+  const modeCopy = getProfileModeCopy(profileMode || activeProfile.profileMode);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showIBGEMetadata, setShowIBGEMetadata] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -222,7 +226,7 @@ export const Header: React.FC<HeaderProps> = ({
                     <div className="flex flex-col min-w-0">
                       <span className="truncate">{p.name}</span>
                       <span className="text-[11px] text-[#76777d] font-normal truncate">
-                        {p.referenceRegion}
+                        {p.referenceRegion} · {resolveProfileMode(p.profileMode) === 'negocio' ? 'Negócio' : 'Pessoal'}
                       </span>
                     </div>
                     {p.id === activeProfile.id && (
@@ -332,8 +336,16 @@ export const Header: React.FC<HeaderProps> = ({
               type="text"
               value={searchTerm}
               onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Buscar na cesta familiar..."
-              aria-label="Buscar na cesta familiar"
+              placeholder={
+                modeCopy.mode === 'negocio'
+                  ? 'Buscar insumo ou custo...'
+                  : 'Buscar na cesta familiar...'
+              }
+              aria-label={
+                modeCopy.mode === 'negocio'
+                  ? 'Buscar insumo ou custo'
+                  : 'Buscar na cesta familiar'
+              }
               className="h-[33px] pl-9 pr-8 w-[224px] rounded-lg bg-[#eff4ff] text-[#0b1c30] placeholder:text-[#45464d] text-sm focus:outline-none focus:bg-[#ffffff] focus:ring-1 focus:ring-[#006a61] transition-all"
             />
             {searchTerm && (

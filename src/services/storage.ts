@@ -4,8 +4,19 @@
  * e integridade referencial dos registros.
  */
 
-import { BasketItem, ConsumptionGroup, FamilyProfile, IncomeRecord, PriceRecord, SubstitutePlanA, EfficiencyPlanB, OpportunityPlanC } from '../types';
+import {
+  BasketItem,
+  ConsumptionGroup,
+  EfficiencyPlanB,
+  FamilyProfile,
+  IncomeRecord,
+  MonthlyClosure,
+  OpportunityPlanC,
+  PriceRecord,
+  SubstitutePlanA,
+} from '../types';
 import { extractIsoDatePrefix, getMonthsAgoIsoDate, getTodayIsoDate } from '../utils/dates';
+import { buildDuplicateSignature } from '../utils/csvImport';
 
 const STORAGE_KEYS = {
   PROFILES: 'ipca_casa_profiles_v1',
@@ -17,10 +28,12 @@ const STORAGE_KEYS = {
   PLANS_A: 'ipca_casa_plans_a_v1',
   PLANS_B: 'ipca_casa_plans_b_v1',
   PLANS_C: 'ipca_casa_plans_c_v1',
+  MONTHLY_CLOSURES: 'ipca_casa_monthly_closures_v1',
   DEMO_SEEDED_ITEMS: 'ipca_casa_demo_seeded_items_v1',
   DEMO_SEEDED_INCOME: 'ipca_casa_demo_seeded_income_v1',
   DEMO_SEEDED_PLANS_A: 'ipca_casa_demo_seeded_plans_a_v1',
   DEMO_SEEDED_PLANS_B: 'ipca_casa_demo_seeded_plans_b_v1',
+  DEMO_SEEDED_CLOSURES: 'ipca_casa_demo_seeded_closures_v1',
 };
 
 export const DEFAULT_GROUPS: ConsumptionGroup[] = [
@@ -43,6 +56,8 @@ export const INITIAL_PROFILES: FamilyProfile[] = [
   {
     id: DEMO_PROFILE_ID,
     name: 'Perfil Demonstrativo (Exemplo)',
+    profileMode: 'pessoal',
+    priceAlertThresholdPercent: 10,
     membersCount: 4,
     referenceRegion: 'Brasil',
     currency: 'BRL',
@@ -53,6 +68,8 @@ export const INITIAL_PROFILES: FamilyProfile[] = [
   {
     id: USER_DEFAULT_PROFILE_ID,
     name: 'Meu Orçamento Familiar',
+    profileMode: 'pessoal',
+    priceAlertThresholdPercent: 10,
     membersCount: 2,
     referenceRegion: 'Brasil',
     currency: 'BRL',
@@ -71,7 +88,7 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     id: 'item-01',
     profileId: DEMO_PROFILE_ID,
     name: 'Aluguel Residencial (Locação)',
-    description: 'Imóvel residencial 3 dormitórios',
+    description: 'Imóvel residencial 3 dormitórios (cota de rateio considerada no exemplo)',
     group: 'Habitação',
     classification: 'Essencial',
     monthlySpend: 1537.90,
@@ -80,7 +97,8 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     oldPriceDate: '2025-11-01',
     currentPriceDate: '2026-11-01',
     unit: 'mensalidade',
-    notes: 'Reajuste anual pelo IGP-M/IPCA negociado',
+    dataOrigin: 'demonstrativo',
+    notes: 'Reajuste anual pelo IGP-M/IPCA negociado; gasto mensal reflete cota parcial familiar (rateio).',
     active: true,
     createdAt: '2025-11-01',
     updatedAt: '2026-11-01',
@@ -98,6 +116,7 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     oldPriceDate: '2025-11-01',
     currentPriceDate: '2026-11-01',
     unit: 'mensalidade',
+    dataOrigin: 'demonstrativo',
     notes: 'Reajuste regulado pela ANS + faixa etária',
     active: true,
     createdAt: '2025-11-01',
@@ -107,16 +126,20 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     id: 'item-03',
     profileId: DEMO_PROFILE_ID,
     name: 'Gasolina Comum',
-    description: 'Consumo aproximado: ~116 litros / mês',
+    description: 'Consumo aproximado: 116 litros / mês (116 × R$ 5,85)',
     group: 'Transportes',
     classification: 'Essencial',
-    monthlySpend: 680.00,
+    monthlySpend: 678.60,
     oldPrice: 5.20,
     currentPrice: 5.85,
     oldPriceDate: '2025-11-01',
     currentPriceDate: '2026-11-01',
     unit: 'litro',
-    notes: 'Posto habitual da Av. Jabaquara',
+    quantity: 116,
+    baseQuantity: 116,
+    consumptionFrequency: 'mensal',
+    dataOrigin: 'demonstrativo',
+    notes: 'Posto habitual da Av. Jabaquara (dado demonstrativo fictício)',
     active: true,
     createdAt: '2025-11-01',
     updatedAt: '2026-11-01',
@@ -125,7 +148,7 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     id: 'item-04',
     profileId: DEMO_PROFILE_ID,
     name: 'Mensalidade Escolar Infantil',
-    description: 'Colégio Fundamental I (2 filhos)',
+    description: 'Colégio Fundamental I (cota parcial considerada no orçamento do exemplo)',
     group: 'Educação',
     classification: 'Essencial',
     monthlySpend: 718.25,
@@ -134,7 +157,8 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     oldPriceDate: '2025-11-01',
     currentPriceDate: '2026-11-01',
     unit: 'mensalidade',
-    notes: 'Rematrícula e apostilas didáticas',
+    dataOrigin: 'demonstrativo',
+    notes: 'Valor unitário referente a 2 filhos; gasto mensal reflete cota parcial neste perfil demonstrativo.',
     active: true,
     createdAt: '2025-11-01',
     updatedAt: '2026-11-01',
@@ -143,16 +167,20 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     id: 'item-05',
     profileId: DEMO_PROFILE_ID,
     name: 'Energia Elétrica Residencial',
-    description: 'Média mensal 460 kWh • Enel SP',
+    description: 'Média mensal 460 kWh × R$ 0,89/kWh • Enel SP',
     group: 'Habitação',
     classification: 'Essencial',
-    monthlySpend: 410.00,
+    monthlySpend: 409.40,
     oldPrice: 0.78,
     currentPrice: 0.89,
     oldPriceDate: '2025-11-01',
     currentPriceDate: '2026-11-01',
     unit: 'kWh',
-    notes: 'Incidência de bandeira amarela nos últimos ciclos',
+    quantity: 460,
+    baseQuantity: 460,
+    consumptionFrequency: 'mensal',
+    dataOrigin: 'demonstrativo',
+    notes: 'Incidência de bandeira amarela nos últimos ciclos (dado demonstrativo)',
     active: true,
     createdAt: '2025-11-01',
     updatedAt: '2026-11-01',
@@ -161,7 +189,7 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     id: 'item-06',
     profileId: DEMO_PROFILE_ID,
     name: 'Carnes Bovinas (Média da Cesta)',
-    description: 'Cortes para consumo semanal (~12 kg/mês)',
+    description: 'Cortes para consumo semanal (~10,2 kg/mês)',
     group: 'Alimentação e bebidas',
     classification: 'Essencial',
     monthlySpend: 490.10,
@@ -170,6 +198,7 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     oldPriceDate: '2025-11-01',
     currentPriceDate: '2026-11-01',
     unit: 'kg',
+    dataOrigin: 'demonstrativo',
     notes: 'Acém, patinho e coxão mole',
     active: true,
     createdAt: '2025-11-01',
@@ -179,7 +208,7 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     id: 'item-07',
     profileId: DEMO_PROFILE_ID,
     name: 'Taxa Condominial Ordinária',
-    description: 'Condomínio Residencial Edifício Flamboyant',
+    description: 'Condomínio Residencial Edifício Flamboyant (cota de rateio no exemplo)',
     group: 'Habitação',
     classification: 'Essencial',
     monthlySpend: 456.30,
@@ -188,7 +217,8 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     oldPriceDate: '2025-11-01',
     currentPriceDate: '2026-11-01',
     unit: 'mensalidade',
-    notes: 'Dissídio coletivo dos porteiros e zelador',
+    dataOrigin: 'demonstrativo',
+    notes: 'Dissídio coletivo dos porteiros e zelador; gasto mensal reflete rateio no exemplo.',
     active: true,
     createdAt: '2025-11-01',
     updatedAt: '2026-11-01',
@@ -200,12 +230,16 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     description: 'Vidro 500ml • Consumo: 1 unidade/mês',
     group: 'Alimentação e bebidas',
     classification: 'Supérfluo',
-    monthlySpend: 48.00,
+    monthlySpend: 46.90,
     oldPrice: 29.90,
     currentPrice: 46.90,
     oldPriceDate: '2025-11-01',
     currentPriceDate: '2026-11-01',
     unit: 'unidade',
+    quantity: 1,
+    baseQuantity: 1,
+    consumptionFrequency: 'mensal',
+    dataOrigin: 'demonstrativo',
     notes: 'Choque de safra e seca na bacia do Mediterrâneo',
     active: true,
     createdAt: '2025-11-01',
@@ -224,6 +258,10 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     oldPriceDate: '2025-11-01',
     currentPriceDate: '2026-11-01',
     unit: 'unidade',
+    quantity: 2,
+    baseQuantity: 2,
+    consumptionFrequency: 'mensal',
+    dataOrigin: 'demonstrativo',
     notes: 'Alta mundial da saca do grão conilon e arábica',
     active: true,
     createdAt: '2025-11-01',
@@ -242,6 +280,10 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     oldPriceDate: '2025-11-01',
     currentPriceDate: '2026-11-01',
     unit: 'unidade',
+    quantity: 2,
+    baseQuantity: 2,
+    consumptionFrequency: 'mensal',
+    dataOrigin: 'demonstrativo',
     notes: 'Pressão climática e exportações',
     active: true,
     createdAt: '2025-11-01',
@@ -260,6 +302,10 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     oldPriceDate: '2025-11-01',
     currentPriceDate: '2026-11-01',
     unit: 'litro',
+    quantity: 12,
+    baseQuantity: 12,
+    consumptionFrequency: 'mensal',
+    dataOrigin: 'demonstrativo',
     notes: 'Queda de safra e importação do Mercosul (deflação alívio)',
     active: true,
     createdAt: '2025-11-01',
@@ -278,6 +324,7 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     oldPriceDate: '2025-11-01',
     currentPriceDate: '2026-11-01',
     unit: 'mensalidade',
+    dataOrigin: 'demonstrativo',
     notes: 'Reajuste anual contratual',
     active: true,
     createdAt: '2025-11-01',
@@ -287,16 +334,20 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     id: 'item-13',
     profileId: DEMO_PROFILE_ID,
     name: 'Água e Esgoto Residencial',
-    description: 'Sabesp SP • Consumo médio 18 m³/mês',
+    description: 'Sabesp SP • Consumo médio 18 m³/mês × R$ 9,16/m³',
     group: 'Habitação',
     classification: 'Essencial',
-    monthlySpend: 165.00,
-    oldPrice: 150.00,
-    currentPrice: 165.00,
+    monthlySpend: 164.88,
+    oldPrice: 8.33,
+    currentPrice: 9.16,
     oldPriceDate: '2025-11-01',
     currentPriceDate: '2026-11-01',
     unit: 'm³',
-    notes: 'Tarifa básica + excedente esgoto',
+    quantity: 18,
+    baseQuantity: 18,
+    consumptionFrequency: 'mensal',
+    dataOrigin: 'demonstrativo',
+    notes: 'Tarifa demonstrativa por m³ (18 m³ × R$ 9,16 = R$ 164,88)',
     active: true,
     createdAt: '2025-11-01',
     updatedAt: '2026-11-01',
@@ -314,6 +365,7 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     oldPriceDate: '2025-11-01',
     currentPriceDate: '2026-11-01',
     unit: 'm³',
+    dataOrigin: 'demonstrativo',
     notes: 'Fatura mensal de consumo de gás',
     active: true,
     createdAt: '2025-11-01',
@@ -332,6 +384,7 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     oldPriceDate: '2025-11-01',
     currentPriceDate: '2026-11-01',
     unit: 'cesta',
+    dataOrigin: 'demonstrativo',
     notes: 'Feira livre e supermercado quinzenal',
     active: true,
     createdAt: '2025-11-01',
@@ -350,6 +403,7 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     oldPriceDate: '2025-11-01',
     currentPriceDate: '2026-11-01',
     unit: 'mês',
+    dataOrigin: 'demonstrativo',
     notes: 'Reajuste anual de medicamentos CMED',
     active: true,
     createdAt: '2025-11-01',
@@ -368,6 +422,7 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     oldPriceDate: '2025-11-01',
     currentPriceDate: '2026-11-01',
     unit: 'mensalidade',
+    dataOrigin: 'demonstrativo',
     notes: 'Ajuste de assinaturas de entretenimento',
     active: true,
     createdAt: '2025-11-01',
@@ -386,6 +441,7 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     oldPriceDate: '2025-11-01',
     currentPriceDate: '2026-11-01',
     unit: 'mês',
+    dataOrigin: 'demonstrativo',
     notes: 'Restaurantes e deliverys',
     active: true,
     createdAt: '2025-11-01',
@@ -404,6 +460,7 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     oldPriceDate: '2025-11-01',
     currentPriceDate: '2026-11-01',
     unit: 'mensalidade',
+    dataOrigin: 'demonstrativo',
     notes: 'Renovação apólice anual',
     active: true,
     createdAt: '2025-11-01',
@@ -422,6 +479,7 @@ export const DEMO_BASKET_ITEMS: BasketItem[] = [
     oldPriceDate: '2025-11-01',
     currentPriceDate: '2026-11-01',
     unit: 'mês',
+    dataOrigin: 'demonstrativo',
     notes: 'Compras sazonais',
     active: true,
     createdAt: '2025-11-01',
@@ -487,29 +545,31 @@ export const DEMO_PLANS_B: EfficiencyPlanB[] = [
     id: 'eff-02',
     profileId: DEMO_PROFILE_ID,
     resourceName: 'Água & Esgoto',
+    resourceCategory: 'agua',
     unit: 'm³',
     tariffPerUnit: 9.16,
     currentConsumption: 18,
     targetConsumption: 15,
-    currentSpend: 165.00,
-    estimatedMonthlySavings: 38.00,
+    currentSpend: 164.88,
+    estimatedMonthlySavings: 27.48,
     progressPercent: 62,
     applied: true,
-    notes: 'Arejadores de torneira instalados e revisão de estanqueidade nas caixas acopladas.',
+    notes: 'Arejadores de torneira instalados e revisão de estanqueidade nas caixas acopladas ((18 - 15) × R$ 9,16 = R$ 27,48/mês).',
   },
   {
     id: 'eff-03',
     profileId: DEMO_PROFILE_ID,
     resourceName: 'Transporte Urbano (Gasolina)',
+    resourceCategory: 'combustivel',
     unit: 'Litros',
     tariffPerUnit: 5.85,
     currentConsumption: 116,
     targetConsumption: 96,
-    currentSpend: 680.00,
+    currentSpend: 678.60,
     estimatedMonthlySavings: 117.00,
     progressPercent: 80,
     applied: true,
-    notes: 'Rodízio solidário de carona escolar e adoção de metrô 2x por semana em trajetos ao centro.',
+    notes: 'Rodízio solidário de carona escolar e adoção de metrô 2x por semana em trajetos ao centro ((116 - 96) × R$ 5,85 = R$ 117,00/mês).',
   },
 ];
 
@@ -520,10 +580,68 @@ export const DEMO_PLAN_C: OpportunityPlanC = {
   nominalAnnualRate: 10.50,
   expectedAnnualInflation: 4.00,
   realAnnualYield: 6.25,
-  projection12Months: 5324.80,
-  projection24Months: 11236.15,
-  projection36Months: 17801.90,
+  projection12Months: 5278.19,
+  projection24Months: 11110.58,
+  projection36Months: 17555.38,
+  isSimulated: true,
 };
+
+export const DEMO_MONTHLY_CLOSURES: MonthlyClosure[] = [
+  {
+    id: 'cls_demo_2026_09',
+    profileId: DEMO_PROFILE_ID,
+    monthKey: '2026-09',
+    monthLabel: 'Set/26',
+    profileMode: 'pessoal',
+    totalMonthlySpend: 7698.40,
+    comparableBaseCost: 7120.00,
+    ipcaCasaPercent: 8.12,
+    ipcaOficialPercent: 3.99,
+    spreadPP: 4.13,
+    itemsCount: 20,
+    eligibleItemsCount: 20,
+    monthlyIncome: 10500,
+    monthlyBalance: 2801.60,
+    topCategory: 'Habitação',
+    topDriverName: 'Azeite de Oliva Extra Virgem 500ml',
+    topDriverChangePercent: 52.84,
+    priceEffectReais: 578.40,
+    quantityEffectReais: 0,
+    mixEffectReais: 0,
+    ibgeSourceMode: 'contingency',
+    ibgeReferenceMonth: 'Set/26',
+    dataOrigin: 'demonstrativo',
+    notes: 'Fechamento demonstrativo ilustrativo — não representa histórico real auditado.',
+    closedAt: '2026-09-30',
+  },
+  {
+    id: 'cls_demo_2026_10',
+    profileId: DEMO_PROFILE_ID,
+    monthKey: '2026-10',
+    monthLabel: 'Out/26',
+    profileMode: 'pessoal',
+    totalMonthlySpend: 7937.18,
+    comparableBaseCost: 7310.20,
+    ipcaCasaPercent: 8.58,
+    ipcaOficialPercent: 4.34,
+    spreadPP: 4.24,
+    itemsCount: 20,
+    eligibleItemsCount: 20,
+    monthlyIncome: 10500,
+    monthlyBalance: 2562.82,
+    topCategory: 'Habitação',
+    topDriverName: 'Azeite de Oliva Extra Virgem 500ml',
+    topDriverChangePercent: 56.86,
+    priceEffectReais: 626.98,
+    quantityEffectReais: 0,
+    mixEffectReais: 0,
+    ibgeSourceMode: 'contingency',
+    ibgeReferenceMonth: 'Out/26',
+    dataOrigin: 'demonstrativo',
+    notes: 'Fechamento demonstrativo ilustrativo — não representa histórico real auditado.',
+    closedAt: '2026-10-31',
+  },
+];
 
 // ==========================================
 // UNIVERSAL KEY-VALUE STORAGE (Browser + Node)
@@ -687,6 +805,11 @@ export class StorageService {
     safeStorage.setItem(STORAGE_KEYS.PLANS_B, JSON.stringify(allPlansB));
 
     this.deletePlanC(profileId);
+
+    const allClosures = safeParseArray<MonthlyClosure>(
+      safeStorage.getItem(STORAGE_KEYS.MONTHLY_CLOSURES)
+    ).filter((c) => c.profileId !== profileId);
+    safeStorage.setItem(STORAGE_KEYS.MONTHLY_CLOSURES, JSON.stringify(allClosures));
 
     return { success: true, message: 'Perfil e registros associados excluídos com sucesso.' };
   }
@@ -1252,6 +1375,85 @@ export class StorageService {
   }
 
   // ==========================================
+  // FECHAMENTOS MENSAIS DE COMPETÊNCIA
+  // ==========================================
+  static getMonthlyClosures(profileId?: string): MonthlyClosure[] {
+    const targetId = profileId || this.getActiveProfileId();
+    const raw = safeStorage.getItem(STORAGE_KEYS.MONTHLY_CLOSURES);
+
+    if (
+      targetId === DEMO_PROFILE_ID &&
+      !safeStorage.getItem(STORAGE_KEYS.DEMO_SEEDED_CLOSURES)
+    ) {
+      const existingNonDemo = safeParseArray<MonthlyClosure>(raw).filter(
+        (c) => c.profileId !== DEMO_PROFILE_ID
+      );
+      safeStorage.setItem(
+        STORAGE_KEYS.MONTHLY_CLOSURES,
+        JSON.stringify([...existingNonDemo, ...DEMO_MONTHLY_CLOSURES])
+      );
+      safeStorage.setItem(STORAGE_KEYS.DEMO_SEEDED_CLOSURES, '1');
+    }
+
+    return safeParseArray<MonthlyClosure>(
+      safeStorage.getItem(STORAGE_KEYS.MONTHLY_CLOSURES)
+    )
+      .filter((c) => c.profileId === targetId)
+      .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+  }
+
+  static saveMonthlyClosure(
+    closure: MonthlyClosure,
+    allowOverwrite = false
+  ): {
+    success: boolean;
+    requiresOverwriteConfirmation?: boolean;
+    closure?: MonthlyClosure;
+  } {
+    const all = safeParseArray<MonthlyClosure>(
+      safeStorage.getItem(STORAGE_KEYS.MONTHLY_CLOSURES)
+    );
+    const existingIdx = all.findIndex(
+      (c) => c.profileId === closure.profileId && c.monthKey === closure.monthKey
+    );
+
+    if (existingIdx >= 0 && !allowOverwrite) {
+      return {
+        success: false,
+        requiresOverwriteConfirmation: true,
+      };
+    }
+
+    const nowIso = new Date().toISOString();
+    const normalized: MonthlyClosure = {
+      ...closure,
+      id:
+        existingIdx >= 0
+          ? all[existingIdx].id
+          : closure.id || `cls_${closure.profileId}_${closure.monthKey}`,
+      createdAt: existingIdx >= 0 ? all[existingIdx].createdAt || nowIso : closure.createdAt || nowIso,
+      updatedAt: nowIso,
+    };
+
+    if (existingIdx >= 0) {
+      all[existingIdx] = normalized;
+    } else {
+      all.push(normalized);
+    }
+
+    safeStorage.setItem(STORAGE_KEYS.MONTHLY_CLOSURES, JSON.stringify(all));
+    return { success: true, closure: normalized };
+  }
+
+  static deleteMonthlyClosure(closureId: string): void {
+    const all = safeParseArray<MonthlyClosure>(
+      safeStorage.getItem(STORAGE_KEYS.MONTHLY_CLOSURES)
+    );
+    const filtered = all.filter((c) => c.id !== closureId);
+    safeStorage.setItem(STORAGE_KEYS.MONTHLY_CLOSURES, JSON.stringify(filtered));
+  }
+
+  // ==========================================
   // RESET, LIMPEZA E CENÁRIOS
   // ==========================================
   static resetToDemoData(): void {
@@ -1336,6 +1538,15 @@ export class StorageService {
     allPlansC[DEMO_PROFILE_ID] = { ...DEMO_PLAN_C, isSimulated: true };
     safeStorage.setItem(STORAGE_KEYS.PLANS_C, JSON.stringify(allPlansC));
 
+    const nonDemoClosures = safeParseArray<MonthlyClosure>(
+      safeStorage.getItem(STORAGE_KEYS.MONTHLY_CLOSURES)
+    ).filter((c) => c.profileId !== DEMO_PROFILE_ID);
+    safeStorage.setItem(
+      STORAGE_KEYS.MONTHLY_CLOSURES,
+      JSON.stringify([...nonDemoClosures, ...DEMO_MONTHLY_CLOSURES])
+    );
+    safeStorage.setItem(STORAGE_KEYS.DEMO_SEEDED_CLOSURES, '1');
+
     const existingGroups = safeParseArray<ConsumptionGroup>(
       safeStorage.getItem(STORAGE_KEYS.GROUPS)
     );
@@ -1385,21 +1596,68 @@ export class StorageService {
       )
     );
     this.deletePlanC(EMPTY_PROFILE_ID);
+    safeStorage.setItem(
+      STORAGE_KEYS.MONTHLY_CLOSURES,
+      JSON.stringify(
+        safeParseArray<MonthlyClosure>(safeStorage.getItem(STORAGE_KEYS.MONTHLY_CLOSURES)).filter(
+          (c) => c.profileId !== EMPTY_PROFILE_ID
+        )
+      )
+    );
   }
 
   static loadDemoBasket(): void {
     this.resetToDemoData();
   }
 
-  static importItems(imported: BasketItem[], targetProfileId?: string): void {
+  static importItems(
+    imported: BasketItem[],
+    targetProfileId?: string,
+    mode: 'merge' | 'replace' = 'merge'
+  ): { importedCount: number; skippedDuplicates: number } {
     const activeId = targetProfileId || this.getActiveProfileId();
-    const existing = this.getAllStoredItems().filter((i) => i.profileId !== activeId);
-    const stamped = imported.map((it) => ({
-      ...it,
-      profileId: activeId,
-      id: it.id || `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    }));
-    safeStorage.setItem(STORAGE_KEYS.BASKET_ITEMS, JSON.stringify([...existing, ...stamped]));
+    const allStored = this.getAllStoredItems();
+    const otherProfileItems = allStored.filter((i) => i.profileId !== activeId);
+    const currentProfileItems = allStored.filter((i) => i.profileId === activeId);
+
+    const existingIds = new Set(currentProfileItems.filter((i) => !i.isArchived).map((i) => i.id));
+    const existingSignatures = new Set(
+      currentProfileItems.filter((i) => !i.isArchived).map((i) => buildDuplicateSignature(i))
+    );
+
+    const baseProfileList = mode === 'replace' ? [] : [...currentProfileItems];
+    const seenBatchSignatures = new Set<string>();
+    let importedCount = 0;
+    let skippedDuplicates = 0;
+
+    for (let idx = 0; idx < imported.length; idx++) {
+      const it = imported[idx];
+      const sig = buildDuplicateSignature(it);
+      const hasExistingDup =
+        mode === 'merge' &&
+        ((it.id && existingIds.has(it.id)) || existingSignatures.has(sig));
+
+      if (hasExistingDup || seenBatchSignatures.has(sig)) {
+        skippedDuplicates += 1;
+        continue;
+      }
+
+      seenBatchSignatures.add(sig);
+      baseProfileList.push({
+        ...it,
+        profileId: activeId,
+        id: it.id || `item-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+        active: it.active !== false,
+        isArchived: false,
+      });
+      importedCount += 1;
+    }
+
+    safeStorage.setItem(
+      STORAGE_KEYS.BASKET_ITEMS,
+      JSON.stringify([...otherProfileItems, ...baseProfileList])
+    );
+    return { importedCount, skippedDuplicates };
   }
 
   // ==========================================

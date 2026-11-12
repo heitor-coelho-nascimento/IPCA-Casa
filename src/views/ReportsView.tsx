@@ -1,14 +1,21 @@
-import React from 'react';
-import { EconomicCalculationSummary, FamilyProfile } from '../types';
+import React, { useMemo, useState } from 'react';
+import { EconomicCalculationSummary, FamilyProfile, MonthlyClosure, ProfileMode } from '../types';
 import { trackExportData } from '../services/analytics';
 import { IBGESeriesMetadata } from '../services/ibge';
+import { buildMonthlyClosureSnapshot, compareMonthlyClosures } from '../services/economics';
+import { ConfirmModal } from '../components/ConfirmModal';
 import { formatDateRangeLabel, formatIsoDateBR, getTodayIsoDate } from '../utils/dates';
+import { getProfileModeCopy } from '../utils/profileMode';
 
 interface ReportsViewProps {
   summary: EconomicCalculationSummary;
   activeProfile?: FamilyProfile;
   ibgeData?: IBGESeriesMetadata | null;
   isDemo: boolean;
+  profileMode?: ProfileMode;
+  monthlyClosures?: MonthlyClosure[];
+  onSaveMonthlyClosure?: (closure: MonthlyClosure, allowOverwrite?: boolean) => void | Promise<void>;
+  onDeleteMonthlyClosure?: (closureId: string) => void | Promise<void>;
 }
 
 function formatSignedPercent(value: number, digits = 2): string {
@@ -31,6 +38,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   activeProfile,
   ibgeData = null,
   isDemo,
+  profileMode = 'pessoal',
+  monthlyClosures = [],
+  onSaveMonthlyClosure,
+  onDeleteMonthlyClosure,
 }) => {
   const {
     totalMonthlySpend,
@@ -44,22 +55,89 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     timeframeLabel,
   } = summary;
 
+  const modeCopy = getProfileModeCopy(profileMode);
+  const isBiz = modeCopy.mode === 'negocio';
+  const todayIso = getTodayIsoDate();
+
+  const [closureMonthKey, setClosureMonthKey] = useState<string>(todayIso.slice(0, 7));
+  const [closureNotes, setClosureNotes] = useState<string>('');
+  const [isSavingClosure, setIsSavingClosure] = useState(false);
+  const [pendingOverwriteClosure, setPendingOverwriteClosure] = useState<MonthlyClosure | null>(null);
+  const [closureToDelete, setClosureToDelete] = useState<MonthlyClosure | null>(null);
+
+  const sortedClosures = useMemo(
+    () => [...monthlyClosures].sort((a, b) => b.monthKey.localeCompare(a.monthKey)),
+    [monthlyClosures]
+  );
+
+  const monthComparison = useMemo(() => {
+    if (sortedClosures.length < 2) return null;
+    return compareMonthlyClosures(sortedClosures[0], sortedClosures[1]);
+  }, [sortedClosures]);
+
   const handlePrint = () => {
     trackExportData('print_pdf');
     window.print();
   };
 
-  const todayIso = getTodayIsoDate();
+  const handleTriggerSaveClosure = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onSaveMonthlyClosure) return;
+    const snapshot = buildMonthlyClosureSnapshot({
+      profileId: activeProfile?.id || 'default',
+      monthKey: closureMonthKey,
+      summary,
+      ibgeData,
+      profileMode: modeCopy.mode,
+      isDemo,
+      notes: closureNotes.trim() || undefined,
+    });
+
+    const alreadyExists = monthlyClosures.some((c) => c.monthKey === snapshot.monthKey);
+    if (alreadyExists) {
+      setPendingOverwriteClosure(snapshot);
+      return;
+    }
+
+    setIsSavingClosure(true);
+    try {
+      await onSaveMonthlyClosure(snapshot, false);
+      setClosureNotes('');
+    } finally {
+      setIsSavingClosure(false);
+    }
+  };
+
+  const handleConfirmOverwriteClosure = async () => {
+    if (!pendingOverwriteClosure || !onSaveMonthlyClosure) return;
+    const target = pendingOverwriteClosure;
+    setPendingOverwriteClosure(null);
+    setIsSavingClosure(true);
+    try {
+      await onSaveMonthlyClosure(target, true);
+      setClosureNotes('');
+    } finally {
+      setIsSavingClosure(false);
+    }
+  };
+
+  const handleConfirmDeleteClosure = async () => {
+    if (!closureToDelete || !onDeleteMonthlyClosure) return;
+    const id = closureToDelete.id;
+    setClosureToDelete(null);
+    await onDeleteMonthlyClosure(id);
+  };
+
   const incomePeriodLabel = purchasingPower.hasIncomeData
     ? formatDateRangeLabel(purchasingPower.initialDate, purchasingPower.finalDate, timeframeLabel)
     : timeframeLabel;
 
   const ibgeOriginLabel =
-    ibgeData?.sourceMode === 'live'
+    ibgeData?.sourceMode === 'live' && !ibgeData.isContingencyData
       ? 'SIDRA/IBGE em tempo real'
       : ibgeData?.sourceMode === 'cached_live'
       ? 'SIDRA/IBGE em cache local'
-      : 'Referência offline auditada';
+      : 'Contingência offline';
 
   return (
     <div className="flex flex-col w-full px-6 lg:px-12 py-8 max-w-[1440px] mx-auto gap-8 print:p-0 print:max-w-none">
@@ -71,10 +149,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </div>
           <div className="flex flex-col">
             <span className="text-sm font-bold text-[#0b1c30]">
-              Relatório Executivo & Laudo Econômico de Inflação Familiar
+              {isBiz
+                ? 'Fechamentos Mensais & Relatório de Custos do Negócio'
+                : 'Fechamentos Mensais & Relatório do Orçamento Familiar'}
             </span>
             <span className="text-xs text-[#45464d]">
-              Documento formatado para prestação de contas, planejamento financeiro e exportação em PDF.
+              Salve snapshots mensais para comparar meses anteriores ou exporte o documento completo em PDF.
             </span>
           </div>
         </div>
@@ -89,6 +169,174 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             <span>Imprimir / Gerar PDF</span>
           </button>
         </div>
+      </div>
+
+      {/* Fechamento Mensal (Snapshots & Comparação Mês a Mês) */}
+      <div className="bg-[#ffffff] rounded-2xl p-6 shadow-sm border border-[#eff4ff] flex flex-col gap-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#eff4ff]">
+          <div>
+            <h2 className="text-base font-bold text-[#0b1c30]">Fechamento Mensal (Snapshots)</h2>
+            <p className="text-xs text-[#45464d]">
+              Registre a fotografia consolidada do mês para acompanhar a evolução de gastos, margem e inflação ao longo do tempo.
+            </p>
+          </div>
+          <span className="font-mono text-xs text-[#006a61] font-semibold">
+            {sortedClosures.length} {sortedClosures.length === 1 ? 'mês fechado' : 'meses fechados'}
+          </span>
+        </div>
+
+        {onSaveMonthlyClosure && (
+          <form
+            onSubmit={handleTriggerSaveClosure}
+            className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end p-4 rounded-xl bg-[#eff4ff] border border-[#e5eeff] print:hidden"
+          >
+            <div className="md:col-span-3 flex flex-col gap-1">
+              <label className="text-[11px] font-mono uppercase text-[#45464d] font-semibold">
+                Competência (Mês/Ano)
+              </label>
+              <input
+                type="month"
+                required
+                value={closureMonthKey}
+                onChange={(e) => setClosureMonthKey(e.target.value)}
+                className="h-10 px-3 rounded-lg border border-[#c6c6cd] bg-[#ffffff] font-mono text-xs text-[#0b1c30] focus:outline-none focus:border-[#000000]"
+              />
+            </div>
+
+            <div className="md:col-span-6 flex flex-col gap-1">
+              <label className="text-[11px] font-mono uppercase text-[#45464d] font-semibold">
+                Observação do Fechamento (opcional)
+              </label>
+              <input
+                type="text"
+                value={closureNotes}
+                onChange={(e) => setClosureNotes(e.target.value)}
+                placeholder={
+                  isBiz
+                    ? 'Ex: Reajuste de farinha e energia no mês'
+                    : 'Ex: Mês com aumento na conta de luz'
+                }
+                className="h-10 px-3 rounded-lg border border-[#c6c6cd] bg-[#ffffff] text-xs text-[#0b1c30] focus:outline-none focus:border-[#000000]"
+              />
+            </div>
+
+            <div className="md:col-span-3">
+              <button
+                type="submit"
+                disabled={isSavingClosure}
+                className="w-full h-10 px-4 rounded-lg bg-[#006a61] text-[#ffffff] hover:bg-[#004e47] text-xs font-mono font-semibold transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+              >
+                <span className="material-symbols-outlined text-[18px]">event_available</span>
+                <span>{isSavingClosure ? 'Salvando...' : 'Fechar Mês e Salvar Snapshot'}</span>
+              </button>
+            </div>
+          </form>
+        )}
+
+        {monthComparison && sortedClosures.length >= 2 && (
+          <div className="p-4 rounded-xl bg-[#131b2e] text-[#ffffff] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex flex-col gap-1">
+              <span className="font-mono text-[11px] uppercase tracking-wider text-[#86f2e4] font-semibold">
+                Comparação Mês a Mês ({sortedClosures[1].monthLabel} → {sortedClosures[0].monthLabel})
+              </span>
+              <p className="text-xs text-[#dae2fd] leading-relaxed">{monthComparison.summaryText}</p>
+            </div>
+            <div className="flex items-center gap-4 shrink-0 font-mono text-xs">
+              <div className="flex flex-col items-end">
+                <span className="text-[10px] text-[#bec6e0]">Diferença de gasto</span>
+                <span
+                  className={`font-bold ${
+                    monthComparison.spendDiffReais > 0 ? 'text-[#ffb4ab]' : 'text-[#86f2e4]'
+                  }`}
+                >
+                  {monthComparison.spendDiffReais >= 0 ? '+R$ ' : '-R$ '}
+                  {formatMoneyBR(Math.abs(monthComparison.spendDiffReais))}
+                </span>
+              </div>
+              <div className="flex flex-col items-end">
+                <span className="text-[10px] text-[#bec6e0]">Variação IPCA-Casa</span>
+                <span className="font-bold text-[#ffffff]">
+                  {formatSignedPP(monthComparison.ipcaCasaDiffPP)}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {sortedClosures.length === 0 ? (
+          <div className="p-6 rounded-xl bg-[#eff4ff]/50 text-center text-xs font-mono text-[#76777d]">
+            Nenhum fechamento mensal salvo ainda. Use o botão acima para salvar o primeiro snapshot.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-[#eff4ff] text-[#45464d] font-mono uppercase tracking-wider">
+                  <th className="py-2.5 px-3 font-semibold">Mês</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">{modeCopy.spendLabel}</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">IPCA-Casa</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">IBGE</th>
+                  <th className="py-2.5 px-3 font-semibold">Maior Vilão</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">Fechado em</th>
+                  {onDeleteMonthlyClosure && (
+                    <th className="py-2.5 px-3 font-semibold text-center print:hidden">Ações</th>
+                  )}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#eff4ff] text-[#0b1c30]">
+                {sortedClosures.map((cls) => (
+                  <tr key={cls.id} className="hover:bg-[#eff4ff]/50">
+                    <td className="py-2.5 px-3 font-mono font-bold">
+                      {cls.monthLabel}
+                      {cls.dataOrigin === 'demonstrativo' && (
+                        <span className="ml-2 px-1.5 py-0.5 rounded bg-[#eff4ff] text-[10px] text-[#45464d] font-normal">
+                          Demo
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-mono font-semibold">
+                      R$ {formatMoneyBR(cls.totalMonthlySpend)}
+                    </td>
+                    <td
+                      className={`py-2.5 px-3 text-right font-mono font-bold ${
+                        cls.ipcaCasaPercent > 0 ? 'text-[#ba1a1a]' : 'text-[#006a61]'
+                      }`}
+                    >
+                      {formatSignedPercent(cls.ipcaCasaPercent)}
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-mono text-[#45464d]">
+                      {formatSignedPercent(cls.ipcaOficialPercent)}
+                    </td>
+                    <td className="py-2.5 px-3 text-[#45464d]">
+                      {cls.topDriverName
+                        ? `${cls.topDriverName}${
+                            typeof cls.topDriverChangePercent === 'number'
+                              ? ` (${formatSignedPercent(cls.topDriverChangePercent, 1)})`
+                              : ''
+                          }`
+                        : cls.topCategory || '—'}
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-mono text-[#76777d]">
+                      {formatIsoDateBR(cls.closedAt)}
+                    </td>
+                    {onDeleteMonthlyClosure && (
+                      <td className="py-2.5 px-3 text-center print:hidden">
+                        <button
+                          type="button"
+                          onClick={() => setClosureToDelete(cls)}
+                          className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-[#76777d] hover:bg-[#ffdad6] hover:text-[#ba1a1a] transition-colors cursor-pointer"
+                          title="Excluir fechamento"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">delete</span>
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Printable Report Document Sheet */}
@@ -385,10 +633,39 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </span>
           </div>
           <span>
-            Página 1 de 1 • Emitido em {formatIsoDateBR(todayIso)} para uso familiar pessoal
+            Página 1 de 1 • Emitido em {formatIsoDateBR(todayIso)} • {modeCopy.modeTitle}
           </span>
         </div>
       </div>
+
+      <ConfirmModal
+        isOpen={Boolean(pendingOverwriteClosure)}
+        title="Substituir Fechamento Existente"
+        message={
+          pendingOverwriteClosure
+            ? `Já existe um fechamento salvo para ${pendingOverwriteClosure.monthLabel}. Deseja substituir o snapshot anterior pelos valores atuais?`
+            : ''
+        }
+        confirmLabel="Sim, Substituir"
+        cancelLabel="Cancelar"
+        onConfirm={handleConfirmOverwriteClosure}
+        onCancel={() => setPendingOverwriteClosure(null)}
+      />
+
+      <ConfirmModal
+        isOpen={Boolean(closureToDelete)}
+        title="Excluir Fechamento Mensal"
+        message={
+          closureToDelete
+            ? `Deseja realmente excluir o snapshot de fechamento de ${closureToDelete.monthLabel}?`
+            : ''
+        }
+        confirmLabel="Sim, Excluir"
+        cancelLabel="Cancelar"
+        isDestructive={true}
+        onConfirm={handleConfirmDeleteClosure}
+        onCancel={() => setClosureToDelete(null)}
+      />
     </div>
   );
 };

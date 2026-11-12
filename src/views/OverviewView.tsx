@@ -1,9 +1,19 @@
-import React, { useMemo, useState } from 'react';
-import { EconomicCalculationSummary } from '../types';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  EconomicCalculationSummary,
+  MonthlyClosure,
+  PriceHistory,
+  ProfileMode,
+} from '../types';
 import { NavTab } from '../components/Sidebar';
 import { IBGESeriesMetadata } from '../services/ibge';
-import { calculateObservedBasketDifference } from '../services/economics';
+import {
+  calculateObservedBasketDifference,
+  detectComparablePriceAlerts,
+  generateStructuredRecommendations,
+} from '../services/economics';
 import { formatDateRangeLabel, formatIsoDateBR, parseIsoDateToLocalTimestamp } from '../utils/dates';
+import { getProfileModeCopy } from '../utils/profileMode';
 
 interface OverviewViewProps {
   summary: EconomicCalculationSummary;
@@ -12,6 +22,11 @@ interface OverviewViewProps {
   onOpenNewItem: () => void;
   onOpenQuickPrice: () => void;
   isDemo: boolean;
+  profileMode?: ProfileMode;
+  priceRecords?: PriceHistory[];
+  monthlyClosures?: MonthlyClosure[];
+  alertThresholdPercent?: number;
+  onUpdateAlertThreshold?: (threshold: number) => void | Promise<void>;
 }
 
 function formatSignedPercent(val: number, digits = 2): string {
@@ -31,8 +46,28 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
   onOpenNewItem,
   onOpenQuickPrice,
   isDemo,
+  profileMode = 'pessoal',
+  priceRecords = [],
+  monthlyClosures = [],
+  alertThresholdPercent = 10,
+  onUpdateAlertThreshold,
 }) => {
   const [showDemoBanner, setShowDemoBanner] = useState(isDemo);
+  const [localThreshold, setLocalThreshold] = useState<number>(alertThresholdPercent);
+
+  useEffect(() => {
+    setLocalThreshold(alertThresholdPercent);
+  }, [alertThresholdPercent]);
+
+  const modeCopy = getProfileModeCopy(profileMode);
+  const isBiz = modeCopy.mode === 'negocio';
+
+  const ibgeOriginBadge =
+    ibgeData?.sourceMode === 'live' && !ibgeData.isContingencyData
+      ? 'SIDRA Ao Vivo'
+      : ibgeData?.sourceMode === 'cached_live'
+      ? 'Cache SIDRA'
+      : 'Contingência Offline';
 
   const {
     totalMonthlySpend,
@@ -76,28 +111,53 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
     return bestIso;
   }, [calculatedItems]);
 
-  // Dados reais do Gráfico 1 (Série IBGE 12M + trajetória proporcional IPCA-Casa)
+  // Dados reais do Gráfico 1 (Série oficial IBGE + apenas pontos reais pessoais quando existirem)
   const historyPoints = useMemo(() => {
     const raw = ibgeData?.history?.slice(-12) || [];
     if (raw.length === 0) return [];
-    const lastIdx = raw.length - 1;
-    const latestOfficial12M = raw[lastIdx]?.accumulated12M ?? ipcaIBGE12M;
-    return raw.map((pt, idx) => {
-      const progress = lastIdx > 0 ? idx / lastIdx : 1;
-      const personalEstimate =
-        latestOfficial12M > 0
-          ? pt.accumulated12M * (1 + ((ipcaCasa12M - latestOfficial12M) / Math.max(1, latestOfficial12M)) * progress)
-          : ipcaCasa12M * progress;
+    const chainedByLabel = new Map(
+      (summary.chainedSeries || []).map((pt) => [pt.label, pt.accumulatedPercent])
+    );
+    const chainedByCode = new Map(
+      (summary.chainedSeries || []).map((pt) => [pt.monthCode, pt.accumulatedPercent])
+    );
+    const closureByLabel = new Map(
+      (monthlyClosures || []).map((c) => [c.monthLabel, c.ipcaCasaPercent])
+    );
+    const closureByCode = new Map(
+      (monthlyClosures || []).map((c) => [c.monthKey.replace('-', ''), c.ipcaCasaPercent])
+    );
+
+    return raw.map((pt) => {
+      const code = pt.monthCode || (pt.date ? pt.date.slice(0, 7).replace('-', '') : '');
+      const realPersonal =
+        chainedByCode.get(code) ??
+        chainedByLabel.get(pt.label) ??
+        closureByCode.get(code) ??
+        closureByLabel.get(pt.label) ??
+        null;
       return {
         label: pt.label,
         official12M: Number.isFinite(pt.accumulated12M) ? pt.accumulated12M : 0,
-        personal12M: Number.isFinite(personalEstimate) ? personalEstimate : 0,
+        personal12M: realPersonal !== null && Number.isFinite(realPersonal) ? realPersonal : null,
       };
     });
-  }, [ibgeData?.history, ipcaCasa12M, ipcaIBGE12M]);
+  }, [ibgeData?.history, summary.chainedSeries, monthlyClosures]);
+
+  const realPersonalPoints = useMemo(
+    () =>
+      historyPoints
+        .map((pt, idx) => ({ idx, val: pt.personal12M }))
+        .filter((p): p is { idx: number; val: number } => p.val !== null),
+    [historyPoints]
+  );
 
   const chartBounds = useMemo(() => {
-    const allVals = historyPoints.flatMap((p) => [p.official12M, p.personal12M]);
+    const allVals = [
+      ...historyPoints.map((p) => p.official12M),
+      ...realPersonalPoints.map((p) => p.val),
+      ipcaCasa12M,
+    ];
     const minVal = Math.min(0, ...allVals);
     const maxVal = Math.max(4, ...allVals);
     const pad = Math.max(0.5, (maxVal - minVal) * 0.15);
@@ -110,7 +170,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
     const count = historyPoints.length;
     const mapX = (idx: number) => (count <= 1 ? 390 : 60 + (idx / (count - 1)) * 660);
     return { yMin, yMax, mapY, mapX };
-  }, [historyPoints]);
+  }, [historyPoints, realPersonalPoints, ipcaCasa12M]);
 
   // Donut dinâmico por ponderação orçamentária real
   const donutSegments = useMemo(() => {
@@ -202,7 +262,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             : spreadPP < -0.2
             ? 'Inflação Pessoal Abaixo do IBGE'
             : 'Inflação Pessoal Alinhada ao País',
-        body: `Seu IPCA-Casa (${formatSignedPercent(ipcaCasa12M)}) vs. IPCA IBGE (${formatSignedPercent(ipcaIBGE12M)}${ibgeData?.isContingencyData ? ' em cache' : ''}).`,
+        body: `Seu IPCA-Casa (${formatSignedPercent(ipcaCasa12M)}) vs. IPCA IBGE (${formatSignedPercent(ipcaIBGE12M)} — ${ibgeOriginBadge}).`,
         badge: `Diferencial: ${spreadPP >= 0 ? '+' : ''}${spreadPP.toFixed(2).replace('.', ',')} p.p.`,
         badgeColor: spreadPP > 0.2 ? 'text-[#ba1a1a]' : 'text-[#006a61]',
       });
@@ -217,8 +277,8 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         title: gap < 0 ? 'Defasagem no Poder de Compra' : 'Ganho Real de Renda Preservado',
         body:
           gap < 0
-            ? `A renda atual está R$ ${formatCurrencyBR(Math.abs(gap))}/mês abaixo do necessário para empatar com sua cesta.`
-            : `Sua renda atual supera em R$ ${formatCurrencyBR(gap)}/mês o necessário para acompanhar a inflação.`,
+            ? `A entrada atual está R$ ${formatCurrencyBR(Math.abs(gap))}/mês abaixo do necessário para empatar com sua cesta.`
+            : `Sua entrada atual supera em R$ ${formatCurrencyBR(gap)}/mês o necessário para acompanhar a inflação.`,
         badge: `Poder de compra: ${formatSignedPercent(purchasingPower.realPurchasingPowerChangePercent ?? 0)}`,
         badgeColor: gap < 0 ? 'text-[#ba1a1a]' : 'text-[#006a61]',
       });
@@ -227,9 +287,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         id: 'income-missing',
         icon: 'payments',
         iconColor: 'text-[#497cff]',
-        title: 'Poder de Compra Não Apurado',
-        body: 'Informe sua renda inicial e atual na aba Impacto no Bolso para calcular o ganho ou perda real salarial.',
-        badge: 'Configurar faixa de renda',
+        title: `${modeCopy.incomeNavLabel} Não Apurado`,
+        body: `Informe sua entrada inicial e atual na aba ${modeCopy.incomeNavLabel} para calcular ganho ou perda real.`,
+        badge: 'Configurar valores mensais',
         badgeColor: 'text-[#497cff]',
       });
     }
@@ -242,9 +302,33 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
     spreadPP,
     ipcaCasa12M,
     ipcaIBGE12M,
-    ibgeData?.isContingencyData,
+    ibgeOriginBadge,
     purchasingPower,
+    modeCopy.incomeNavLabel,
   ]);
+
+  const comparableAlerts = useMemo(
+    () => detectComparablePriceAlerts(calculatedItems, priceRecords, localThreshold),
+    [calculatedItems, priceRecords, localThreshold]
+  );
+
+  const structuredRecs = useMemo(
+    () =>
+      generateStructuredRecommendations({
+        summary,
+        closures: monthlyClosures,
+        profileMode: modeCopy.mode,
+      }),
+    [summary, monthlyClosures, modeCopy.mode]
+  );
+
+  const handleThresholdSelect = async (nextThreshold: number) => {
+    const clean = Math.max(1, Math.min(100, Number.isFinite(nextThreshold) ? nextThreshold : 10));
+    setLocalThreshold(clean);
+    if (onUpdateAlertThreshold) {
+      await onUpdateAlertThreshold(clean);
+    }
+  };
 
   const topGroupName = groupContributions[0]?.group;
   const maxGroupSpend = Math.max(1, ...groupContributions.slice(0, 4).map((g) => g.totalSpend));
@@ -291,17 +375,17 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-mono text-xs uppercase tracking-wider text-[#45464d] font-medium">
-                Relatório Executivo
+                {modeCopy.badgeLabel}
               </span>
               <span className="w-1 h-1 rounded-full bg-[#c6c6cd]" />
               <span className="font-mono text-xs text-[#006a61] font-semibold">
                 {ibgeData?.latestMonthLabel
-                  ? `Ref. IBGE: ${ibgeData.latestMonthLabel}${ibgeData.isContingencyData ? ' (Cache)' : ''}`
+                  ? `Ref. IBGE: ${ibgeData.latestMonthLabel} (${ibgeOriginBadge})`
                   : `Janela: ${timeframeLabel}`}
               </span>
             </div>
             <h1 className="text-3xl lg:text-4xl font-bold text-[#0b1c30] tracking-tight mt-0.5">
-              Termômetro da Inflação Doméstica
+              {isBiz ? 'Painel de Custos e Alta nos Insumos' : 'Termômetro do Seu Custo de Vida'}
             </h1>
           </div>
 
@@ -442,16 +526,137 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           )}
         </div>
 
+        {/* 0. Resumo Mensal em Linguagem Simples (para qualquer usuário entender de primeira) */}
+        {(() => {
+          const monthlyIncome = summary.householdIndicators.netIncome;
+          const monthlyBalance = summary.householdIndicators.monthlyBalance;
+          const biggestRise = topIncreases[0] || topVillains[0];
+          return (
+            <div className="bg-[#ffffff] rounded-2xl p-5 shadow-sm border border-[#e5eeff] flex flex-col gap-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#eff4ff]">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[20px] text-[#006a61]">summarize</span>
+                  <div>
+                    <h2 className="text-base font-bold text-[#0b1c30]">Resumo Mensal</h2>
+                    <p className="text-xs text-[#45464d]">
+                      Visão direta em linguagem simples do seu {modeCopy.recommendationContextLabel} ({timeframeLabel})
+                    </p>
+                  </div>
+                </div>
+                <span className="font-mono text-[11px] bg-[#eff4ff] text-[#45464d] px-2.5 py-1 rounded-md font-semibold">
+                  {isDemo ? 'Dados de Exemplo' : modeCopy.modeTitle}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
+                <div className="p-3.5 rounded-xl bg-[#eff4ff] flex flex-col justify-between gap-1">
+                  <span className="text-[#45464d] font-medium">
+                    {isBiz ? 'Quanto entrou no mês' : 'Quanto entrou de renda'}
+                  </span>
+                  <strong className="text-lg font-mono text-[#0b1c30]">
+                    {monthlyIncome !== null && monthlyIncome > 0
+                      ? `R$ ${formatCurrencyBR(monthlyIncome)}`
+                      : 'Não informado'}
+                  </strong>
+                  <button
+                    type="button"
+                    onClick={() => onNavigateTab('renda-e-poder-de-compra')}
+                    className="text-[11px] text-[#497cff] font-semibold text-left hover:underline cursor-pointer"
+                  >
+                    {monthlyIncome ? 'Atualizar entrada →' : 'Informar entrada →'}
+                  </button>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-[#eff4ff] flex flex-col justify-between gap-1">
+                  <span className="text-[#45464d] font-medium">
+                    {isBiz ? 'Quanto saiu em custos' : 'Quanto saiu em gastos'}
+                  </span>
+                  <strong className="text-lg font-mono text-[#0b1c30]">
+                    R$ {formatCurrencyBR(totalMonthlySpend)}
+                  </strong>
+                  <span className="text-[11px] text-[#76777d]">
+                    {totalItemsCount} {totalItemsCount === 1 ? 'item ativo' : 'itens ativos'}
+                  </span>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-[#eff4ff] flex flex-col justify-between gap-1">
+                  <span className="text-[#45464d] font-medium">
+                    {isBiz ? 'Saldo / Margem do mês' : 'Quanto sobrou ou faltou'}
+                  </span>
+                  <strong
+                    className={`text-lg font-mono ${
+                      monthlyBalance === null
+                        ? 'text-[#76777d]'
+                        : monthlyBalance >= 0
+                        ? 'text-[#006a61]'
+                        : 'text-[#ba1a1a]'
+                    }`}
+                  >
+                    {monthlyBalance === null
+                      ? 'Aguardando entrada'
+                      : `${monthlyBalance >= 0 ? '+R$ ' : '-R$ '}${formatCurrencyBR(Math.abs(monthlyBalance))}`}
+                  </strong>
+                  <span className="text-[11px] text-[#76777d]">
+                    {monthlyBalance === null
+                      ? 'Preencha quanto entra'
+                      : monthlyBalance >= 0
+                      ? 'Saldo positivo no mês'
+                      : 'Saídas maiores que entradas'}
+                  </span>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-[#eff4ff] flex flex-col justify-between gap-1">
+                  <span className="text-[#45464d] font-medium">O que mais subiu</span>
+                  <strong className="text-sm font-bold text-[#0b1c30] truncate" title={biggestRise?.name}>
+                    {biggestRise ? biggestRise.name : 'Sem comparação ainda'}
+                  </strong>
+                  <span
+                    className={`text-[11px] font-mono font-bold ${
+                      (biggestRise?.priceChangePercent ?? 0) > 0 ? 'text-[#ba1a1a]' : 'text-[#006a61]'
+                    }`}
+                  >
+                    {biggestRise && biggestRise.priceChangePercent !== null
+                      ? `${formatSignedPercent(biggestRise.priceChangePercent, 1)} (${biggestRise.group.split(' ')[0]})`
+                      : 'Adicione preço anterior'}
+                  </span>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-[#eff4ff] flex flex-col justify-between gap-1">
+                  <span className="text-[#45464d] font-medium">Impacto real no mês</span>
+                  <strong
+                    className={`text-lg font-mono ${
+                      summary.budgetDecomposition.priceEffectReais > 0
+                        ? 'text-[#ba1a1a]'
+                        : 'text-[#006a61]'
+                    }`}
+                  >
+                    {eligibleItemsCount > 0
+                      ? `${summary.budgetDecomposition.priceEffectReais >= 0 ? '+R$ ' : '-R$ '}${formatCurrencyBR(
+                          Math.abs(summary.budgetDecomposition.priceEffectReais)
+                        )}`
+                      : 'R$ 0,00'}
+                  </strong>
+                  <span className="text-[11px] text-[#76777d]">
+                    {eligibleItemsCount > 0
+                      ? 'Diferença pelos preços atuais'
+                      : 'Sem itens comparáveis'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* 1. Grid de Indicadores Principais (KPIs) */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
           {/* KPI 1: Gasto Mensal Total */}
           <div className="bg-[#ffffff] rounded-xl p-4 shadow-sm flex flex-col justify-between border border-[#eff4ff]">
             <div className="flex items-center justify-between text-[#45464d]">
-              <span className="font-mono text-xs uppercase tracking-wider font-semibold">Quanto você gasta</span>
+              <span className="font-mono text-xs uppercase tracking-wider font-semibold">{modeCopy.spendLabel}</span>
               <span className="material-symbols-outlined text-[18px]">payments</span>
             </div>
             <div className="my-2">
-              <span className="text-[11px] text-[#45464d] font-medium">Gasto Mensal Atual</span>
+              <span className="text-[11px] text-[#45464d] font-medium">{modeCopy.spendLabel}</span>
               <div className="text-2xl font-bold text-[#0b1c30] tracking-tight tabular-nums">
                 R$ {intPart}
                 <span className="text-[#45464d] font-normal text-lg">,{decPart}</span>
@@ -466,7 +671,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           {/* KPI 2: Aumento dos Seus Gastos (IPCA-Casa) */}
           <div className="bg-[#ffffff] rounded-xl p-4 shadow-sm flex flex-col justify-between border border-[#eff4ff]">
             <div className="flex items-center justify-between text-[#45464d]">
-              <span className="font-mono text-xs uppercase tracking-wider font-semibold">Sua Inflação</span>
+              <span className="font-mono text-xs uppercase tracking-wider font-semibold">{modeCopy.inflationLabel}</span>
               <span
                 className={`material-symbols-outlined text-[18px] ${
                   ipcaCasa12M > 0 ? 'text-[#ba1a1a]' : 'text-[#006a61]'
@@ -632,11 +837,13 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                 <div className="flex items-center gap-2">
                   <h2 className="text-lg font-semibold text-[#0b1c30]">Histórico Acumulado 12 Meses</h2>
                   <span className="font-mono text-xs bg-[#eff4ff] px-2 py-0.5 rounded text-[#45464d]">
-                    {ibgeData?.sourceMode === 'live' ? 'SIDRA Ao Vivo' : 'SIDRA Cache'}
+                    {ibgeOriginBadge}
                   </span>
                 </div>
                 <p className="text-xs text-[#45464d] mt-0.5">
-                  Série oficial IBGE (12 meses) comparada à referência atual da sua cesta familiar
+                  {realPersonalPoints.length >= 2
+                    ? 'Série oficial IBGE (12M) comparada aos seus pontos históricos reais apurados.'
+                    : 'Série oficial IBGE (12M) + ponto atual medido da sua cesta (sem curva sintética interpolada).'}
                 </p>
               </div>
               <div className="flex items-center gap-4 font-mono text-xs">
@@ -684,13 +891,6 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                     );
                   })}
 
-                  <polygon
-                    fill="url(#ipcaCasaGrad)"
-                    points={`${historyPoints
-                      .map((p, idx) => `${chartBounds.mapX(idx)},${chartBounds.mapY(p.personal12M)}`)
-                      .join(' ')} ${chartBounds.mapX(historyPoints.length - 1)},230 ${chartBounds.mapX(0)},230`}
-                  />
-
                   <polyline
                     fill="none"
                     stroke="#497cff"
@@ -701,19 +901,29 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                       .join(' ')}
                   />
 
-                  <polyline
-                    fill="none"
-                    stroke="#000000"
-                    strokeWidth="3"
-                    points={historyPoints
-                      .map((p, idx) => `${chartBounds.mapX(idx)},${chartBounds.mapY(p.personal12M)}`)
-                      .join(' ')}
-                  />
+                  {realPersonalPoints.length >= 2 && (
+                    <>
+                      <polygon
+                        fill="url(#ipcaCasaGrad)"
+                        points={`${realPersonalPoints
+                          .map((p) => `${chartBounds.mapX(p.idx)},${chartBounds.mapY(p.val)}`)
+                          .join(' ')} ${chartBounds.mapX(realPersonalPoints[realPersonalPoints.length - 1].idx)},230 ${chartBounds.mapX(realPersonalPoints[0].idx)},230`}
+                      />
+                      <polyline
+                        fill="none"
+                        stroke="#000000"
+                        strokeWidth="3"
+                        points={realPersonalPoints
+                          .map((p) => `${chartBounds.mapX(p.idx)},${chartBounds.mapY(p.val)}`)
+                          .join(' ')}
+                      />
+                    </>
+                  )}
 
                   {(() => {
                     const lastIdx = historyPoints.length - 1;
                     const lastX = chartBounds.mapX(lastIdx);
-                    const lastPersonalY = chartBounds.mapY(historyPoints[lastIdx].personal12M);
+                    const lastPersonalY = chartBounds.mapY(ipcaCasa12M);
                     const lastOfficialY = chartBounds.mapY(historyPoints[lastIdx].official12M);
                     return (
                       <>
@@ -753,10 +963,10 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               <div className="flex items-center gap-2">
                 <span className={`w-2 h-2 rounded-full ${spreadPP > 0 ? 'bg-[#ba1a1a]' : 'bg-[#006a61]'}`} />
                 <span>
-                  {totalItemsCount === 0
-                    ? 'Cadastre seus itens para comparar sua inflação domiciliar com o IBGE.'
+                  {realPersonalPoints.length < 2
+                    ? 'A curva pessoal histórica é construída automaticamente conforme você registra cotações ou fechamentos mensais.'
                     : topGroupName
-                    ? `Maior concentração orçamentária atual no grupo "${topGroupName}".`
+                    ? `Maior concentração atual no grupo "${topGroupName}".`
                     : 'Base calculada sobre os itens cadastrados na sua cesta.'}
                 </span>
               </div>
@@ -1068,9 +1278,69 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           <div className="lg:col-span-4 flex flex-col gap-4">
             <div className="bg-[#ffffff] rounded-xl p-5 shadow-sm border border-[#eff4ff]">
               <div className="flex items-center justify-between pb-2 border-b border-[#eff4ff]">
-                <h2 className="text-base font-semibold text-[#0b1c30]">Alertas da Sua Cesta</h2>
-                <span className="material-symbols-outlined text-[#76777d] text-[20px]">notifications_active</span>
+                <h2 className="text-base font-semibold text-[#0b1c30]">Alertas de Aumento de Preço</h2>
+                <span className="material-symbols-outlined text-[#ba1a1a] text-[20px]">notifications_active</span>
               </div>
+
+              {/* Limite configurável para alertas comparáveis */}
+              <div className="mt-3 p-2.5 rounded-lg bg-[#eff4ff] flex flex-col gap-2 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[#45464d] font-medium">Avisar quando subir acima de:</span>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={localThreshold}
+                      onChange={(e) => handleThresholdSelect(parseFloat(e.target.value) || 10)}
+                      className="w-14 h-7 px-2 rounded border border-[#c6c6cd] bg-[#ffffff] font-mono text-xs text-right focus:outline-none focus:border-[#000000]"
+                    />
+                    <span className="font-mono text-[#45464d]">%</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {[5, 10, 15, 20].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => handleThresholdSelect(preset)}
+                      className={`px-2 py-0.5 rounded font-mono text-[11px] font-semibold cursor-pointer transition-colors ${
+                        localThreshold === preset
+                          ? 'bg-[#000000] text-[#ffffff]'
+                          : 'bg-[#ffffff] text-[#45464d] hover:bg-[#dce9ff]'
+                      }`}
+                    >
+                      +{preset}%
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {comparableAlerts.length > 0 ? (
+                <div className="flex flex-col gap-2 mt-3 text-xs">
+                  {comparableAlerts.slice(0, 4).map((al) => (
+                    <div
+                      key={al.itemId}
+                      className="p-3 rounded-lg bg-[#ffdad6]/35 border border-[#ba1a1a]/20 flex flex-col gap-1"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-[#0b1c30] truncate">{al.itemName}</span>
+                        <span className="font-mono font-bold text-[#ba1a1a] shrink-0">
+                          +{al.percentChange.toFixed(1).replace('.', ',')}%
+                        </span>
+                      </div>
+                      <span className="text-[#45464d]">
+                        Subiu R$ {formatCurrencyBR(al.absoluteChangeReais)}/{al.unit} (impacto de +R${' '}
+                        {formatCurrencyBR(al.monthlyImpactReais)}/mês)
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-3 p-3 rounded-lg bg-[#86f2e4]/20 text-xs text-[#006a61] font-medium">
+                  Nenhum item comparável subiu {localThreshold}% ou mais no período.
+                </div>
+              )}
 
               <div className="flex flex-col gap-2.5 mt-3 text-xs">
                 {smartAlerts.map((alertItem) => (
@@ -1090,11 +1360,11 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               </div>
             </div>
 
-            {/* Diagnóstico da Família Card */}
+            {/* Diagnóstico da Família / Negócio Card */}
             <div className="bg-[#131b2e] text-[#ffffff] rounded-xl p-5 shadow-sm flex flex-col justify-between">
               <div className="flex items-center justify-between">
                 <span className="font-mono text-[11px] uppercase tracking-wider text-[#dae2fd] font-semibold">
-                  Diagnóstico da Família
+                  {isBiz ? 'Saúde da Margem' : 'Diagnóstico do Bolso'}
                 </span>
                 <span className="material-symbols-outlined text-[#86f2e4] text-[20px]">shield</span>
               </div>
@@ -1104,14 +1374,14 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                     ? purchasingPower.monthlyPurchasingDeficitOrGain < 0
                       ? `Déficit Real de R$ ${formatCurrencyBR(Math.abs(purchasingPower.monthlyPurchasingDeficitOrGain))}/mês`
                       : `Ganho Real de +R$ ${formatCurrencyBR(purchasingPower.monthlyPurchasingDeficitOrGain)}/mês`
-                    : 'Poder de Compra Aguardando Renda'}
+                    : `${modeCopy.incomeNavLabel} Aguardando Dados`}
                 </h3>
                 <p className="text-xs text-[#bec6e0] mt-1 leading-relaxed">
                   {purchasingPower.monthlyPurchasingDeficitOrGain === null
-                    ? 'Informe sua renda na aba Renda & Poder de Compra para calcular quanto falta ou sobra em relação à inflação da casa.'
+                    ? `Informe suas entradas na aba ${modeCopy.incomeNavLabel} para calcular quanto falta ou sobra frente à variação de preços.`
                     : purchasingPower.monthlyPurchasingDeficitOrGain < 0
-                    ? 'Para recompor o poder de compra mantendo a mesma cesta, avalie ajustes salariais ou substituições táticas de itens.'
-                    : 'Sua renda superou a variação da sua cesta familiar. Você pode direcionar o excedente nas Estratégias de Economia.'}
+                    ? 'Para recompor sua margem mantendo a mesma cesta, avalie ajustes de preço ou substituições táticas de itens.'
+                    : 'Suas entradas superaram a variação da cesta. Você pode simular economias e reservas na aba Estratégias.'}
                 </p>
               </div>
               <button
@@ -1127,12 +1397,81 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               >
                 <span>
                   {purchasingPower.monthlyPurchasingDeficitOrGain === null
-                    ? 'Informar Renda Familiar'
+                    ? `Ir para ${modeCopy.incomeNavLabel}`
                     : 'Simular Estratégias de Economia'}
                 </span>
                 <span className="material-symbols-outlined text-[16px]">tune</span>
               </button>
             </div>
+          </div>
+        </div>
+
+        {/* 4.5. Recomendações Explicadas (Preço vs Quantidade vs Composição vs Equilíbrio) */}
+        <div className="bg-[#ffffff] rounded-2xl p-6 shadow-sm border border-[#eff4ff] flex flex-col gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#eff4ff]">
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-[20px] text-[#497cff]">tips_and_updates</span>
+              <div>
+                <h2 className="text-base font-bold text-[#0b1c30]">Recomendações Explicadas</h2>
+                <p className="text-xs text-[#45464d]">
+                  Conclusões práticas baseadas apenas nos seus números, separando aumento de preço, quantidade, categoria e equilíbrio.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {!structuredRecs.hasSufficientData && structuredRecs.insufficientReason && (
+            <p className="text-xs text-[#45464d] bg-[#eff4ff] p-3 rounded-lg">
+              {structuredRecs.insufficientReason}
+            </p>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {structuredRecs.recommendations.map((rec) => {
+              const badgeMap: Record<string, string> = {
+                preco: 'Efeito Preço',
+                quantidade: 'Efeito Quantidade',
+                composicao: 'Composição',
+                equilibrio: 'Equilíbrio',
+                insuficiente: 'Dados Pendentes',
+              };
+              const colorMap: Record<string, string> = {
+                preco: 'bg-[#ffdad6]/40 text-[#ba1a1a]',
+                quantidade: 'bg-[#e5eeff] text-[#0b1c30]',
+                composicao: 'bg-[#eff4ff] text-[#497cff]',
+                equilibrio: 'bg-[#86f2e4]/35 text-[#006a61]',
+                insuficiente: 'bg-[#eff4ff] text-[#45464d]',
+              };
+              return (
+                <div
+                  key={rec.id}
+                  className="p-4 rounded-xl bg-[#eff4ff]/70 border border-[#e5eeff] flex flex-col justify-between gap-3"
+                >
+                  <div className="flex flex-col gap-1.5">
+                    <span
+                      className={`w-fit px-2 py-0.5 rounded font-mono text-[10px] font-bold uppercase ${
+                        colorMap[rec.driverType] || 'bg-[#eff4ff] text-[#45464d]'
+                      }`}
+                    >
+                      {badgeMap[rec.driverType] || rec.driverType}
+                    </span>
+                    <h3 className="text-sm font-bold text-[#0b1c30]">{rec.title}</h3>
+                    <p className="text-xs text-[#45464d] leading-relaxed">{rec.summary}</p>
+                    <span className="text-[11px] font-mono text-[#76777d]">{rec.effectDetail}</span>
+                  </div>
+                  {rec.actionLabel && rec.targetTab && (
+                    <button
+                      type="button"
+                      onClick={() => onNavigateTab(rec.targetTab as NavTab)}
+                      className="self-start text-xs font-semibold text-[#0b1c30] hover:text-[#497cff] flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>{rec.actionLabel}</span>
+                      <span className="material-symbols-outlined text-[15px]">arrow_forward</span>
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 

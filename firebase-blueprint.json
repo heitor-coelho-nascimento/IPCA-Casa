@@ -37,6 +37,8 @@
         "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
         "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
         "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "profileMode": { "type": "string", "enum": ["pessoal", "negocio"] },
+        "priceAlertThresholdPercent": { "type": "number" },
         "membersCount": { "type": "integer" },
         "referenceRegion": { "type": "string", "minLength": 1, "maxLength": 120 },
         "currency": { "type": "string", "minLength": 1, "maxLength": 10 },
@@ -231,6 +233,58 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "userId", "profileId", "planType", "title", "applied", "monthlySavings", "createdAt", "updatedAt"]
+    },
+    "MonthlyClosure": {
+      "title": "Fechamento Mensal",
+      "description": "Snapshot consolidado de fechamento mensal do orçamento ou custo operacional para comparação histórica.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "profileId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "monthKey": { "type": "string", "minLength": 7, "maxLength": 10 },
+        "monthLabel": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "profileMode": { "type": "string", "enum": ["pessoal", "negocio"] },
+        "totalMonthlySpend": { "type": "number" },
+        "comparableBaseCost": { "type": "number" },
+        "ipcaCasaPercent": { "type": "number" },
+        "ipcaOficialPercent": { "type": "number" },
+        "spreadPP": { "type": "number" },
+        "itemsCount": { "type": "integer" },
+        "eligibleItemsCount": { "type": "integer" },
+        "monthlyIncome": { "type": "number" },
+        "monthlyBalance": { "type": "number" },
+        "topCategory": { "type": "string", "maxLength": 120 },
+        "topDriverName": { "type": "string", "maxLength": 200 },
+        "topDriverChangePercent": { "type": "number" },
+        "priceEffectReais": { "type": "number" },
+        "quantityEffectReais": { "type": "number" },
+        "mixEffectReais": { "type": "number" },
+        "ibgeSourceMode": { "type": "string", "enum": ["live", "cached_live", "contingency"] },
+        "ibgeReferenceMonth": { "type": "string", "maxLength": 32 },
+        "dataOrigin": { "type": "string", "enum": ["usuario", "oficial_ibge", "demonstrativo", "estimado", "simulado", "cache"] },
+        "notes": { "type": "string", "maxLength": 500 },
+        "closedAt": { "type": "string", "maxLength": 32 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "userId",
+        "profileId",
+        "monthKey",
+        "monthLabel",
+        "totalMonthlySpend",
+        "comparableBaseCost",
+        "ipcaCasaPercent",
+        "ipcaOficialPercent",
+        "spreadPP",
+        "itemsCount",
+        "eligibleItemsCount",
+        "closedAt",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -265,6 +319,10 @@
     "/users/{userId}/strategies/{strategyId}": {
       "schema": { "$ref": "#/entities/SavingStrategy" },
       "description": "Estratégias de economia doméstica (Planos A, B e C) do usuário."
+    },
+    "/users/{userId}/monthlyClosures/{closureId}": {
+      "schema": { "$ref": "#/entities/MonthlyClosure" },
+      "description": "Snapshots históricos de fechamento mensal pertencentes ao usuário."
     }
   }
 }
