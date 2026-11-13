@@ -415,7 +415,7 @@ export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
         </div>
 
         {/* Right Column: Historical details for the selected item */}
-        <div className="lg:col-span-8 flex flex-col gap-6">
+        <div className="lg:col-span-8 min-w-0 flex flex-col gap-6">
           {selectedItem ? (
             <>
               {/* Highlight KPI Grid */}
@@ -474,7 +474,7 @@ export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
               </div>
 
               {/* Price Timeline Visual */}
-              <div className="bg-[#ffffff] rounded-xl p-6 shadow-sm border border-[#eff4ff] flex flex-col gap-4">
+              <div className="bg-[#ffffff] rounded-xl p-6 shadow-sm border border-[#eff4ff] flex flex-col gap-4 min-w-0">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
                     <h3 className="text-base font-bold text-[#0b1c30]">
@@ -503,47 +503,53 @@ export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
                 </div>
 
                 {/* Bar Visual Representation of Price Evolution (Comparable records only) */}
-                <div className="w-full min-h-48 bg-[#eff4ff] rounded-xl p-4 flex flex-col justify-between border border-[#e5eeff] relative overflow-hidden">
-                  <div className="flex justify-between text-[11px] font-mono text-[#76777d] z-10">
+                <div className="w-full min-w-0 min-h-48 h-auto bg-[#eff4ff] rounded-xl p-4 flex flex-col justify-between gap-3 border border-[#e5eeff] relative">
+                  <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11px] font-mono text-[#76777d] z-10">
                     <span>Teto: R$ {formatMoneyBR(maxPrice * 1.05)}</span>
                     <span>Piso: R$ {formatMoneyBR(minPrice * 0.95)}</span>
                   </div>
 
                   {comparableEntries.length === 0 ? (
-                    <div className="h-28 flex items-center justify-center text-center px-4 text-xs font-mono text-[#76777d]">
+                    <div className="min-h-28 py-4 flex items-center justify-center text-center px-4 text-xs font-mono text-[#76777d]">
                       {priceHistory.length > 0
                         ? 'Nenhuma cotação compatível com a unidade do item para compor a curva.'
                         : 'Nenhuma cotação histórica registrada ainda. Use "Registrar Nova Cotação" para construir a linha do tempo.'}
                     </div>
                   ) : (
-                    <div className="h-32 w-full overflow-x-auto flex items-end justify-around gap-3 px-4 pb-2 relative z-10">
-                      {comparableEntries.map((entry, idx) => {
-                        const spread = maxPrice - minPrice;
-                        const heightPx =
-                          spread === 0
-                            ? 60
-                            : Math.round(
-                                Math.max(18, Math.min(88, ((entry.normalizedPrice - minPrice) / spread) * 70 + 18))
-                              );
-                        return (
-                          <div key={entry.record.id || idx} className="flex flex-col items-center gap-1 group shrink-0">
-                            <span className="text-[10px] font-mono font-bold text-[#0b1c30] group-hover:scale-105 transition-transform">
-                              R$ {formatMoneyBR(entry.normalizedPrice)}/{entry.canonicalUnit}
-                            </span>
+                    <div className="w-full min-w-0 overflow-x-auto pb-1 relative z-10">
+                      <div className="min-w-full w-max min-h-[156px] flex items-end justify-around gap-4 sm:gap-5 px-2 sm:px-4 pt-4 pb-2">
+                        {comparableEntries.map((entry, idx) => {
+                          const spread = maxPrice - minPrice;
+                          const heightPx =
+                            spread === 0
+                              ? 60
+                              : Math.round(
+                                  Math.max(18, Math.min(88, ((entry.normalizedPrice - minPrice) / spread) * 70 + 18))
+                                );
+                          return (
                             <div
-                              className="w-8 bg-[#006a61] rounded-t-md transition-all group-hover:bg-[#497cff]"
-                              style={{ height: `${heightPx}px` }}
-                            />
-                            <span className="text-[9px] font-mono text-[#76777d] mt-1">
-                              {formatMonthYearLabel(entry.record.referenceDate)}
-                            </span>
-                          </div>
-                        );
-                      })}
+                              key={entry.record.id || idx}
+                              className="flex flex-col items-center justify-end gap-1.5 group shrink-0 min-w-[64px]"
+                            >
+                              <span className="text-[10px] font-mono font-bold text-[#0b1c30] whitespace-nowrap leading-tight group-hover:scale-105 transition-transform">
+                                R$ {formatMoneyBR(entry.normalizedPrice)}/{entry.canonicalUnit}
+                              </span>
+                              <div
+                                className="w-8 sm:w-9 bg-[#006a61] rounded-t-md transition-all group-hover:bg-[#497cff]"
+                                style={{ height: `${heightPx}px` }}
+                                title={`${formatIsoDateBR(entry.record.referenceDate)}: R$ ${formatMoneyBR(entry.normalizedPrice)}/${entry.canonicalUnit}`}
+                              />
+                              <span className="text-[10px] font-mono text-[#76777d] whitespace-nowrap leading-tight mt-0.5">
+                                {formatMonthYearLabel(entry.record.referenceDate)}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
 
-                  <div className="flex justify-between items-center text-[10px] font-mono text-[#45464d] pt-2 border-t border-[#e5eeff] z-10">
+                  <div className="flex flex-wrap justify-between items-center gap-x-4 gap-y-1 text-[10px] font-mono text-[#45464d] pt-2 border-t border-[#e5eeff] z-10">
                     <span>Comparação normalizada por {comparableEntries[0]?.canonicalUnit || itemBaseUnit}</span>
                     <span>
                       {comparableEntries.length} comparáveis de {priceHistory.length} registradas
