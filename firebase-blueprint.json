@@ -285,6 +285,105 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "ConsentRecord": {
+      "title": "Registro de Consentimento LGPD (CMP)",
+      "description": "Registro auditável das preferências granulares de cookies e analytics do titular.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "anonymousConsentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "essenciais": { "type": "boolean" },
+        "analytics": { "type": "boolean" },
+        "marketing": { "type": "boolean" },
+        "cmpVersion": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "policyVersion": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "source": { "type": "string", "enum": ["banner", "modal", "privacy_page", "settings", "revocation"] },
+        "decidedAt": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "userId",
+        "anonymousConsentId",
+        "essenciais",
+        "analytics",
+        "marketing",
+        "cmpVersion",
+        "policyVersion",
+        "source",
+        "decidedAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "TermsAcceptance": {
+      "title": "Aceite dos Termos de Uso e Política de Privacidade",
+      "description": "Evidência versionada de ciência e concordância do titular com os Termos de Uso e Política de Privacidade.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "termsVersion": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "policyVersion": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "acceptedTerms": { "type": "boolean" },
+        "acceptedPrivacy": { "type": "boolean" },
+        "acceptanceMethod": { "type": "string", "enum": ["email_register", "google_signin", "post_login_gate"] },
+        "acceptedAt": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "userId",
+        "termsVersion",
+        "policyVersion",
+        "acceptedTerms",
+        "acceptedPrivacy",
+        "acceptanceMethod",
+        "acceptedAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PrivacyRequest": {
+      "title": "Solicitação de Direitos do Titular (Art. 18 LGPD)",
+      "description": "Registro formal de exercício de direitos do titular previsto no art. 18 da Lei nº 13.709/2018.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "requestType": {
+          "type": "string",
+          "enum": [
+            "confirmacao_acesso",
+            "correcao",
+            "anonimizacao_eliminacao",
+            "portabilidade",
+            "revogacao_consentimento",
+            "informacao_compartilhamento",
+            "revisao_oposicao"
+          ]
+        },
+        "status": { "type": "string", "enum": ["registrada", "em_analise", "atendida", "cancelada"] },
+        "details": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "resolutionNote": { "type": "string", "maxLength": 500 },
+        "requestedAt": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "userId",
+        "requestType",
+        "status",
+        "details",
+        "requestedAt",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -323,6 +422,18 @@
     "/users/{userId}/monthlyClosures/{closureId}": {
       "schema": { "$ref": "#/entities/MonthlyClosure" },
       "description": "Snapshots históricos de fechamento mensal pertencentes ao usuário."
+    },
+    "/users/{userId}/consentRecords/{recordId}": {
+      "schema": { "$ref": "#/entities/ConsentRecord" },
+      "description": "Registros imutáveis de consentimento granular de cookies/analytics do titular."
+    },
+    "/users/{userId}/termsAcceptances/{acceptanceId}": {
+      "schema": { "$ref": "#/entities/TermsAcceptance" },
+      "description": "Evidências versionadas de aceite dos Termos de Uso e Política de Privacidade."
+    },
+    "/users/{userId}/privacyRequests/{requestId}": {
+      "schema": { "$ref": "#/entities/PrivacyRequest" },
+      "description": "Solicitações formais de exercício dos direitos previstos no art. 18 da LGPD."
     }
   }
 }

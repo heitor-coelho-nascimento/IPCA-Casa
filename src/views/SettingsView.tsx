@@ -4,6 +4,7 @@ import { StorageService } from '../services/storage';
 import { IBGESeriesMetadata, IBGEService } from '../services/ibge';
 import { trackExportData } from '../services/analytics';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { PrivacyCenterSection } from '../components/PrivacyCenterSection';
 import { formatIsoDateBR, getTodayIsoDate } from '../utils/dates';
 import { getProfileModeCopy, resolveProfileMode } from '../utils/profileMode';
 
@@ -31,6 +32,16 @@ interface SettingsViewProps {
   currentUser?: UserAccount | null;
   isFirebaseMode?: boolean;
   onExportBackupData?: () => unknown;
+  dataCounts?: {
+    profiles: number;
+    items: number;
+    prices: number;
+    incomes: number;
+    strategies: number;
+    closures: number;
+  };
+  onAccountDeleted?: () => void;
+  onOpenPrivacyPolicy?: () => void;
 }
 
 const REGION_OPTIONS = [
@@ -72,6 +83,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   currentUser = null,
   isFirebaseMode = false,
   onExportBackupData,
+  dataCounts,
+  onAccountDeleted,
+  onOpenPrivacyPolicy,
 }) => {
   const [profileName, setProfileName] = useState(activeProfile.name);
   const [region, setRegion] = useState(activeProfile.referenceRegion);
@@ -853,22 +867,55 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
 
-          {/* Card: Exclusão LGPD / Limpeza Completa */}
+          {/* Central de Direitos LGPD, Cookies, Exportação e Exclusão de Conta */}
+          <PrivacyCenterSection
+            currentUser={currentUser}
+            isDemo={isDemo}
+            isFirebaseMode={isFirebaseMode}
+            counts={
+              dataCounts ?? {
+                profiles: visibleProfiles.length,
+                items: StorageService.getItems(activeProfile.id).length,
+                prices: StorageService.getAllPrices().length,
+                incomes: StorageService.getIncomeHistory(activeProfile.id).length,
+                strategies:
+                  StorageService.getPlansA(activeProfile.id).length +
+                  StorageService.getPlansB(activeProfile.id).length +
+                  (StorageService.getPlanC(activeProfile.id) ? 1 : 0),
+                closures:
+                  monthlyClosures?.length ?? StorageService.getMonthlyClosures(activeProfile.id).length,
+              }
+            }
+            onNotify={onNotify}
+            onWipeFinancialDataOnly={
+              onWipeAllUserData
+                ? async () => {
+                    setIsWipeConfirmOpen(true);
+                  }
+                : undefined
+            }
+            onAccountDeleted={() => {
+              onAccountDeleted?.();
+            }}
+            onOpenPrivacyPolicy={onOpenPrivacyPolicy}
+          />
+
+          {/* Card: Limpeza apenas de dados financeiros (mantém conta ativa) */}
           {onWipeAllUserData && (
             <div className="bg-[#ffffff] rounded-2xl p-6 shadow-sm border border-[#ffdad6] flex flex-col gap-3">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-[#ffdad6]/50 flex items-center justify-center text-[#ba1a1a] shrink-0">
-                  <span className="material-symbols-outlined text-[20px]">delete_forever</span>
+                  <span className="material-symbols-outlined text-[20px]">delete_sweep</span>
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-[#0b1c30]">
                     {isFirebaseMode
-                      ? 'Zona de Privacidade (Exclusão LGPD)'
+                      ? 'Limpar Apenas Dados Financeiros (Manter Conta)'
                       : 'Reiniciar Dados Locais de Demonstração'}
                   </h3>
                   <p className="text-xs text-[#45464d]">
                     {isFirebaseMode
-                      ? 'Apaga definitivamente todos os itens, preços, rendas, estratégias e perfis salvos na nuvem.'
+                      ? 'Apaga itens, preços, rendas, estratégias e perfis financeiros salvos na nuvem mantendo seu cadastro ativo.'
                       : 'Restaura o estado inicial padrão do ambiente de demonstração no navegador.'}
                   </p>
                 </div>
@@ -883,7 +930,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   {isWiping
                     ? 'Processando...'
                     : isFirebaseMode
-                    ? 'Apagar Todos os Meus Dados'
+                    ? 'Apagar Dados Financeiros'
                     : 'Restaurar Padrão Inicial'}
                 </button>
               </div>

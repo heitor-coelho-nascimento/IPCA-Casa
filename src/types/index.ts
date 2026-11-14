@@ -674,3 +674,100 @@ export interface StructuredRecommendation {
   targetTab?: string;
 }
 
+export interface ConsentCategories {
+  essenciais: true;
+  analytics: boolean;
+  marketing: boolean;
+}
+
+export interface ConsentPreferenceState {
+  version: string;
+  cmpVersion: string;
+  anonymousConsentId: string;
+  categories: ConsentCategories;
+  decidedAt: string;
+  source: 'banner' | 'modal' | 'privacy_page' | 'settings' | 'revocation';
+}
+
+export interface ConsentRecord {
+  id: string;
+  userId?: string;
+  anonymousConsentId: string;
+  essenciais: true;
+  analytics: boolean;
+  marketing: boolean;
+  cmpVersion: string;
+  policyVersion: string;
+  source: 'banner' | 'modal' | 'privacy_page' | 'settings' | 'revocation';
+  decidedAt: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface TermsAcceptanceRecord {
+  id: string;
+  userId?: string;
+  termsVersion: string;
+  policyVersion: string;
+  acceptedTerms: boolean;
+  acceptedPrivacy: boolean;
+  acceptanceMethod: 'email_register' | 'google_signin' | 'post_login_gate';
+  acceptedAt: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type PrivacyRightType =
+  | 'confirmacao_acesso'
+  | 'correcao'
+  | 'anonimizacao_eliminacao'
+  | 'portabilidade'
+  | 'revogacao_consentimento'
+  | 'informacao_compartilhamento'
+  | 'revisao_oposicao';
+
+export type PrivacyRequestStatus =
+  | 'registrada'
+  | 'em_analise'
+  | 'atendida'
+  | 'cancelada';
+
+export interface PrivacyRequestRecord {
+  id: string;
+  userId?: string;
+  requestType: PrivacyRightType;
+  status: PrivacyRequestStatus;
+  details: string;
+  resolutionNote?: string;
+  requestedAt: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface UserPrivacyExportBundle {
+  exportedAt: string;
+  exportVersion: string;
+  policyVersion: string;
+  termsVersion: string;
+  account: {
+    userId: string;
+    email: string;
+    displayName: string;
+    authProvider?: string;
+    emailVerified?: boolean;
+    defaultProfileId?: string;
+    createdAt?: string;
+    lastLoginAt?: string;
+  };
+  profiles: FamilyProfile[];
+  consumptionGroups: ConsumptionGroup[];
+  basketItems: BasketItem[];
+  priceHistory: PriceRecord[];
+  incomeHistory: IncomeRecord[];
+  strategies: Array<SubstitutePlanA | EfficiencyPlanB | OpportunityPlanC | Record<string, unknown>>;
+  monthlyClosures: MonthlyClosure[];
+  consentRecords: ConsentRecord[];
+  termsAcceptances: TermsAcceptanceRecord[];
+  privacyRequests: PrivacyRequestRecord[];
+}
+

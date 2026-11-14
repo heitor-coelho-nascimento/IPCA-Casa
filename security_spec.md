@@ -12,6 +12,10 @@
 6. **Limites Volumétricos e Regex de IDs:** Todos os IDs de documentos e referências devem obedecer `^[a-zA-Z0-9_-]+$` com no máximo 128 caracteres; todas as strings possuem limite explícito de tamanho (`.size()`) e valores numéricos possuem teto finito validado contra overflow/`Infinity`.
 7. **Listagens Seguras (Query Enforcer):** Toda regra `allow list` valida `resource.data.userId == request.auth.uid` sem executar `get()`/`exists()` em consultas de lista. Listagem da coleção raiz `/users` é bloqueada (`allow list: if false`).
 8. **Provedores Oficiais & Validação de E-mail:** Apenas `authProvider` em `['google', 'password']` e formato de e-mail válido são aceitos no documento de conta; nenhum segredo ou credencial de autenticação local é persistido no navegador.
+9. **Conformidade LGPD, Imutabilidade de Evidências e Exclusão pelo Titular:**
+   - `consentRecords` e `termsAcceptances` são imutáveis contra alteração (`allow update: if false`) após o registro.
+   - `privacyRequests` inicia obrigatoriamente com `status: 'registrada'` e o titular só pode transicionar solicitações abertas (`registrada` / `em_analise`) para `cancelada`, sem falsificar `atendida` nem `resolutionNote`.
+   - A exclusão do documento raiz `/users/{userId}` e `/users/{userId}/private/account` é permitida exclusivamente ao próprio titular verificado (`isOwner(userId)`), viabilizando a eliminação integral em cascata pela API `/api/privacy/delete-account`.
 
 ---
 
@@ -27,5 +31,6 @@
 8. **Payload Exhaustion ("Denial of Wallet"):** Usuário envia `BasketItem.notes` com 5.000 caracteres (> limite de 1.000). Esperado: `PERMISSION_DENIED`.
 9. **Type Confusion ("Value Poisoning"):** Usuário envia atualização alterando `monthlySpend` para string `"1000"` ou `classification` para `"VIP"`. Esperado: `PERMISSION_DENIED`.
 10. **Immutable Timestamp Tampering:** Usuário cria documento com `createdAt: "2020-01-01T00:00:00Z"` em vez de `request.time` ou tenta alterar `createdAt` em `update`. Esperado: `PERMISSION_DENIED`.
-11. **Immutable Ownership Hijack on Update:** Usuário tenta atualizar `BasketItem` mudando `userId` ou `profileId`. Esperado: `PERMISSION_DENIED`.
+11. **Immutable Ownership Hijack on Update:** Usuário tenta atualizar `BasketItem` mudando `userId` ou `profileId`, ou tenta alterar `termsAcceptances` / marcar `privacyRequests` como `atendida`. Esperado: `PERMISSION_DENIED`.
 12. **PII Leak Attempt:** Usuário autenticado tenta listar `/users` ou ler `/users/{otherUid}/private/account`. Esperado: `PERMISSION_DENIED`.
+

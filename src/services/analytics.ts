@@ -1,21 +1,31 @@
 /**
- * IPCA-Casa: Google Analytics 4 com Consent Mode v2 e Firewall Anti-PII / Financeiro
+ * IPCA-Casa: Google Analytics 4 com Consent Mode v2, CMP 3 Categorias e Firewall Anti-PII / Financeiro
  *
- * Regras de segurança e privacidade:
+ * Regras de segurança e privacidade (Privacy by Default):
  * - Nunca embute ID fictício (usa estritamente VITE_GA_MEASUREMENT_ID).
+ * - Analytics e Marketing começam desativados (`denied` / `false`) até consentimento explícito.
  * - Nunca envia renda, salários, gastos, valores monetários em R$, e-mails, nomes ou UIDs.
- * - Evita carregamento duplicado de script e page_views duplicados em navegação SPA.
+ * - Revogação desativa coleta imediatamente (window['ga-disable-*'] = true + Consent Mode denied + limpeza de cookies).
  */
+
+import {
+  CONSENT_PREFS_STORAGE_KEY,
+  LEGACY_ANALYTICS_CONSENT_KEY,
+  clearThirdPartyTrackingCookies,
+  getEffectiveConsentCategories,
+  getStoredConsentPreferences,
+  saveConsentPreferences,
+} from './consent';
 
 export type AnalyticsConsentState = 'granted' | 'denied';
 
-const CONSENT_STORAGE_KEY = 'ipca_casa_analytics_consent_v1';
 const GA_SCRIPT_ATTR = 'data-ipca-ga4-script';
 
 declare global {
   interface Window {
     dataLayer?: unknown[];
     gtag?: (...args: unknown[]) => void;
+    [key: `ga-disable-${string}`]: boolean | undefined;
   }
 }
 
@@ -68,7 +78,8 @@ let lastImpactSignature = '';
 function readGaMeasurementIdFromEnv(overrideId?: string): string {
   if (overrideId !== undefined) return overrideId.trim();
   const viteEnv =
-    typeof import.meta !== 'undefined' && (import.meta as unknown as { env?: Record<string, string | undefined> }).env
+    typeof import.meta !== 'undefined' &&
+    (import.meta as unknown as { env?: Record<string, string | undefined> }).env
       ? (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_GA_MEASUREMENT_ID
       : undefined;
   const nodeEnv = typeof process !== 'undefined' ? process.env?.VITE_GA_MEASUREMENT_ID : undefined;
@@ -95,13 +106,22 @@ export function isGaConfigured(overrideId?: string): boolean {
 }
 
 export function getConsentStatus(): AnalyticsConsentState | null {
+  const prefs = getStoredConsentPreferences();
+  if (prefs) {
+    return prefs.categories.analytics ? 'granted' : 'denied';
+  }
   if (typeof window === 'undefined' || !window.localStorage) return null;
   try {
-    const raw = window.localStorage.getItem(CONSENT_STORAGE_KEY);
+    const raw = window.localStorage.getItem(LEGACY_ANALYTICS_CONSENT_KEY);
     return raw === 'granted' || raw === 'denied' ? raw : null;
   } catch {
     return null;
   }
+}
+
+export function isMarketingAllowed(): boolean {
+  const categories = getEffectiveConsentCategories();
+  return categories.marketing === true;
 }
 
 export function sanitizeAnalyticsParams(
@@ -146,14 +166,19 @@ function ensureGtagStub(): void {
   }
 }
 
-function applyConsentToGtag(status: AnalyticsConsentState): void {
+function applyGaDisableFlag(measurementId: string, analyticsGranted: boolean): void {
+  if (typeof window === 'undefined') return;
+  window[`ga-disable-${measurementId}`] = !analyticsGranted;
+}
+
+function applyConsentToGtag(analyticsGranted: boolean, marketingGranted: boolean): void {
   if (typeof window === 'undefined') return;
   ensureGtagStub();
   window.gtag?.('consent', 'update', {
-    analytics_storage: status === 'granted' ? 'granted' : 'denied',
-    ad_storage: 'denied',
-    ad_user_data: 'denied',
-    ad_personalization: 'denied',
+    analytics_storage: analyticsGranted ? 'granted' : 'denied',
+    ad_storage: marketingGranted ? 'granted' : 'denied',
+    ad_user_data: marketingGranted ? 'granted' : 'denied',
+    ad_personalization: marketingGranted ? 'granted' : 'denied',
   });
 }
 
@@ -180,15 +205,18 @@ export function initAnalytics(overrideMeasurementId?: string): boolean {
   const measurementId = getGaMeasurementId(overrideMeasurementId);
   if (!measurementId) return false;
 
-  const consent = getConsentStatus();
+  const categories = getEffectiveConsentCategories();
+  const analyticsGranted = categories.analytics === true;
+  const marketingGranted = categories.marketing === true;
+  applyGaDisableFlag(measurementId, analyticsGranted);
   ensureGtagStub();
 
   if (initializedId !== measurementId) {
     window.gtag?.('consent', 'default', {
-      analytics_storage: consent === 'granted' ? 'granted' : 'denied',
-      ad_storage: 'denied',
-      ad_user_data: 'denied',
-      ad_personalization: 'denied',
+      analytics_storage: analyticsGranted ? 'granted' : 'denied',
+      ad_storage: marketingGranted ? 'granted' : 'denied',
+      ad_user_data: marketingGranted ? 'granted' : 'denied',
+      ad_personalization: marketingGranted ? 'granted' : 'denied',
       wait_for_update: 500,
     });
     window.gtag?.('js', new Date());
@@ -199,7 +227,7 @@ export function initAnalytics(overrideMeasurementId?: string): boolean {
     initializedId = measurementId;
   }
 
-  if (consent === 'granted') {
+  if (analyticsGranted) {
     injectGaScriptOnce(measurementId);
     return true;
   }
@@ -207,26 +235,57 @@ export function initAnalytics(overrideMeasurementId?: string): boolean {
   return false;
 }
 
-export function setConsentStatus(
-  status: AnalyticsConsentState,
+export function syncAnalyticsWithConsent(
+  categories: { analytics: boolean; marketing: boolean },
   overrideMeasurementId?: string
 ): void {
-  if (typeof window !== 'undefined' && window.localStorage) {
-    try {
-      window.localStorage.setItem(CONSENT_STORAGE_KEY, status);
-    } catch {
-      // ignora restrições de armazenamento privado
-    }
+  const measurementId = getGaMeasurementId(overrideMeasurementId);
+
+  if (!categories.analytics) {
+    clearThirdPartyTrackingCookies();
   }
 
-  const measurementId = getGaMeasurementId(overrideMeasurementId);
   if (!measurementId) return;
 
+  applyGaDisableFlag(measurementId, categories.analytics);
   initAnalytics(measurementId);
-  applyConsentToGtag(status);
+  applyConsentToGtag(categories.analytics, categories.marketing);
 
-  if (status === 'granted') {
+  if (categories.analytics) {
     injectGaScriptOnce(measurementId);
+  }
+}
+
+export function setConsentStatus(
+  status: AnalyticsConsentState,
+  overrideMeasurementId?: string,
+  marketingGranted = false
+): void {
+  const saved = saveConsentPreferences(
+    {
+      analytics: status === 'granted',
+      marketing: status === 'granted' ? marketingGranted : false,
+    },
+    'privacy_page'
+  );
+
+  syncAnalyticsWithConsent(
+    {
+      analytics: saved.categories.analytics,
+      marketing: saved.categories.marketing,
+    },
+    overrideMeasurementId
+  );
+}
+
+export function clearConsentForTests(): void {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      window.localStorage.removeItem(CONSENT_PREFS_STORAGE_KEY);
+      window.localStorage.removeItem(LEGACY_ANALYTICS_CONSENT_KEY);
+    } catch {
+      // ignora
+    }
   }
 }
 

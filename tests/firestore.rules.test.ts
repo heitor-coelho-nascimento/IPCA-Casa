@@ -37,6 +37,9 @@ describe('Segurança Firestore, Blueprint e Guardrails Anti-Dirty-Dozen (IPCA-Ca
     expect(RULES_TEXT).toContain('match /consumptionGroups/{groupId}');
     expect(RULES_TEXT).toContain('match /strategies/{strategyId}');
     expect(RULES_TEXT).toContain('match /monthlyClosures/{closureId}');
+    expect(RULES_TEXT).toContain('match /consentRecords/{recordId}');
+    expect(RULES_TEXT).toContain('match /termsAcceptances/{acceptanceId}');
+    expect(RULES_TEXT).toContain('match /privacyRequests/{requestId}');
     expect(SECURITY_SPEC).toContain('Dirty Dozen');
   });
 
@@ -45,7 +48,7 @@ describe('Segurança Firestore, Blueprint e Guardrails Anti-Dirty-Dozen (IPCA-Ca
     expect(RULES_TEXT).toContain('request.auth != null && request.auth.token.email_verified == true');
     expect(RULES_TEXT).toContain('isSignedIn() && request.auth.uid == userId');
 
-    // PII Leak Prevention (#12)
+    // PII Leak Prevention (#12) & Titular Self-Delete (Art. 18, VI LGPD)
     const usersMatchIdx = RULES_TEXT.indexOf('match /users/{userId}');
     const privateMatchIdx = RULES_TEXT.indexOf('match /private/{docId}');
     const profilesMatchIdx = RULES_TEXT.indexOf('match /profiles/{profileId}');
@@ -53,15 +56,15 @@ describe('Segurança Firestore, Blueprint e Guardrails Anti-Dirty-Dozen (IPCA-Ca
     const privateSection = RULES_TEXT.slice(privateMatchIdx, profilesMatchIdx);
 
     expect(rootUserSection).toContain('allow list: if false;');
-    expect(rootUserSection).toContain('allow delete: if false;');
+    expect(rootUserSection).toContain('allow delete: if isOwner(userId) && isValidId(userId);');
     expect(privateSection).toContain("docId == 'account'");
     expect(privateSection).toContain('allow list: if false;');
-    expect(privateSection).toContain('allow delete: if false;');
+    expect(privateSection).toContain('allow delete: if isOwner(userId) && docId == \'account\' && userExists(userId);');
   });
 
   it('Impõe Query Enforcer (sem get/exists em allow list) e integridade referencial nas subcoleções', () => {
     const listRules = RULES_TEXT.match(/allow list:[^\n]+/g) || [];
-    expect(listRules.length).toBe(9);
+    expect(listRules.length).toBe(12);
     for (const rule of listRules) {
       if (!rule.includes('if false;')) {
         expect(rule).toContain('isOwner(userId)');
@@ -319,5 +322,30 @@ describe('Segurança Firestore, Blueprint e Guardrails Anti-Dirty-Dozen (IPCA-Ca
     expect('profileId' in updatePayload).toBe(false);
     expect('monthKey' in updatePayload).toBe(false);
     expect('createdAt' in updatePayload).toBe(false);
+  });
+
+  it('Garante imutabilidade de consentRecords/termsAcceptances e transição restrita em privacyRequests nas regras LGPD', () => {
+    const consentIdx = RULES_TEXT.indexOf('match /consentRecords/{recordId}');
+    const termsIdx = RULES_TEXT.indexOf('match /termsAcceptances/{acceptanceId}');
+    const requestsIdx = RULES_TEXT.indexOf('match /privacyRequests/{requestId}');
+
+    const consentSection = RULES_TEXT.slice(consentIdx, termsIdx);
+    const termsSection = RULES_TEXT.slice(termsIdx, requestsIdx);
+    const requestsSection = RULES_TEXT.slice(requestsIdx);
+
+    expect(consentSection).toContain('allow update: if false;');
+    expect(consentSection).toContain('isValidConsentRecord(incoming(), userId, recordId)');
+    expect(RULES_TEXT).toContain('data.essenciais == true');
+
+    expect(termsSection).toContain('allow update: if false;');
+    expect(termsSection).toContain('isValidTermsAcceptance(incoming(), userId, acceptanceId)');
+    expect(RULES_TEXT).toContain('data.acceptedTerms == true');
+    expect(RULES_TEXT).toContain('data.acceptedPrivacy == true');
+
+    expect(requestsSection).toContain("incoming().status == 'registrada'");
+    expect(requestsSection).toContain("!('resolutionNote' in incoming())");
+    expect(requestsSection).toContain("existing().status in ['registrada', 'em_analise']");
+    expect(requestsSection).toContain("incoming().status == 'cancelada'");
+    expect(requestsSection).toContain("affectedKeys().hasOnly(['status', 'updatedAt'])");
   });
 });

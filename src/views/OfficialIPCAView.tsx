@@ -57,7 +57,8 @@ export const OfficialIPCAView: React.FC<OfficialIPCAViewProps> = ({
         setTimeout(() => setFeedbackMessage(null), 5000);
       }
     } catch (err) {
-      console.error('Falha ao carregar IBGE:', err);
+      const msg = err instanceof Error ? err.message : 'erro desconhecido';
+      console.warn(`Falha ao carregar série IBGE (${msg})`);
       setFeedbackMessage(
         'Não foi possível obter dados em tempo real. Exibindo referência offline de contingência.'
       );

@@ -5,12 +5,15 @@
 import { FirebaseApp, getApp, getApps, initializeApp } from 'firebase/app';
 import {
   Auth,
+  EmailAuthProvider,
   GoogleAuthProvider,
   User,
   browserLocalPersistence,
   createUserWithEmailAndPassword,
   getAuth,
   onAuthStateChanged,
+  reauthenticateWithCredential,
+  reauthenticateWithPopup,
   reload,
   sendEmailVerification,
   sendPasswordResetEmail,
@@ -190,6 +193,29 @@ export async function signOutFirebase(): Promise<void> {
   }
 }
 
+export async function reauthenticateCurrentUserWithPassword(password: string): Promise<string> {
+  if (!auth || !auth.currentUser || !auth.currentUser.email) {
+    throw new Error('Sessão de usuário não encontrada para reautenticação.');
+  }
+  const credential = EmailAuthProvider.credential(auth.currentUser.email, password);
+  const result = await reauthenticateWithCredential(auth.currentUser, credential);
+  return result.user.getIdToken(true);
+}
+
+export async function reauthenticateCurrentUserWithGoogle(): Promise<string> {
+  if (!auth || !auth.currentUser) {
+    throw new Error('Sessão de usuário não encontrada para reautenticação.');
+  }
+  const provider = createGoogleProvider();
+  const result = await reauthenticateWithPopup(auth.currentUser, provider);
+  return result.user.getIdToken(true);
+}
+
+export async function getFreshFirebaseIdToken(): Promise<string | null> {
+  if (!auth || !auth.currentUser) return null;
+  return auth.currentUser.getIdToken(true);
+}
+
 export function subscribeFirebaseAuthState(
   callback: (user: User | null) => void
 ): () => void {
@@ -200,3 +226,4 @@ export function subscribeFirebaseAuthState(
   void ensureFirebaseAuthPersistence();
   return onAuthStateChanged(auth, callback);
 }
+

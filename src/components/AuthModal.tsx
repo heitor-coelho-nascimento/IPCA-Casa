@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import { POLICY_VERSION, TERMS_VERSION } from '../config/privacy';
 import { AuthService } from '../services/auth';
+import { savePendingTermsAcceptance } from '../services/consent';
 import { UserAccount } from '../types';
 import { GoogleSignInButton } from './GoogleSignInButton';
 
@@ -30,6 +32,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [email, setEmail] = useState(pendingVerificationEmail || '');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [error, setError] = useState<string | null>(initialError);
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -40,6 +43,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setMode(initialMode);
       setError(initialError || null);
       setMessage(null);
+      setAcceptedTerms(false);
       if (pendingVerificationEmail) {
         setEmail(pendingVerificationEmail);
       }
@@ -51,6 +55,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const handleGoogleSignIn = async () => {
     setError(null);
     setMessage(null);
+
+    if (mode === 'register' && !acceptedTerms) {
+      setError('Marque a caixa de concordância com os Termos de Uso e Política de Privacidade antes de criar sua conta.');
+      return;
+    }
+
+    if (mode === 'register' && acceptedTerms) {
+      savePendingTermsAcceptance({
+        acceptedTerms: true,
+        acceptedPrivacy: true,
+        termsVersion: TERMS_VERSION,
+        policyVersion: POLICY_VERSION,
+        acceptanceMethod: 'google_signin',
+        capturedAt: new Date().toISOString(),
+      });
+    }
+
     setGoogleLoading(true);
 
     try {
@@ -102,10 +123,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setError(null);
     setMessage(null);
 
+    if (!acceptedTerms) {
+      setError('Você precisa ler e concordar com os Termos de Uso e a Política de Privacidade para criar sua conta.');
+      return;
+    }
+
     if (password !== confirmPassword) {
       setError('A confirmação da senha não coincide com a senha digitada.');
       return;
     }
+
+    savePendingTermsAcceptance({
+      acceptedTerms: true,
+      acceptedPrivacy: true,
+      termsVersion: TERMS_VERSION,
+      policyVersion: POLICY_VERSION,
+      acceptanceMethod: 'email_register',
+      capturedAt: new Date().toISOString(),
+    });
 
     setLoading(true);
     try {
@@ -413,21 +448,34 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
             </div>
 
-            <p className="text-[11px] text-[#76777d] mt-1">
-              Ao criar a conta, enviaremos um link de verificação para confirmar sua identidade antes de liberar o painel. Leia nossos{' '}
-              <button
-                type="button"
-                onClick={() => setMode('terms')}
-                className="text-[#0b1c30] underline font-medium cursor-pointer"
-              >
-                Termos de Uso e Privacidade
-              </button>
-              .
+            <label className="flex items-start gap-2.5 p-2.5 rounded-xl bg-[#f8f9ff] border border-[#eff4ff] cursor-pointer mt-1">
+              <input
+                type="checkbox"
+                checked={acceptedTerms}
+                onChange={(e) => setAcceptedTerms(e.target.checked)}
+                required
+                className="mt-0.5 h-4 w-4 accent-[#006a61] cursor-pointer shrink-0"
+              />
+              <span className="text-[11px] text-[#45464d] leading-relaxed">
+                Li e concordo com os{' '}
+                <button
+                  type="button"
+                  onClick={() => setMode('terms')}
+                  className="text-[#0b1c30] underline font-semibold cursor-pointer"
+                >
+                  Termos de Uso e Política de Privacidade
+                </button>{' '}
+                (versão {TERMS_VERSION}). O consentimento para cookies opcionais é gerenciado separadamente.
+              </span>
+            </label>
+
+            <p className="text-[11px] text-[#76777d]">
+              Ao criar a conta, enviaremos um link de verificação para confirmar sua identidade antes de liberar o painel.
             </p>
 
             <button
               type="submit"
-              disabled={loading || googleLoading}
+              disabled={loading || googleLoading || !acceptedTerms}
               className="mt-1 h-10 rounded-lg bg-[#000000] text-[#ffffff] hover:bg-[#213145] text-xs font-mono font-semibold transition-all cursor-pointer shadow-sm disabled:opacity-50"
             >
               {loading ? 'Criando Conta...' : 'Criar Conta e Enviar Verificação'}

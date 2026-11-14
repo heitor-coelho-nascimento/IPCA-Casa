@@ -1,4 +1,5 @@
 import React from 'react';
+import { openCookiePreferencesModal } from '../services/consent';
 
 export interface PublicNavigationHandlers {
   onNavigate: (path: string) => void;
@@ -163,6 +164,31 @@ export const PublicLayout: React.FC<PublicLayoutProps> = ({
                 {link.label}
               </a>
             ))}
+            <a
+              href="/termos"
+              onClick={(e) => handleLinkClick(e, '/termos')}
+              className="hover:text-[#0b1c30] underline underline-offset-4"
+            >
+              Termos de Uso
+            </a>
+            <button
+              type="button"
+              onClick={openCookiePreferencesModal}
+              className="hover:text-[#0b1c30] underline underline-offset-4 cursor-pointer"
+            >
+              Preferências de Cookies
+            </button>
+            <a
+              href="/privacidade#contato-privacidade"
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                e.preventDefault();
+                onNavigate('/privacidade');
+              }}
+              className="hover:text-[#0b1c30] underline underline-offset-4"
+            >
+              Contato de Privacidade
+            </a>
             <button
               type="button"
               onClick={onEnterDemo}
@@ -176,7 +202,7 @@ export const PublicLayout: React.FC<PublicLayoutProps> = ({
                 onClick={onOpenTerms}
                 className="hover:text-[#0b1c30] underline underline-offset-4 cursor-pointer"
               >
-                Termos de Uso
+                Termos Rápidos
               </button>
             )}
           </nav>

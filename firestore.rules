@@ -365,6 +365,85 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidConsentRecord(data, userId, recordId) {
+      return data.keys().hasAll([
+          'id', 'userId', 'anonymousConsentId', 'essenciais', 'analytics', 'marketing',
+          'cmpVersion', 'policyVersion', 'source', 'decidedAt', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'userId', 'anonymousConsentId', 'essenciais', 'analytics', 'marketing',
+          'cmpVersion', 'policyVersion', 'source', 'decidedAt', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.id == recordId &&
+        data.userId == request.auth.uid &&
+        data.userId == userId &&
+        isValidId(data.anonymousConsentId) &&
+        data.essenciais is bool &&
+        data.essenciais == true &&
+        data.analytics is bool &&
+        data.marketing is bool &&
+        isBoundedString(data.cmpVersion, 1, 40) &&
+        isBoundedString(data.policyVersion, 1, 40) &&
+        data.source in ['banner', 'modal', 'privacy_page', 'settings', 'revocation'] &&
+        isBoundedString(data.decidedAt, 1, 40) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidTermsAcceptance(data, userId, acceptanceId) {
+      return data.keys().hasAll([
+          'id', 'userId', 'termsVersion', 'policyVersion', 'acceptedTerms',
+          'acceptedPrivacy', 'acceptanceMethod', 'acceptedAt', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'userId', 'termsVersion', 'policyVersion', 'acceptedTerms',
+          'acceptedPrivacy', 'acceptanceMethod', 'acceptedAt', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.id == acceptanceId &&
+        data.userId == request.auth.uid &&
+        data.userId == userId &&
+        isBoundedString(data.termsVersion, 1, 40) &&
+        isBoundedString(data.policyVersion, 1, 40) &&
+        data.acceptedTerms is bool &&
+        data.acceptedTerms == true &&
+        data.acceptedPrivacy is bool &&
+        data.acceptedPrivacy == true &&
+        data.acceptanceMethod in ['email_register', 'google_signin', 'post_login_gate'] &&
+        isBoundedString(data.acceptedAt, 1, 40) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidPrivacyRequest(data, userId, requestId) {
+      return data.keys().hasAll([
+          'id', 'userId', 'requestType', 'status', 'details', 'requestedAt', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'userId', 'requestType', 'status', 'details', 'resolutionNote', 'requestedAt', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.id == requestId &&
+        data.userId == request.auth.uid &&
+        data.userId == userId &&
+        data.requestType in [
+          'confirmacao_acesso',
+          'correcao',
+          'anonimizacao_eliminacao',
+          'portabilidade',
+          'revogacao_consentimento',
+          'informacao_compartilhamento',
+          'revisao_oposicao'
+        ] &&
+        data.status in ['registrada', 'em_analise', 'atendida', 'cancelada'] &&
+        isBoundedString(data.details, 1, 1000) &&
+        (!('resolutionNote' in data) || isBoundedString(data.resolutionNote, 0, 500)) &&
+        isBoundedString(data.requestedAt, 1, 40) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
     // 4. Collection Rules
     match /users/{userId} {
       allow get: if isOwner(userId) && isValidId(userId);
@@ -384,7 +463,7 @@ service cloud.firestore {
         incoming().diff(existing()).affectedKeys().hasOnly([
           'displayName', 'avatarUrl', 'authProvider', 'defaultProfileId', 'updatedAt'
         ]);
-      allow delete: if false;
+      allow delete: if isOwner(userId) && isValidId(userId);
 
       // Isolated PII subcollection
       match /private/{docId} {
@@ -405,7 +484,7 @@ service cloud.firestore {
           incoming().createdAt == existing().createdAt &&
           incoming().updatedAt == request.time &&
           incoming().diff(existing()).affectedKeys().hasOnly(['email', 'updatedAt']);
-        allow delete: if false;
+        allow delete: if isOwner(userId) && docId == 'account' && userExists(userId);
       }
 
       // Family Profiles
@@ -608,6 +687,63 @@ service cloud.firestore {
             'ibgeSourceMode', 'ibgeReferenceMonth', 'dataOrigin', 'notes', 'closedAt', 'updatedAt'
           ]);
         allow delete: if isOwner(userId) && isValidId(closureId) && userExists(userId);
+      }
+
+      // Consent Records (LGPD CMP Audit Trail)
+      match /consentRecords/{recordId} {
+        allow get: if isOwner(userId) && isValidId(recordId) && userExists(userId);
+        allow list: if isOwner(userId) && existing().userId == request.auth.uid;
+        allow create: if isOwner(userId) &&
+          isValidId(recordId) &&
+          isValidConsentRecord(incoming(), userId, recordId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          userExists(userId);
+        allow update: if false;
+        allow delete: if isOwner(userId) && isValidId(recordId) && userExists(userId);
+      }
+
+      // Terms & Privacy Acceptances (Versioned Evidence)
+      match /termsAcceptances/{acceptanceId} {
+        allow get: if isOwner(userId) && isValidId(acceptanceId) && userExists(userId);
+        allow list: if isOwner(userId) && existing().userId == request.auth.uid;
+        allow create: if isOwner(userId) &&
+          isValidId(acceptanceId) &&
+          isValidTermsAcceptance(incoming(), userId, acceptanceId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          userExists(userId);
+        allow update: if false;
+        allow delete: if isOwner(userId) && isValidId(acceptanceId) && userExists(userId);
+      }
+
+      // Data Subject Privacy Requests (Art. 18 LGPD)
+      match /privacyRequests/{requestId} {
+        allow get: if isOwner(userId) && isValidId(requestId) && userExists(userId);
+        allow list: if isOwner(userId) && existing().userId == request.auth.uid;
+        allow create: if isOwner(userId) &&
+          isValidId(requestId) &&
+          isValidPrivacyRequest(incoming(), userId, requestId) &&
+          incoming().status == 'registrada' &&
+          !('resolutionNote' in incoming()) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          userExists(userId);
+        allow update: if isOwner(userId) &&
+          isValidId(requestId) &&
+          userExists(userId) &&
+          isValidPrivacyRequest(incoming(), userId, requestId) &&
+          existing().status in ['registrada', 'em_analise'] &&
+          incoming().status == 'cancelada' &&
+          incoming().id == existing().id &&
+          incoming().userId == existing().userId &&
+          incoming().requestType == existing().requestType &&
+          incoming().details == existing().details &&
+          incoming().requestedAt == existing().requestedAt &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(requestId) && userExists(userId);
       }
     }
   }

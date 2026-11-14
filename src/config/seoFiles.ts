@@ -77,6 +77,7 @@ export function generateRobotsTxt(siteUrl?: string): string {
     'Allow: /metodologia',
     'Allow: /ipca-oficial',
     'Allow: /privacidade',
+    'Allow: /termos',
     'Allow: /llms.txt',
     'Allow: /images/',
     'Allow: /favicon.svg',
@@ -135,6 +136,7 @@ A plataforma consulta diretamente a API pública de dados abertos do **SIDRA / I
 - [Metodologia e Fórmulas](${url('/metodologia')}): Detalhamento matemático do Índice de Laspeyres, peso orçamentário, contribuição em pontos percentuais e deflação salarial.
 - [IPCA Oficial do IBGE](${url('/ipca-oficial')}): Indicadores atualizados diretamente do SIDRA/IBGE com variação mensal, ano e 12 meses, grupos e regiões.
 - [Privacidade e Proteção de Dados](${url('/privacidade')}): Política clara de isolamento de dados via Firebase Authentication e Cloud Firestore, além de controles de consentimento de analytics.
+- [Termos de Uso](${url('/termos')}): Condições de utilização do aplicativo, escopo educacional/planejamento e responsabilidades do titular.
 
 ## Referências oficiais externas
 - IBGE — Página oficial do IPCA: https://www.ibge.gov.br/estatisticas/economicas/precos-e-custos/9256-ipca.html

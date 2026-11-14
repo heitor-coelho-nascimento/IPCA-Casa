@@ -175,6 +175,28 @@ export const PUBLIC_ROUTES: Record<string, RouteSeoMetadata> = {
       'consentimento analytics',
     ],
   },
+  '/termos': {
+    path: '/termos',
+    title: 'Termos de Uso e Condições | IPCA-Casa',
+    description:
+      'Conheça os Termos de Uso do IPCA-Casa, regras do serviço, fontes oficiais do IBGE, limitações educativas e direitos de uso da conta.',
+    isPublic: true,
+    robots: 'index, follow',
+    includeSearchConsoleTag: true,
+    includeSchema: true,
+    inSitemap: true,
+    changefreq: 'monthly',
+    priority: '0.5',
+    ogType: 'article',
+    imagePath: DEFAULT_OG_IMAGE_PATH,
+    imageAlt: DEFAULT_OG_IMAGE_ALT,
+    keywords: [
+      'termos de uso IPCA-Casa',
+      'condições de uso',
+      'LGPD consumidor',
+      'planejamento doméstico',
+    ],
+  },
 };
 
 export const PRIVATE_ROUTE_PREFIXES = [

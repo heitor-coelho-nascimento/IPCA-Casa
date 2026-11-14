@@ -36,6 +36,7 @@ describe('SEO Técnico, Indexação, Canônicas e Analytics Seguro (IPCA-Casa)',
       '/metodologia',
       '/ipca-oficial',
       '/privacidade',
+      '/termos',
     ]);
 
     const titles = new Set<string>();
@@ -194,6 +195,7 @@ describe('SEO Técnico, Indexação, Canônicas e Analytics Seguro (IPCA-Casa)',
     expect(sitemap).toContain('<loc>https://ipcacasa.com.br/metodologia</loc>');
     expect(sitemap).toContain('<loc>https://ipcacasa.com.br/ipca-oficial</loc>');
     expect(sitemap).toContain('<loc>https://ipcacasa.com.br/privacidade</loc>');
+    expect(sitemap).toContain('<loc>https://ipcacasa.com.br/termos</loc>');
     expect(sitemap).not.toContain('/login');
     expect(sitemap).not.toContain('/cadastro');
     expect(sitemap).not.toContain('/demo');

@@ -47,7 +47,9 @@ export interface ServerAppOptions {
   checkFirestoreHealth?: () => Promise<FirestoreHealthStatus>;
   forceRefreshCooldownMs?: number;
   apiRateLimitMax?: number;
+  privacyRateLimitMax?: number;
   allowedOrigins?: string[];
+  fetchImpl?: typeof fetch;
 }
 
 function extractHostname(rawHostHeader: string | undefined): string {
@@ -164,6 +166,7 @@ export async function createServerApp(options: ServerAppOptions = {}): Promise<e
   const isTest = Boolean(process.env.VITEST || process.env.NODE_ENV === 'test');
   const forceCooldownMs = options.forceRefreshCooldownMs ?? 60_000;
   const checkFirestoreHealth = options.checkFirestoreHealth ?? defaultCheckFirestoreHealth;
+  const fetchFn = options.fetchImpl ?? fetch;
   const configuredOrigins = buildAllowedOriginSet(options.allowedOrigins);
   const lastForcedIbgeByRegion = new Map<string, number>();
 
@@ -290,6 +293,18 @@ export async function createServerApp(options: ServerAppOptions = {}): Promise<e
     },
   });
 
+  const privacyDeleteLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: options.privacyRateLimitMax ?? 10,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    handler: (_req, res) => {
+      res.status(429).json({
+        error: 'Muitas solicitações de exclusão em um curto intervalo. Aguarde antes de tentar novamente.',
+      });
+    },
+  });
+
   app.use('/api', (req, res, next) => {
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('X-Robots-Tag', 'noindex, nofollow');
@@ -303,7 +318,7 @@ export async function createServerApp(options: ServerAppOptions = {}): Promise<e
       }
       res.setHeader('Access-Control-Allow-Origin', originHeader);
       res.setHeader('Vary', 'Origin');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, HEAD, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     }
 
@@ -380,6 +395,257 @@ export async function createServerApp(options: ServerAppOptions = {}): Promise<e
       return res.json(metadata);
     } catch (err) {
       return next(err);
+    }
+  });
+
+  // 3. Exclusão completa e verificada da conta + cascata Firestore (LGPD Art. 18, VI)
+  app.post('/api/privacy/delete-account', privacyDeleteLimiter, async (req, res) => {
+    if (!isFirebaseConfigured()) {
+      return res.status(503).json({
+        code: 'FIREBASE_NOT_CONFIGURED',
+        error: 'Serviço de autenticação em nuvem não configurado neste ambiente.',
+      });
+    }
+
+    const authHeader = req.get('authorization') || '';
+    const bearerMatch = authHeader.match(/^Bearer\s+([A-Za-z0-9._-]+)$/);
+    const idToken = bearerMatch?.[1];
+    if (!idToken) {
+      return res.status(401).json({
+        code: 'UNAUTHORIZED',
+        error: 'Token de autenticação ausente ou inválido.',
+      });
+    }
+
+    const body = (req.body || {}) as { confirmDeletion?: unknown };
+    if (body.confirmDeletion !== true) {
+      return res.status(400).json({
+        code: 'CONFIRMATION_REQUIRED',
+        error: 'É obrigatório confirmar explicitamente a exclusão definitiva da conta.',
+      });
+    }
+
+    try {
+      // 1) Validação real do ID token junto ao Google Identity Toolkit
+      const lookupRes = await fetchFn(
+        `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(
+          firebaseConfig.apiKey
+        )}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken }),
+          signal: AbortSignal.timeout(8000),
+        }
+      );
+
+      if (!lookupRes.ok) {
+        return res.status(401).json({
+          code: 'INVALID_TOKEN',
+          error: 'Sessão expirada ou inválida. Entre novamente antes de excluir a conta.',
+        });
+      }
+
+      const lookupJson = (await lookupRes.json()) as {
+        users?: Array<{
+          localId?: string;
+          emailVerified?: boolean;
+          lastLoginAt?: string;
+        }>;
+      };
+      const verifiedAccount = lookupJson.users?.[0];
+      const uid = verifiedAccount?.localId;
+      if (!uid || !/^[a-zA-Z0-9_-]{1,128}$/.test(uid)) {
+        return res.status(401).json({
+          code: 'INVALID_ACCOUNT',
+          error: 'Não foi possível validar a titularidade da conta.',
+        });
+      }
+
+      if (!verifiedAccount.emailVerified) {
+        return res.status(403).json({
+          code: 'EMAIL_NOT_VERIFIED',
+          error: 'Confirme o e-mail da conta antes de executar a exclusão em nuvem.',
+        });
+      }
+
+      // 2) Verificação de autenticação recente (máximo 15 minutos desde último login/reautenticação)
+      let authTimeSeconds: number | null = null;
+      const jwtParts = idToken.split('.');
+      if (jwtParts.length === 3) {
+        try {
+          const payloadJson = JSON.parse(
+            Buffer.from(jwtParts[1], 'base64url').toString('utf-8')
+          ) as { auth_time?: unknown };
+          if (typeof payloadJson.auth_time === 'number' && Number.isFinite(payloadJson.auth_time)) {
+            authTimeSeconds = payloadJson.auth_time;
+          }
+        } catch {
+          // fallback para lastLoginAt
+        }
+      }
+      if (authTimeSeconds === null && verifiedAccount.lastLoginAt) {
+        const parsedMs = Number(verifiedAccount.lastLoginAt);
+        if (Number.isFinite(parsedMs)) {
+          authTimeSeconds = Math.floor(parsedMs / 1000);
+        }
+      }
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      if (authTimeSeconds !== null && nowSeconds - authTimeSeconds > 900) {
+        return res.status(401).json({
+          code: 'REQUIRES_RECENT_LOGIN',
+          error: 'Por segurança, confirme sua senha ou login Google novamente antes de excluir a conta.',
+        });
+      }
+
+      // 3) Exclusão em cascata respeitando a hierarquia e userExists(userId) das Firestore Rules
+      const firestoreBase = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+        firebaseConfig.projectId
+      )}/databases/${encodeURIComponent(firebaseConfig.firestoreDatabaseId)}/documents`;
+
+      const deleteCollectionCascade = async (collectionName: string): Promise<number> => {
+        let deletedCount = 0;
+        let nextPageToken: string | undefined = undefined;
+
+        do {
+          const listUrl = new URL(`${firestoreBase}/users/${encodeURIComponent(uid)}/${collectionName}`);
+          listUrl.searchParams.set('pageSize', '100');
+          if (nextPageToken) {
+            listUrl.searchParams.set('pageToken', nextPageToken);
+          }
+
+          const listRes = await fetchFn(listUrl.toString(), {
+            method: 'GET',
+            headers: {
+              Authorization: `Bearer ${idToken}`,
+              Accept: 'application/json',
+            },
+            signal: AbortSignal.timeout(8000),
+          });
+
+          if (listRes.status === 404) {
+            break;
+          }
+          if (!listRes.ok) {
+            throw new Error(`Falha ao listar subcoleção ${collectionName} (HTTP ${listRes.status}).`);
+          }
+
+          const listData = (await listRes.json()) as {
+            documents?: Array<{ name?: string }>;
+            nextPageToken?: string;
+          };
+
+          const docs = (listData.documents || []).filter((d) => typeof d.name === 'string');
+          for (let i = 0; i < docs.length; i += 10) {
+            const chunk = docs.slice(i, i + 10);
+            await Promise.all(
+              chunk.map(async (d) => {
+                const delRes = await fetchFn(`https://firestore.googleapis.com/v1/${d.name}`, {
+                  method: 'DELETE',
+                  headers: { Authorization: `Bearer ${idToken}` },
+                  signal: AbortSignal.timeout(8000),
+                });
+                if (!delRes.ok && delRes.status !== 404) {
+                  throw new Error(`Falha ao remover documento em ${collectionName} (HTTP ${delRes.status}).`);
+                }
+                deletedCount += 1;
+              })
+            );
+          }
+
+          nextPageToken = listData.nextPageToken;
+        } while (nextPageToken);
+
+        return deletedCount;
+      };
+
+      const leafCollections = [
+        'priceHistory',
+        'basketItems',
+        'incomeHistory',
+        'strategies',
+        'monthlyClosures',
+        'consumptionGroups',
+        'consentRecords',
+        'termsAcceptances',
+        'privacyRequests',
+      ];
+
+      let totalDeletedDocs = 0;
+      for (const col of leafCollections) {
+        totalDeletedDocs += await deleteCollectionCascade(col);
+      }
+
+      // Perfis após itens/estratégias
+      totalDeletedDocs += await deleteCollectionCascade('profiles');
+
+      // Subcoleção isolada de PII (private/account)
+      const privRes = await fetchFn(
+        `${firestoreBase}/users/${encodeURIComponent(uid)}/private/account`,
+        {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${idToken}` },
+          signal: AbortSignal.timeout(8000),
+        }
+      );
+      if (privRes.ok) {
+        totalDeletedDocs += 1;
+      } else if (privRes.status !== 404) {
+        throw new Error(`Falha ao excluir private/account (HTTP ${privRes.status}).`);
+      }
+
+      // Documento raiz users/{uid} por último (preserva userExists durante subcoleções)
+      const rootRes = await fetchFn(`${firestoreBase}/users/${encodeURIComponent(uid)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${idToken}` },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (rootRes.ok) {
+        totalDeletedDocs += 1;
+      } else if (rootRes.status !== 404) {
+        throw new Error(`Falha ao excluir documento raiz do usuário (HTTP ${rootRes.status}).`);
+      }
+
+      // 4) Excluir conta no Firebase Authentication (Identity Toolkit accounts:delete)
+      const authDeleteRes = await fetchFn(
+        `https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${encodeURIComponent(
+          firebaseConfig.apiKey
+        )}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken }),
+          signal: AbortSignal.timeout(8000),
+        }
+      );
+
+      if (!authDeleteRes.ok) {
+        return res.status(502).json({
+          code: 'AUTH_DELETE_FAILED',
+          error:
+            'Os dados do Firestore foram removidos, mas houve falha ao encerrar a conta no Firebase Authentication. Tente entrar e concluir a exclusão ou solicite suporte.',
+          deletedDocuments: totalDeletedDocs,
+        });
+      }
+
+      const maskedUid = `${uid.slice(0, 6)}***`;
+      console.info(
+        `[IPCA-Casa LGPD] Exclusão integral de conta concluída (uid=${maskedUid}, docs=${totalDeletedDocs}).`
+      );
+
+      return res.status(200).json({
+        success: true,
+        deletedDocuments: totalDeletedDocs,
+        authDeleted: true,
+        completedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      const safeMsg = err instanceof Error ? err.message.slice(0, 180) : 'Erro desconhecido';
+      console.error('[IPCA-Casa LGPD Error] Falha na exclusão de conta:', safeMsg);
+      return res.status(502).json({
+        code: 'DELETE_CASCADE_FAILED',
+        error: 'Não foi possível concluir a exclusão completa da conta no momento. Nenhuma confirmação falsa foi emitida.',
+      });
     }
   });
 

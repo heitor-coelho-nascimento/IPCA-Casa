@@ -30,7 +30,14 @@ import {
   IBGEService,
 } from './services/ibge';
 import { PUBLIC_ROUTES, normalizeRoutePath } from './config/seo';
+import { POLICY_VERSION, TERMS_VERSION } from './config/privacy';
 import { trackLogin, trackSignUp, trackViewDashboard } from './services/analytics';
+import {
+  clearPendingTermsAcceptance,
+  openCookiePreferencesModal,
+  readPendingTermsAcceptance,
+} from './services/consent';
+import { runLocalDataRetentionSweep } from './services/retention';
 import { getMonthsAgoIsoDate, getTodayIsoDate } from './utils/dates';
 import { buildDuplicateSignature } from './utils/csvImport';
 import { resolveProfileMode } from './utils/profileMode';
@@ -49,6 +56,9 @@ const OfficialIpcaPublicPage = lazy(() =>
 );
 const PrivacyPublicPage = lazy(() =>
   import('./views/public/PrivacyPublicPage').then((m) => ({ default: m.PrivacyPublicPage }))
+);
+const TermsPublicPage = lazy(() =>
+  import('./views/public/TermsPublicPage').then((m) => ({ default: m.TermsPublicPage }))
 );
 
 const Sidebar = lazy(() =>
@@ -174,8 +184,8 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error('[IPCA-Casa ErrorBoundary]', error, errorInfo);
+  componentDidCatch(error: Error) {
+    console.error(`[IPCA-Casa ErrorBoundary] ${error.message || 'Erro de renderização'}`);
   }
 
   render() {
@@ -261,6 +271,13 @@ export default function App() {
   const [googleLandingLoading, setGoogleLandingLoading] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isConfirmEmptyOpen, setIsConfirmEmptyOpen] = useState(false);
+
+  // Governança LGPD: gate pós-login de aceite de termos e visualizador modal autenticado
+  const [needsTermsAcceptanceGate, setNeedsTermsAcceptanceGate] = useState(false);
+  const [termsGateCheckbox, setTermsGateCheckbox] = useState(false);
+  const [termsGateSaving, setTermsGateSaving] = useState(false);
+  const [termsGateError, setTermsGateError] = useState<string | null>(null);
+  const [dashboardLegalDoc, setDashboardLegalDoc] = useState<'privacy' | 'terms' | null>(null);
 
   // Navegação do Painel & Busca Global
   const [activeTab, setActiveTab] = useState<NavTab>(initialTabFromUrl || 'visao-geral');
@@ -377,6 +394,11 @@ export default function App() {
     }
   }, []);
 
+  // Política de retenção e minimização automática local no carregamento
+  useEffect(() => {
+    runLocalDataRetentionSweep();
+  }, []);
+
   // Sincronização do botão voltar/avançar do navegador
   useEffect(() => {
     const onPopState = () => {
@@ -476,6 +498,25 @@ export default function App() {
             testFirestoreConnection().catch(() => {});
             const { user } = await FirestoreService.ensureUserBootstrapped(firebaseUser);
             if (!active) return;
+
+            const pendingTerms = readPendingTermsAcceptance();
+            if (pendingTerms) {
+              await FirestoreService.recordTermsAcceptance(user.id, pendingTerms).catch(() => {});
+              clearPendingTermsAcceptance();
+              if (active) setNeedsTermsAcceptanceGate(false);
+            } else {
+              try {
+                const hasAccepted = await FirestoreService.hasAcceptedTermsVersion(
+                  user.id,
+                  TERMS_VERSION,
+                  POLICY_VERSION
+                );
+                if (active) setNeedsTermsAcceptanceGate(!hasAccepted);
+              } catch {
+                // Em caso de falha transitória, não trava o carregamento e tentará na próxima sessão
+              }
+            }
+
             setFirebaseUid(user.id);
             setIsDemo(false);
             setPendingVerificationEmail(null);
@@ -485,13 +526,15 @@ export default function App() {
             setIsAuthModalOpen(false);
             runLegacyScanForUser(user.id);
           } catch (err) {
-            console.error('Erro ao inicializar sessão no Cloud Firestore:', err);
+            const msg = err instanceof Error ? err.message : 'erro desconhecido';
+            console.error(`Erro ao inicializar sessão no Cloud Firestore (${msg})`);
             setIsAuthInitializing(false);
           }
         });
       })
       .catch((err) => {
-        console.warn('Falha ao carregar módulo de autenticação Firebase:', err);
+        const msg = err instanceof Error ? err.message : 'erro desconhecido';
+        console.warn(`Falha ao carregar módulo de autenticação Firebase (${msg})`);
         if (active) setIsAuthInitializing(false);
       });
 
@@ -511,7 +554,8 @@ export default function App() {
         if (active) setIbgeMetadata(meta);
       })
       .catch((err) => {
-        console.warn('Sincronização em segundo plano do IBGE:', err);
+        const msg = err instanceof Error ? err.message : 'erro desconhecido';
+        console.warn(`Sincronização em segundo plano do IBGE indisponível (${msg})`);
       });
 
     return () => {
@@ -563,7 +607,8 @@ export default function App() {
         });
       })
       .catch((err) => {
-        console.error('Erro ao conectar listeners do Cloud Firestore:', err);
+        const msg = err instanceof Error ? err.message : 'erro desconhecido';
+        console.error(`Erro ao conectar listeners do Cloud Firestore (${msg})`);
       });
 
     return () => {
@@ -826,13 +871,17 @@ export default function App() {
     try {
       await AuthService.logout();
     } catch (err) {
-      console.warn('Erro ao encerrar sessão Firebase:', err);
+      const msg = err instanceof Error ? err.message : 'erro desconhecido';
+      console.warn(`Erro ao encerrar sessão Firebase (${msg})`);
     }
     scannedLegacyUidRef.current = null;
     setFirebaseUid(null);
     setCurrentUser(null);
     setPendingVerificationEmail(null);
     setIsDemo(false);
+    setNeedsTermsAcceptanceGate(false);
+    setTermsGateCheckbox(false);
+    setDashboardLegalDoc(null);
     setIsOnboardingOpen(false);
     setIsMigrationModalOpen(false);
     setPendingLegacyBundle(null);
@@ -853,6 +902,66 @@ export default function App() {
     setGlobalSearchTerm('');
     setActiveTab('visao-geral');
     navigateUrl('/', true);
+  };
+
+  // Handler após exclusão definitiva da conta pelo titular (LGPD Art. 18, VI)
+  const handleAccountDeleted = useCallback(() => {
+    scannedLegacyUidRef.current = null;
+    setFirebaseUid(null);
+    setCurrentUser(null);
+    setPendingVerificationEmail(null);
+    setIsDemo(false);
+    setNeedsTermsAcceptanceGate(false);
+    setTermsGateCheckbox(false);
+    setDashboardLegalDoc(null);
+    setIsOnboardingOpen(false);
+    setIsMigrationModalOpen(false);
+    setPendingLegacyBundle(null);
+    setCloudProfiles([]);
+    setCloudItems([]);
+    setCloudIncomeHistory([]);
+    setCloudPriceHistory([]);
+    setCloudConsumptionGroups([]);
+    setCloudPlansA([]);
+    setCloudPlansB([]);
+    setCloudPlansC([]);
+    setCloudMonthlyClosures([]);
+    setLocalItems([]);
+    setLocalProfiles([SHELL_FALLBACK_PROFILE]);
+    setLocalActiveProfile(SHELL_FALLBACK_PROFILE);
+    setLocalStateHydrated(false);
+    setActiveCloudProfileId('');
+    setGlobalSearchTerm('');
+    setActiveTab('visao-geral');
+    navigateUrl('/', true);
+    addToast('success', 'Conta e dados excluídos permanentemente da nuvem.');
+  }, [navigateUrl, addToast]);
+
+  // Confirmação do gate pós-login de Termos e Privacidade
+  const handleConfirmTermsGate = async () => {
+    if (!firebaseUid || !termsGateCheckbox) {
+      setTermsGateError(
+        'Marque a caixa de concordância com os Termos de Uso e a Política de Privacidade para continuar.'
+      );
+      return;
+    }
+    setTermsGateError(null);
+    setTermsGateSaving(true);
+    try {
+      const { FirestoreService } = await import('./services/firestore');
+      await FirestoreService.recordTermsAcceptance(firebaseUid, {
+        termsVersion: TERMS_VERSION,
+        policyVersion: POLICY_VERSION,
+        acceptanceMethod: 'post_login_gate',
+      });
+      setNeedsTermsAcceptanceGate(false);
+      setTermsGateCheckbox(false);
+      addToast('success', 'Aceite dos Termos de Uso e Política de Privacidade registrado.');
+    } catch {
+      setTermsGateError('Não foi possível registrar o aceite no momento. Tente novamente.');
+    } finally {
+      setTermsGateSaving(false);
+    }
   };
 
   // Handler de Entrada no Modo Demonstração
@@ -1707,7 +1816,7 @@ export default function App() {
           onOpenLogin={openLoginModal}
           onOpenRegister={openRegisterModal}
           onEnterDemo={handleEnterDemo}
-          onOpenTerms={() => navigateUrl('/privacidade')}
+          onOpenTerms={() => navigateUrl('/termos')}
         >
           {(!isKnownPublicPage && (
             <main className="max-w-[960px] mx-auto px-6 py-20 flex flex-col items-start gap-4">
@@ -1762,6 +1871,11 @@ export default function App() {
               <Suspense fallback={<PageChunkFallback />}>
                 <PrivacyPublicPage onNavigate={(path) => navigateUrl(path)} />
               </Suspense>
+            )) ||
+            (cleanPublicPath === '/termos' && (
+              <Suspense fallback={<PageChunkFallback />}>
+                <TermsPublicPage onNavigate={(path) => navigateUrl(path)} />
+              </Suspense>
             )) || (
               <LandingPageView
                 onOpenRegister={openRegisterModal}
@@ -1773,7 +1887,10 @@ export default function App() {
             )}
         </PublicLayout>
 
-        <AnalyticsConsentBanner onOpenPrivacy={() => navigateUrl('/privacidade')} />
+        <AnalyticsConsentBanner
+          onOpenPrivacy={() => navigateUrl('/privacidade')}
+          authenticatedUserId={isFirebaseMode ? firebaseUid : null}
+        />
 
         {isAuthModalOpen && (
           <Suspense fallback={null}>
@@ -2072,6 +2189,19 @@ export default function App() {
                 onNotify={addToast}
                 isDemo={isDemo}
                 isFirebaseMode={isFirebaseMode}
+                dataCounts={{
+                  profiles: profiles.length,
+                  items: isFirebaseMode ? cloudItems.length : items.length,
+                  prices: isFirebaseMode ? cloudPriceHistory.length : activePriceHistory.length,
+                  incomes: isFirebaseMode ? cloudIncomeHistory.length : activeIncomeHistory.length,
+                  strategies:
+                    (isFirebaseMode
+                      ? cloudPlansA.length + cloudPlansB.length + cloudPlansC.length
+                      : activePlansA.length + activePlansB.length + (activePlanC ? 1 : 0)),
+                  closures: isFirebaseMode ? cloudMonthlyClosures.length : activeMonthlyClosures.length,
+                }}
+                onAccountDeleted={handleAccountDeleted}
+                onOpenPrivacyPolicy={() => setDashboardLegalDoc('privacy')}
                 onExportBackupData={
                   isFirebaseMode
                     ? () => ({
@@ -2117,6 +2247,34 @@ export default function App() {
             )}
           </Suspense>
         </ErrorBoundary>
+
+          {/* Faixa discreta de privacidade e termos no rodapé do painel */}
+          <footer className="max-w-[1440px] mx-auto px-6 lg:px-12 pt-4 pb-2 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-[#76777d]">
+            <span>IPCA-Casa • Privacidade e Governança de Dados (LGPD)</span>
+            <div className="flex flex-wrap items-center gap-4">
+              <button
+                type="button"
+                onClick={openCookiePreferencesModal}
+                className="hover:text-[#0b1c30] underline cursor-pointer"
+              >
+                Preferências de Cookies
+              </button>
+              <button
+                type="button"
+                onClick={() => setDashboardLegalDoc('privacy')}
+                className="hover:text-[#0b1c30] underline cursor-pointer"
+              >
+                Política de Privacidade
+              </button>
+              <button
+                type="button"
+                onClick={() => setDashboardLegalDoc('terms')}
+                className="hover:text-[#0b1c30] underline cursor-pointer"
+              >
+                Termos de Uso
+              </button>
+            </div>
+          </footer>
       </main>
       </div>
 
@@ -2263,6 +2421,140 @@ export default function App() {
           />
         </Suspense>
       )}
+
+      {needsTermsAcceptanceGate && currentUser && isFirebaseMode && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="lgpd-terms-gate-title"
+          className="fixed inset-0 bg-[#213145]/75 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+        >
+          <div className="bg-[#ffffff] rounded-2xl max-w-lg w-full shadow-2xl border border-[#eff4ff] p-6 flex flex-col gap-4">
+            <div>
+              <span className="font-mono text-[11px] uppercase tracking-wider font-bold text-[#006a61]">
+                Atualização de Governança e Privacidade (LGPD)
+              </span>
+              <h2 id="lgpd-terms-gate-title" className="text-lg font-bold text-[#0b1c30] mt-1">
+                Confirme os Termos de Uso e a Política de Privacidade
+              </h2>
+              <p className="text-xs text-[#45464d] mt-1 leading-relaxed">
+                Para manter o registro formal do seu aceite nas versões atuais (Termos {TERMS_VERSION} • Política {POLICY_VERSION}), leia os documentos e confirme sua concordância abaixo.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setDashboardLegalDoc('privacy')}
+                className="px-3 py-1.5 rounded-lg bg-[#eff4ff] hover:bg-[#dce9ff] text-xs font-mono font-semibold text-[#0b1c30] cursor-pointer"
+              >
+                Ler Política de Privacidade
+              </button>
+              <button
+                type="button"
+                onClick={() => setDashboardLegalDoc('terms')}
+                className="px-3 py-1.5 rounded-lg bg-[#eff4ff] hover:bg-[#dce9ff] text-xs font-mono font-semibold text-[#0b1c30] cursor-pointer"
+              >
+                Ler Termos de Uso
+              </button>
+            </div>
+
+            {termsGateError && (
+              <div className="p-3 rounded-xl bg-[#ffdad6]/50 border border-[#ba1a1a]/30 text-xs font-mono text-[#ba1a1a]">
+                {termsGateError}
+              </div>
+            )}
+
+            <label className="flex items-start gap-2.5 text-xs text-[#45464d] cursor-pointer p-3 rounded-xl bg-[#f8f9ff] border border-[#dce9ff]">
+              <input
+                type="checkbox"
+                checked={termsGateCheckbox}
+                onChange={(e) => setTermsGateCheckbox(e.target.checked)}
+                className="mt-0.5 rounded border-[#c6c6cd] text-[#006a61] focus:ring-[#006a61]"
+              />
+              <span>
+                Li e concordo com os <strong>Termos de Uso ({TERMS_VERSION})</strong> e com a{' '}
+                <strong>Política de Privacidade ({POLICY_VERSION})</strong> do IPCA-Casa.
+              </span>
+            </label>
+
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-[#eff4ff]">
+              <button
+                type="button"
+                disabled={termsGateSaving}
+                onClick={handleLogout}
+                className="h-9 px-4 rounded-lg bg-[#eff4ff] text-[#45464d] hover:text-[#ba1a1a] text-xs font-semibold cursor-pointer"
+              >
+                Cancelar e Sair
+              </button>
+              <button
+                type="button"
+                disabled={termsGateSaving || !termsGateCheckbox}
+                onClick={handleConfirmTermsGate}
+                className="h-9 px-4 rounded-lg bg-[#000000] hover:bg-[#213145] text-[#ffffff] text-xs font-mono font-semibold cursor-pointer disabled:opacity-50"
+              >
+                {termsGateSaving ? 'Registrando aceite...' : 'Concordar e Continuar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {dashboardLegalDoc && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="dashboard-legal-doc-title"
+          className="fixed inset-0 bg-[#213145]/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+        >
+          <div className="bg-[#f8f9ff] rounded-2xl max-w-4xl w-full max-h-[88vh] shadow-2xl border border-[#eff4ff] flex flex-col overflow-hidden">
+            <div className="px-6 py-4 bg-[#ffffff] border-b border-[#eff4ff] flex items-center justify-between gap-3">
+              <h2 id="dashboard-legal-doc-title" className="text-sm font-bold text-[#0b1c30]">
+                {dashboardLegalDoc === 'privacy'
+                  ? 'Política de Privacidade — IPCA-Casa'
+                  : 'Termos de Uso — IPCA-Casa'}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setDashboardLegalDoc(null)}
+                className="h-8 px-3 rounded-lg bg-[#000000] text-[#ffffff] text-xs font-mono font-semibold cursor-pointer"
+              >
+                Fechar
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1">
+              <Suspense fallback={<PageChunkFallback />}>
+                {dashboardLegalDoc === 'privacy' ? (
+                  <PrivacyPublicPage
+                    onNavigate={(target) => {
+                      if (target === '/termos') {
+                        setDashboardLegalDoc('terms');
+                      } else {
+                        setDashboardLegalDoc(null);
+                      }
+                    }}
+                  />
+                ) : (
+                  <TermsPublicPage
+                    onNavigate={(target) => {
+                      if (target === '/privacidade') {
+                        setDashboardLegalDoc('privacy');
+                      } else {
+                        setDashboardLegalDoc(null);
+                      }
+                    }}
+                  />
+                )}
+              </Suspense>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <AnalyticsConsentBanner
+        onOpenPrivacy={() => setDashboardLegalDoc('privacy')}
+        authenticatedUserId={isFirebaseMode ? firebaseUid : null}
+      />
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>

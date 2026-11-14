@@ -27,6 +27,7 @@ import type {
   AccountingType,
   BasketItem,
   CompoundingFrequency,
+  ConsentRecord,
   ConsumptionFrequency,
   ConsumptionGroup,
   DataOrigin,
@@ -40,13 +41,18 @@ import type {
   MonthlyClosure,
   OpportunityPlanC,
   PriceRecord,
+  PrivacyRequestRecord,
+  PrivacyRightType,
   ProfileMode,
   RecurrenceType,
   StrategyStatus,
   SubstitutePlanA,
   TaxMode,
+  TermsAcceptanceRecord,
   UserAccount,
+  UserPrivacyExportBundle,
 } from '../types';
+import { POLICY_VERSION, TERMS_VERSION } from '../config/privacy';
 import { extractIsoDatePrefix, getMonthsAgoIsoDate, getTodayIsoDate } from '../utils/dates';
 import type { LegacyLocalBundle } from './auth';
 
@@ -2325,5 +2331,327 @@ export class FirestoreService {
         this.saveBasketItem(params.userId, { ...item, profileId: params.profile.id }, false)
       )
     );
+  }
+
+  static async recordConsent(
+    userId: string,
+    record: Omit<ConsentRecord, 'userId' | 'createdAt' | 'updatedAt'>
+  ): Promise<void> {
+    if (!db) return;
+    const uid = sanitizeFirestoreId(userId, 'usr');
+    const recordId = sanitizeFirestoreId(record.id, 'consent');
+    const path = `users/${uid}/consentRecords/${recordId}`;
+    const validSources = ['banner', 'modal', 'privacy_page', 'settings', 'revocation'];
+    const source = validSources.includes(record.source) ? record.source : 'modal';
+
+    try {
+      await setDoc(doc(db, path), {
+        id: recordId,
+        userId: uid,
+        anonymousConsentId: sanitizeFirestoreId(record.anonymousConsentId, 'cmp'),
+        essenciais: true,
+        analytics: Boolean(record.analytics),
+        marketing: Boolean(record.marketing),
+        cmpVersion: clampString(record.cmpVersion, BLUEPRINT_LIMITS.VERSION_MAX, 'v1'),
+        policyVersion: clampString(record.policyVersion, BLUEPRINT_LIMITS.VERSION_MAX, POLICY_VERSION),
+        source,
+        decidedAt: clampString(record.decidedAt || new Date().toISOString(), BLUEPRINT_LIMITS.VERSION_MAX),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, path);
+    }
+  }
+
+  static async listConsentRecords(userId: string): Promise<ConsentRecord[]> {
+    if (!db) return [];
+    const uid = sanitizeFirestoreId(userId, 'usr');
+    const path = `users/${uid}/consentRecords`;
+    try {
+      const snap = await getDocs(query(collection(db, path), where('userId', '==', uid)));
+      return snap.docs
+        .map((d) => {
+          const raw = d.data();
+          return {
+            id: String(raw.id || d.id),
+            userId: String(raw.userId || uid),
+            anonymousConsentId: String(raw.anonymousConsentId || ''),
+            essenciais: true as const,
+            analytics: Boolean(raw.analytics),
+            marketing: Boolean(raw.marketing),
+            cmpVersion: String(raw.cmpVersion || ''),
+            policyVersion: String(raw.policyVersion || ''),
+            source: (raw.source || 'modal') as ConsentRecord['source'],
+            decidedAt: String(raw.decidedAt || timestampToIso(raw.createdAt)),
+            createdAt: timestampToIso(raw.createdAt),
+            updatedAt: timestampToIso(raw.updatedAt),
+          };
+        })
+        .sort((a, b) => b.decidedAt.localeCompare(a.decidedAt));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  }
+
+  static async recordTermsAcceptance(
+    userId: string,
+    params: {
+      termsVersion?: string;
+      policyVersion?: string;
+      acceptanceMethod: TermsAcceptanceRecord['acceptanceMethod'];
+      acceptedAt?: string;
+    }
+  ): Promise<TermsAcceptanceRecord | null> {
+    if (!db) return null;
+    const uid = sanitizeFirestoreId(userId, 'usr');
+    const acceptanceId = sanitizeFirestoreId(`terms_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, 'terms');
+    const path = `users/${uid}/termsAcceptances/${acceptanceId}`;
+    const termsVersion = clampString(params.termsVersion || TERMS_VERSION, BLUEPRINT_LIMITS.VERSION_MAX, TERMS_VERSION);
+    const policyVersion = clampString(params.policyVersion || POLICY_VERSION, BLUEPRINT_LIMITS.VERSION_MAX, POLICY_VERSION);
+    const acceptedAt = clampString(params.acceptedAt || new Date().toISOString(), BLUEPRINT_LIMITS.VERSION_MAX);
+    const method =
+      params.acceptanceMethod === 'email_register' ||
+      params.acceptanceMethod === 'google_signin' ||
+      params.acceptanceMethod === 'post_login_gate'
+        ? params.acceptanceMethod
+        : 'post_login_gate';
+
+    try {
+      await setDoc(doc(db, path), {
+        id: acceptanceId,
+        userId: uid,
+        termsVersion,
+        policyVersion,
+        acceptedTerms: true,
+        acceptedPrivacy: true,
+        acceptanceMethod: method,
+        acceptedAt,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      return {
+        id: acceptanceId,
+        userId: uid,
+        termsVersion,
+        policyVersion,
+        acceptedTerms: true,
+        acceptedPrivacy: true,
+        acceptanceMethod: method,
+        acceptedAt,
+      };
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, path);
+    }
+  }
+
+  static async listTermsAcceptances(userId: string): Promise<TermsAcceptanceRecord[]> {
+    if (!db) return [];
+    const uid = sanitizeFirestoreId(userId, 'usr');
+    const path = `users/${uid}/termsAcceptances`;
+    try {
+      const snap = await getDocs(query(collection(db, path), where('userId', '==', uid)));
+      return snap.docs
+        .map((d) => {
+          const raw = d.data();
+          return {
+            id: String(raw.id || d.id),
+            userId: String(raw.userId || uid),
+            termsVersion: String(raw.termsVersion || ''),
+            policyVersion: String(raw.policyVersion || ''),
+            acceptedTerms: Boolean(raw.acceptedTerms),
+            acceptedPrivacy: Boolean(raw.acceptedPrivacy),
+            acceptanceMethod: (raw.acceptanceMethod || 'post_login_gate') as TermsAcceptanceRecord['acceptanceMethod'],
+            acceptedAt: String(raw.acceptedAt || timestampToIso(raw.createdAt)),
+            createdAt: timestampToIso(raw.createdAt),
+            updatedAt: timestampToIso(raw.updatedAt),
+          };
+        })
+        .sort((a, b) => b.acceptedAt.localeCompare(a.acceptedAt));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  }
+
+  static async hasAcceptedTermsVersion(
+    userId: string,
+    termsVersion = TERMS_VERSION,
+    policyVersion = POLICY_VERSION
+  ): Promise<boolean> {
+    if (!db) return true;
+    const records = await this.listTermsAcceptances(userId);
+    return records.some(
+      (r) =>
+        r.acceptedTerms &&
+        r.acceptedPrivacy &&
+        r.termsVersion === termsVersion &&
+        r.policyVersion === policyVersion
+    );
+  }
+
+  static async createPrivacyRequest(
+    userId: string,
+    params: {
+      requestType: PrivacyRightType;
+      details: string;
+    }
+  ): Promise<PrivacyRequestRecord | null> {
+    if (!db) return null;
+    const uid = sanitizeFirestoreId(userId, 'usr');
+    const requestId = sanitizeFirestoreId(`req_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, 'req');
+    const path = `users/${uid}/privacyRequests/${requestId}`;
+    const details = clampString(params.details, BLUEPRINT_LIMITS.REQUEST_DETAILS_MAX, 'Solicitação do titular');
+    const requestedAt = new Date().toISOString().slice(0, BLUEPRINT_LIMITS.VERSION_MAX);
+
+    try {
+      await setDoc(doc(db, path), {
+        id: requestId,
+        userId: uid,
+        requestType: params.requestType,
+        status: 'registrada',
+        details,
+        requestedAt,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      return {
+        id: requestId,
+        userId: uid,
+        requestType: params.requestType,
+        status: 'registrada',
+        details,
+        requestedAt,
+      };
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, path);
+    }
+  }
+
+  static async listPrivacyRequests(userId: string): Promise<PrivacyRequestRecord[]> {
+    if (!db) return [];
+    const uid = sanitizeFirestoreId(userId, 'usr');
+    const path = `users/${uid}/privacyRequests`;
+    try {
+      const snap = await getDocs(query(collection(db, path), where('userId', '==', uid)));
+      return snap.docs
+        .map((d) => {
+          const raw = d.data();
+          return {
+            id: String(raw.id || d.id),
+            userId: String(raw.userId || uid),
+            requestType: raw.requestType as PrivacyRightType,
+            status: (raw.status || 'registrada') as PrivacyRequestRecord['status'],
+            details: String(raw.details || ''),
+            resolutionNote: typeof raw.resolutionNote === 'string' ? raw.resolutionNote : undefined,
+            requestedAt: String(raw.requestedAt || timestampToIso(raw.createdAt)),
+            createdAt: timestampToIso(raw.createdAt),
+            updatedAt: timestampToIso(raw.updatedAt),
+          };
+        })
+        .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  }
+
+  static async cancelPrivacyRequest(userId: string, requestId: string): Promise<void> {
+    if (!db) return;
+    const uid = sanitizeFirestoreId(userId, 'usr');
+    const cleanId = sanitizeFirestoreId(requestId, 'req');
+    const path = `users/${uid}/privacyRequests/${cleanId}`;
+    try {
+      await updateDoc(doc(db, path), {
+        status: 'cancelada',
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  }
+
+  static async exportAllUserDataBundle(
+    userId: string,
+    accountUser?: UserAccount | null
+  ): Promise<UserPrivacyExportBundle> {
+    if (!db) {
+      throw new Error('Cloud Firestore não está configurado neste ambiente.');
+    }
+    const uid = sanitizeFirestoreId(userId, 'usr');
+    const safeDocs = async (colName: string): Promise<Array<Record<string, unknown>>> => {
+      const colPath = `users/${uid}/${colName}`;
+      try {
+        const snap = await getDocs(query(collection(db!, colPath), where('userId', '==', uid)));
+        return snap.docs.map((d) => {
+          const data = { ...(d.data() as Record<string, unknown>) };
+          if (data.createdAt && typeof (data.createdAt as Timestamp).toDate === 'function') {
+            data.createdAt = (data.createdAt as Timestamp).toDate().toISOString();
+          }
+          if (data.updatedAt && typeof (data.updatedAt as Timestamp).toDate === 'function') {
+            data.updatedAt = (data.updatedAt as Timestamp).toDate().toISOString();
+          }
+          return data;
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.LIST, colPath);
+      }
+    };
+
+    const [
+      userPublicSnap,
+      userPrivateSnap,
+      profiles,
+      consumptionGroups,
+      basketItems,
+      priceHistory,
+      incomeHistory,
+      strategies,
+      monthlyClosures,
+      consentRecords,
+      termsAcceptances,
+      privacyRequests,
+    ] = await Promise.all([
+      getDoc(doc(db, `users/${uid}`)),
+      getDoc(doc(db, `users/${uid}/private/account`)),
+      safeDocs('profiles'),
+      safeDocs('consumptionGroups'),
+      safeDocs('basketItems'),
+      safeDocs('priceHistory'),
+      safeDocs('incomeHistory'),
+      safeDocs('strategies'),
+      safeDocs('monthlyClosures'),
+      safeDocs('consentRecords'),
+      safeDocs('termsAcceptances'),
+      safeDocs('privacyRequests'),
+    ]);
+
+    const pub = userPublicSnap.exists() ? userPublicSnap.data() : {};
+    const priv = userPrivateSnap.exists() ? userPrivateSnap.data() : {};
+
+    return {
+      exportedAt: new Date().toISOString(),
+      exportVersion: '1.0.0',
+      policyVersion: POLICY_VERSION,
+      termsVersion: TERMS_VERSION,
+      account: {
+        userId: uid,
+        email: String(priv.email || accountUser?.email || ''),
+        displayName: String(pub.displayName || accountUser?.displayName || ''),
+        authProvider: String(pub.authProvider || accountUser?.authProvider || ''),
+        emailVerified: accountUser?.emailVerified,
+        defaultProfileId: typeof pub.defaultProfileId === 'string' ? pub.defaultProfileId : accountUser?.profileId,
+        createdAt: pub.createdAt ? timestampToIso(pub.createdAt) : accountUser?.createdAt,
+        lastLoginAt: accountUser?.lastLoginAt,
+      },
+      profiles: profiles as unknown as FamilyProfile[],
+      consumptionGroups: consumptionGroups as unknown as ConsumptionGroup[],
+      basketItems: basketItems as unknown as BasketItem[],
+      priceHistory: priceHistory as unknown as PriceRecord[],
+      incomeHistory: incomeHistory as unknown as IncomeRecord[],
+      strategies: strategies as UserPrivacyExportBundle['strategies'],
+      monthlyClosures: monthlyClosures as unknown as MonthlyClosure[],
+      consentRecords: consentRecords as unknown as ConsentRecord[],
+      termsAcceptances: termsAcceptances as unknown as TermsAcceptanceRecord[],
+      privacyRequests: privacyRequests as unknown as PrivacyRequestRecord[],
+    };
   }
 }
