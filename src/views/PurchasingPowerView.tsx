@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { EconomicCalculationSummary, ProfileMode } from '../types';
+import { EconomicCalculationSummary, FamilyProfile, ProfileMode } from '../types';
 import {
   formatDateRangeLabel,
   formatMonthYearLabel,
@@ -12,11 +12,13 @@ import { getProfileModeCopy } from '../utils/profileMode';
 
 interface PurchasingPowerViewProps {
   summary: EconomicCalculationSummary;
+  activeProfile?: FamilyProfile | null;
   onUpdateIncome: (
     initial: number,
     final: number,
     dates?: { initialDate?: string; finalDate?: string }
   ) => void | Promise<void>;
+  onOpenQuestionnaire?: () => void;
   isDemo: boolean;
   profileMode?: ProfileMode;
 }
@@ -35,12 +37,17 @@ function formatCurrencyBR(value: number): string {
 
 export const PurchasingPowerView: React.FC<PurchasingPowerViewProps> = ({
   summary,
+  activeProfile = null,
   onUpdateIncome,
+  onOpenQuestionnaire,
   isDemo,
   profileMode = 'pessoal',
 }) => {
   const modeCopy = getProfileModeCopy(profileMode);
   const isBiz = modeCopy.mode === 'negocio';
+  const isStudent = modeCopy.mode === 'estudante';
+  const hasNoOwnIncome = Boolean(summary.hasNoOwnIncome || activeProfile?.hasNoOwnIncome);
+  const surplusBreakdown = summary.surplusBreakdown;
   const { ipcaCasa12M, ipcaIBGE12M, spreadPP, purchasingPower } = summary;
 
   // Estado do simulador interativo de reajuste necessário (sem defaults fictícios)
@@ -321,8 +328,10 @@ export const PurchasingPowerView: React.FC<PurchasingPowerViewProps> = ({
             <h1 className="text-3xl font-bold text-[#0b1c30] tracking-tight mt-1">{modeCopy.incomeHeading}</h1>
             <p className="text-xs text-[#45464d] max-w-2xl mt-1 leading-relaxed">
               {isBiz
-                ? 'Compare a evolução do faturamento ou sobra mensal com a alta dos seus insumos e custos operacionais para saber se a margem está acompanhando os preços.'
-                : 'Compare a evolução da sua renda com a variação dos seus gastos para saber se seu dinheiro está comprando mais ou menos do que antes.'}
+                ? 'Compare a evolução do faturamento mensal com a alta dos seus insumos e custos operacionais para saber se a receita está acompanhando os preços.'
+                : isStudent
+                  ? 'Compare a evolução da sua renda, bolsa ou auxílio com a variação dos gastos estudantis, ou acompanhe apenas os gastos se não possuir renda própria.'
+                  : 'Compare a evolução da sua renda com a variação dos seus gastos para saber se seu dinheiro está comprando mais ou menos do que antes.'}
             </p>
           </div>
 
@@ -390,22 +399,37 @@ export const PurchasingPowerView: React.FC<PurchasingPowerViewProps> = ({
             <>
               <div className="flex flex-col gap-2">
                 <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-[#497cff]" />
-                  <span className="font-mono text-xs uppercase font-semibold tracking-wider text-[#497cff]">
-                    Renda Não Cadastrada
+                  <span className={`w-2 h-2 rounded-full ${hasNoOwnIncome ? 'bg-[#006a61]' : 'bg-[#497cff]'}`} />
+                  <span className={`font-mono text-xs uppercase font-semibold tracking-wider ${hasNoOwnIncome ? 'text-[#006a61]' : 'text-[#497cff]'}`}>
+                    {hasNoOwnIncome ? 'Sem Renda Própria' : 'Renda Não Cadastrada'}
                   </span>
                 </div>
-                <h3 className="text-base font-bold text-[#0b1c30]">Diagnóstico Pendente</h3>
+                <h3 className="text-base font-bold text-[#0b1c30]">
+                  {hasNoOwnIncome ? 'Acompanhamento Focado nos Gastos' : 'Diagnóstico Pendente'}
+                </h3>
                 <p className="text-xs text-[#45464d] leading-relaxed">
-                  Informe o rendimento inicial e atual no simulador abaixo e clique em sincronizar para calcular o ganho ou corrosão real frente ao seu IPCA-Casa.
+                  {hasNoOwnIncome
+                    ? 'Este perfil foi configurado sem renda própria. O painel acompanha a evolução dos seus gastos sem exigir salário nem acusar déficit salarial.'
+                    : 'Informe o rendimento inicial e atual no simulador abaixo e clique em sincronizar para calcular o ganho ou corrosão real frente ao seu IPCA-Casa.'}
                 </p>
               </div>
-              <a
-                href="#simulador-renda"
-                className="mt-4 w-full py-2.5 bg-[#000000] text-[#ffffff] rounded-lg font-mono text-xs text-center hover:bg-[#213145] transition-colors"
-              >
-                Informar Renda Agora
-              </a>
+              <div className="mt-4 flex flex-col gap-2">
+                {hasNoOwnIncome && onOpenQuestionnaire && (
+                  <button
+                    type="button"
+                    onClick={onOpenQuestionnaire}
+                    className="w-full py-2 bg-[#ffffff] border border-[#c6c6cd] text-[#0b1c30] rounded-lg font-mono text-xs text-center hover:bg-[#e5eeff] transition-colors cursor-pointer"
+                  >
+                    Atualizar Questionário
+                  </button>
+                )}
+                <a
+                  href="#simulador-renda"
+                  className="w-full py-2.5 bg-[#000000] text-[#ffffff] rounded-lg font-mono text-xs text-center hover:bg-[#213145] transition-colors"
+                >
+                  {hasNoOwnIncome ? 'Simular Auxílio (Opcional)' : 'Informar Renda Agora'}
+                </a>
+              </div>
             </>
           ) : (
             <>
@@ -478,12 +502,18 @@ export const PurchasingPowerView: React.FC<PurchasingPowerViewProps> = ({
           </div>
           <div className="flex flex-col">
             <div className="text-2xl font-bold text-[#0b1c30] font-mono tracking-tight">
-              {nominalGrowthDisplay !== null ? formatSignedPercent(nominalGrowthDisplay) : 'Aguardando'}
+              {nominalGrowthDisplay !== null
+                ? formatSignedPercent(nominalGrowthDisplay)
+                : hasNoOwnIncome
+                  ? 'Sem renda própria'
+                  : 'Aguardando'}
             </div>
             <span className="text-xs text-[#45464d] mt-0.5">
               {hasAnyIncomeToChart
                 ? `${formatCurrencyBR(displayInitial)} → ${formatCurrencyBR(displayFinal)}`
-                : 'Informe as rendas no simulador'}
+                : hasNoOwnIncome
+                  ? 'Acompanhamento focado nos gastos'
+                  : 'Informe os valores no simulador'}
             </span>
           </div>
           <div
@@ -502,7 +532,9 @@ export const PurchasingPowerView: React.FC<PurchasingPowerViewProps> = ({
             </span>
             <span>
               {nominalGrowthDisplay === null
-                ? 'Sem histórico salarial'
+                ? hasNoOwnIncome
+                  ? 'Sem divisão salarial'
+                  : 'Sem histórico de renda'
                 : `Diferença: ${displayFinal >= displayInitial ? '+' : '-'}${formatCurrencyBR(
                     Math.abs(displayFinal - displayInitial)
                   )}`}
@@ -513,7 +545,9 @@ export const PurchasingPowerView: React.FC<PurchasingPowerViewProps> = ({
         {/* Card 2: Inflação Pessoal IPCA-Casa */}
         <div className="bg-[#ffffff] rounded-xl p-4 shadow-sm flex flex-col justify-between gap-2 border border-[#eff4ff]">
           <div className="flex items-center justify-between">
-            <span className="font-mono text-xs text-[#45464d] uppercase tracking-wider">Inflação Pessoal</span>
+            <span className="font-mono text-xs text-[#45464d] uppercase tracking-wider">
+              {modeCopy.inflationLabel}
+            </span>
             <span
               className={`w-8 h-8 rounded-lg flex items-center justify-center ${
                 ipcaCasa12M < 0 ? 'bg-[#86f2e4]/40 text-[#006a61]' : 'bg-[#ffdad6]/40 text-[#ba1a1a]'
@@ -579,10 +613,14 @@ export const PurchasingPowerView: React.FC<PurchasingPowerViewProps> = ({
                   : 'text-[#006a61]'
               }`}
             >
-              {realChangePctDisplay !== null ? formatSignedPercent(realChangePctDisplay) : 'Aguardando'}
+              {realChangePctDisplay !== null
+                ? formatSignedPercent(realChangePctDisplay)
+                : hasNoOwnIncome
+                  ? 'Sem renda própria'
+                  : 'Aguardando'}
             </div>
             <span className="font-mono text-[11px] text-[#76777d] mt-0.5">
-              [(1 + g) / (1 + π) - 1]
+              {hasNoOwnIncome ? 'Comparação não aplicável' : '[(1 + g) / (1 + π) - 1]'}
             </span>
           </div>
           <div
@@ -605,7 +643,9 @@ export const PurchasingPowerView: React.FC<PurchasingPowerViewProps> = ({
             />
             <span>
               {realChangePctDisplay === null
-                ? 'Cadastre a renda'
+                ? hasNoOwnIncome
+                  ? 'Foco na variação de preços'
+                  : 'Cadastre a renda'
                 : realChangePctDisplay < 0
                 ? 'Corrosão real líquida'
                 : realChangePctDisplay > 0
@@ -643,13 +683,17 @@ export const PurchasingPowerView: React.FC<PurchasingPowerViewProps> = ({
                   {formatCurrencyBR(Math.abs(realDiffReaisDisplay))}
                   <span className="text-xs text-[#76777d] font-normal">/mês</span>
                 </>
+              ) : hasNoOwnIncome ? (
+                'Sem renda própria'
               ) : (
                 'Não apurado'
               )}
             </div>
             <span className="text-xs text-[#45464d] mt-0.5">
               {realDiffReaisDisplay === null
-                ? 'Aguardando faixa de renda'
+                ? hasNoOwnIncome
+                  ? 'Sem comparação com renda'
+                  : 'Aguardando faixa de renda'
                 : realDiffReaisDisplay < 0
                 ? 'Déficit para manter padrão'
                 : 'Excedente frente à inflação'}
@@ -658,10 +702,56 @@ export const PurchasingPowerView: React.FC<PurchasingPowerViewProps> = ({
           <div className="pt-1 font-mono text-xs text-[#76777d]">
             {realDiffReaisDisplay !== null
               ? `${formatCurrencyBR(Math.abs(realDiffReaisDisplay) * 12)} projeção 12 meses`
-              : 'Sem dados salariais'}
+              : isBiz
+                ? modeCopy.surplusNotice
+                : 'Sem dados salariais'}
           </div>
         </div>
       </div>
+
+      {/* Transparência de Sobras (Informada x Estimada x Calculada) */}
+      {surplusBreakdown && (
+        <div className="bg-[#ffffff] rounded-xl p-4 border border-[#eff4ff] shadow-sm flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-mono text-xs uppercase tracking-wider font-semibold text-[#0b1c30]">
+              Detalhamento de Sobra e Resultado Mensal
+            </span>
+            {surplusBreakdown.isBusinessEstimateNotice && (
+              <span className="px-2.5 py-0.5 rounded-full bg-[#fef3c7] text-[#92400e] font-mono text-[11px] font-semibold">
+                {modeCopy.surplusNotice}
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div className="p-3 rounded-lg bg-[#eff4ff]">
+              <span className="font-mono text-[11px] text-[#76777d] block">Sobra informada</span>
+              <span className="font-mono text-sm font-bold text-[#0b1c30]">
+                {surplusBreakdown.reportedMonthlySurplus !== null
+                  ? formatCurrencyBR(surplusBreakdown.reportedMonthlySurplus)
+                  : 'Não informada'}
+              </span>
+            </div>
+            <div className="p-3 rounded-lg bg-[#eff4ff]">
+              <span className="font-mono text-[11px] text-[#76777d] block">Sobra estimada (renda − gasto estimado)</span>
+              <span className="font-mono text-sm font-bold text-[#0b1c30]">
+                {surplusBreakdown.estimatedMonthlySurplus !== null
+                  ? formatCurrencyBR(surplusBreakdown.estimatedMonthlySurplus)
+                  : 'Não apurada'}
+              </span>
+            </div>
+            <div className="p-3 rounded-lg bg-[#eff4ff]">
+              <span className="font-mono text-[11px] text-[#76777d] block">Saldo efetivo calculado</span>
+              <span className="font-mono text-sm font-bold text-[#006a61]">
+                {hasNoOwnIncome
+                  ? 'Sem renda própria'
+                  : surplusBreakdown.effectiveCalculatedBalance !== null
+                    ? formatCurrencyBR(surplusBreakdown.effectiveCalculatedBalance)
+                    : 'Aguardando renda'}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Didactic Educational Block */}
       <div className="bg-[#eff4ff] rounded-xl p-6 shadow-sm flex flex-col lg:flex-row gap-6 items-start justify-between border border-[#e5eeff]">
@@ -771,8 +861,10 @@ export const PurchasingPowerView: React.FC<PurchasingPowerViewProps> = ({
           </div>
 
           {!chartData ? (
-            <div className="py-12 my-4 text-center rounded-xl bg-[#eff4ff]/50 border border-dashed border-[#c6c6cd] text-xs font-mono text-[#76777d]">
-              Informe uma renda base maior que zero no simulador abaixo para plotar a comparação nominal vs. deflacionada.
+            <div className="py-12 my-4 text-center rounded-xl bg-[#eff4ff]/50 border border-dashed border-[#c6c6cd] text-xs font-mono text-[#76777d] px-4">
+              {hasNoOwnIncome
+                ? 'Perfil sem renda própria: o acompanhamento principal é feito pela evolução da cesta de gastos. Caso queira simular um auxílio ou bolsa, informe um valor no simulador abaixo.'
+                : 'Informe uma renda base maior que zero no simulador abaixo para plotar a comparação nominal vs. deflacionada.'}
             </div>
           ) : (
             <>
@@ -1110,18 +1202,26 @@ export const PurchasingPowerView: React.FC<PurchasingPowerViewProps> = ({
                       setCurrentActualSalary(val);
                       if (baseSalary === 0) setBaseSalary(val);
                     }}
-                    placeholder="Ex: 5.000,00"
+                    placeholder={isBiz ? 'Ex: 12.000,00' : isStudent ? 'Ex: 1.200,00' : 'Ex: 5.000,00'}
                     className="w-full h-10 pl-9 pr-3 rounded-lg bg-[#eff4ff] text-[#0b1c30] font-mono text-sm focus:outline-none focus:bg-[#ffffff] focus:ring-1 focus:ring-[#006a61]"
                   />
                 </div>
                 <span className="text-[11px] text-[#76777d]">
-                  {isBiz ? 'Faturamento líquido ou sobra mensal atual' : 'Renda líquida familiar atual'}
+                  {isBiz
+                    ? 'Faturamento bruto ou receita mensal atual'
+                    : isStudent
+                      ? 'Renda, bolsa, mesada ou auxílio mensal atual'
+                      : 'Renda líquida familiar atual'}
                 </span>
               </div>
 
               <div className="flex flex-col gap-1">
                 <label className="font-mono text-xs uppercase text-[#45464d] font-semibold">
-                  {isBiz ? 'Quanto faturava no início? (Base)' : 'Quanto recebia há 1 ano? (Renda Base)'}
+                  {isBiz
+                    ? 'Quanto faturava no início? (Base)'
+                    : isStudent
+                      ? 'Quanto recebia há 1 ano? (Base)'
+                      : 'Quanto recebia há 1 ano? (Renda Base)'}
                 </label>
                 <div className="relative flex items-center">
                   <span className="absolute left-3 text-[#76777d] font-mono text-xs font-semibold">R$</span>
@@ -1131,7 +1231,7 @@ export const PurchasingPowerView: React.FC<PurchasingPowerViewProps> = ({
                     step="100"
                     value={baseSalary}
                     onChange={(e) => setBaseSalary(Math.max(0, parseFloat(e.target.value) || 0))}
-                    placeholder="Ex: 4.800,00"
+                    placeholder={isBiz ? 'Ex: 10.000,00' : isStudent ? 'Ex: 1.000,00' : 'Ex: 4.800,00'}
                     className="w-full h-10 pl-9 pr-3 rounded-lg bg-[#eff4ff] text-[#0b1c30] font-mono text-sm focus:outline-none focus:bg-[#ffffff]"
                   />
                 </div>

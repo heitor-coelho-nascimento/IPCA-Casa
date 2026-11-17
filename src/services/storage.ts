@@ -13,6 +13,8 @@ import {
   MonthlyClosure,
   OpportunityPlanC,
   PriceRecord,
+  ProfileMode,
+  QuestionnaireDataPayload,
   SubstitutePlanA,
 } from '../types';
 import { extractIsoDatePrefix, getMonthsAgoIsoDate, getTodayIsoDate } from '../utils/dates';
@@ -34,33 +36,73 @@ const STORAGE_KEYS = {
   DEMO_SEEDED_PLANS_A: 'ipca_casa_demo_seeded_plans_a_v1',
   DEMO_SEEDED_PLANS_B: 'ipca_casa_demo_seeded_plans_b_v1',
   DEMO_SEEDED_CLOSURES: 'ipca_casa_demo_seeded_closures_v1',
+  QUESTIONNAIRE_DRAFT_PREFIX: 'ipca_casa_q_draft_v2_',
 };
 
 export const DEFAULT_GROUPS: ConsumptionGroup[] = [
-  { id: 'grp-1', name: 'Alimentação e bebidas', description: 'Gêneros alimentícios, carnes, hortifrúti e refeições', color: '#000000', icon: 'restaurant', nationalWeightIBGE: 21.0 },
-  { id: 'grp-2', name: 'Habitação', description: 'Aluguel, condomínio, energia elétrica, gás e água', color: '#497cff', icon: 'home', nationalWeightIBGE: 15.0 },
-  { id: 'grp-3', name: 'Transportes', description: 'Combustíveis, transporte público, manutenção veicular', color: '#006a61', icon: 'directions_car', nationalWeightIBGE: 20.0 },
-  { id: 'grp-4', name: 'Saúde e cuidados pessoais', description: 'Planos de saúde, farmácia, consultas e higiene', color: '#86f2e4', icon: 'health_and_safety', nationalWeightIBGE: 13.5 },
-  { id: 'grp-5', name: 'Educação', description: 'Mensalidades escolares, cursos, livros e material didático', color: '#bec6e0', icon: 'school', nationalWeightIBGE: 6.0 },
-  { id: 'grp-6', name: 'Despesas pessoais', description: 'Lazer, serviços pessoais, vestuário e recreação', color: '#d3e4fe', icon: 'person', nationalWeightIBGE: 10.0 },
-  { id: 'grp-7', name: 'Comunicação', description: 'Telefonia celular, internet banda larga e streaming', color: '#7c839b', icon: 'wifi', nationalWeightIBGE: 5.5 },
-  { id: 'grp-8', name: 'Vestuário', description: 'Roupas, calçados e acessórios', color: '#3f465c', icon: 'checkroom', nationalWeightIBGE: 4.5 },
-  { id: 'grp-9', name: 'Artigos de residência', description: 'Mobiliário, eletrodomésticos e utensílios', color: '#565e74', icon: 'chair', nationalWeightIBGE: 4.5 },
+  { id: 'grp-1', name: 'Alimentação e bebidas', description: 'Gêneros alimentícios, carnes, hortifrúti e refeições', color: '#000000', icon: 'restaurant', profileMode: 'pessoal', nationalWeightIBGE: 21.0 },
+  { id: 'grp-2', name: 'Habitação', description: 'Aluguel, condomínio, energia elétrica, gás e água', color: '#497cff', icon: 'home', profileMode: 'pessoal', nationalWeightIBGE: 15.0 },
+  { id: 'grp-3', name: 'Transportes', description: 'Combustíveis, transporte público, manutenção veicular', color: '#006a61', icon: 'directions_car', profileMode: 'pessoal', nationalWeightIBGE: 20.0 },
+  { id: 'grp-4', name: 'Saúde e cuidados pessoais', description: 'Planos de saúde, farmácia, consultas e higiene', color: '#86f2e4', icon: 'health_and_safety', profileMode: 'pessoal', nationalWeightIBGE: 13.5 },
+  { id: 'grp-5', name: 'Educação', description: 'Mensalidades escolares, cursos, livros e material didático', color: '#bec6e0', icon: 'school', profileMode: 'pessoal', nationalWeightIBGE: 6.0 },
+  { id: 'grp-6', name: 'Despesas pessoais', description: 'Lazer, serviços pessoais, vestuário e recreação', color: '#d3e4fe', icon: 'person', profileMode: 'pessoal', nationalWeightIBGE: 10.0 },
+  { id: 'grp-7', name: 'Comunicação', description: 'Telefonia celular, internet banda larga e streaming', color: '#7c839b', icon: 'wifi', profileMode: 'pessoal', nationalWeightIBGE: 5.5 },
+  { id: 'grp-8', name: 'Vestuário', description: 'Roupas, calçados e acessórios', color: '#3f465c', icon: 'checkroom', profileMode: 'pessoal', nationalWeightIBGE: 4.5 },
+  { id: 'grp-9', name: 'Artigos de residência', description: 'Mobiliário, eletrodomésticos e utensílios', color: '#565e74', icon: 'chair', profileMode: 'pessoal', nationalWeightIBGE: 4.5 },
 ];
 
+export const NEGOCIO_DEFAULT_GROUPS: ConsumptionGroup[] = [
+  { id: 'grp-biz-1', name: 'Matéria-prima e Insumos', description: 'Ingredientes, matéria-prima e insumos de produção direta', color: '#006a61', icon: 'inventory_2', profileMode: 'negocio' },
+  { id: 'grp-biz-2', name: 'Mercadorias para Revenda', description: 'Produtos adquiridos prontos para comercialização', color: '#0b1c30', icon: 'storefront', profileMode: 'negocio' },
+  { id: 'grp-biz-3', name: 'Embalagens e Descartáveis', description: 'Sacos, caixas, rótulos e embalagens de entrega', color: '#497cff', icon: 'package_2', profileMode: 'negocio' },
+  { id: 'grp-biz-4', name: 'Fornecedores e Terceirizados', description: 'Serviços externos contratados e fornecedores recorrentes', color: '#005049', icon: 'handshake', profileMode: 'negocio' },
+  { id: 'grp-biz-5', name: 'Estrutura, Aluguel e Energia', description: 'Aluguel comercial, energia elétrica, água e gás', color: '#565e74', icon: 'apartment', profileMode: 'negocio' },
+  { id: 'grp-biz-6', name: 'Logística e Combustível', description: 'Fretes, entregas, combustível e transporte de carga', color: '#7c3aed', icon: 'local_shipping', profileMode: 'negocio' },
+  { id: 'grp-biz-7', name: 'Manutenção e Equipamentos', description: 'Revisões, reparos, máquinas e ferramentas', color: '#b45309', icon: 'build', profileMode: 'negocio' },
+  { id: 'grp-biz-8', name: 'Comunicação e Sistemas', description: 'Internet, telefonia e sistemas operacionais', color: '#7c839b', icon: 'wifi', profileMode: 'negocio' },
+  { id: 'grp-biz-9', name: 'Despesas Operacionais Gerais', description: 'Demais gastos rotineiros de funcionamento', color: '#3f465c', icon: 'receipt_long', profileMode: 'negocio' },
+];
+
+export const ESTUDANTE_DEFAULT_GROUPS: ConsumptionGroup[] = [
+  { id: 'grp-est-1', name: 'Alimentação e Lanches', description: 'Refeições diárias, cantina e lanches entre aulas', color: '#006a61', icon: 'lunch_dining', profileMode: 'estudante' },
+  { id: 'grp-est-2', name: 'Transporte Estudantil', description: 'Passagens, recarga de bilhete, aplicativo ou combustível', color: '#497cff', icon: 'directions_bus', profileMode: 'estudante' },
+  { id: 'grp-est-3', name: 'Material Escolar e Papelaria', description: 'Cadernos, canetas, impressões e papelaria', color: '#b45309', icon: 'edit_note', profileMode: 'estudante' },
+  { id: 'grp-est-4', name: 'Livros e Apostilas', description: 'Livros didáticos, xerox, apostilas e guias', color: '#0b1c30', icon: 'menu_book', profileMode: 'estudante' },
+  { id: 'grp-est-5', name: 'Cursos e Mensalidades', description: 'Mensalidade escolar/faculdade, idiomas e preparatórios', color: '#7c3aed', icon: 'school', profileMode: 'estudante' },
+  { id: 'grp-est-6', name: 'Internet e Assinaturas', description: 'Plano móvel, internet e ferramentas digitais de estudo', color: '#7c839b', icon: 'wifi', profileMode: 'estudante' },
+  { id: 'grp-est-7', name: 'Tecnologia e Acessórios', description: 'Fones, mouses, pen drives e manutenção básica', color: '#0f766e', icon: 'laptop_mac', profileMode: 'estudante' },
+  { id: 'grp-est-8', name: 'Lazer e Vida Acadêmica', description: 'Cultura, eventos, cinema e convivência', color: '#d3e4fe', icon: 'celebration', profileMode: 'estudante' },
+  { id: 'grp-est-9', name: 'Moradia Estudantil', description: 'Aluguel ou taxa de república quando aplicável', color: '#565e74', icon: 'home', profileMode: 'estudante' },
+  { id: 'grp-est-10', name: 'Vestuário e Higiene', description: 'Uniformes, roupas e higiene pessoal', color: '#3f465c', icon: 'checkroom', profileMode: 'estudante' },
+  { id: 'grp-est-11', name: 'Saúde e Bem-estar', description: 'Farmácia, consultas e cuidados pessoais', color: '#be123c', icon: 'health_and_safety', profileMode: 'estudante' },
+  { id: 'grp-est-12', name: 'Outros Gastos Estudantis', description: 'Outros custos da rotina estudantil', color: '#76777d', icon: 'category', profileMode: 'estudante' },
+];
+
+export function getDefaultGroupsForMode(mode: ProfileMode = 'pessoal'): ConsumptionGroup[] {
+  if (mode === 'negocio') return NEGOCIO_DEFAULT_GROUPS.map((g) => ({ ...g }));
+  if (mode === 'estudante') return ESTUDANTE_DEFAULT_GROUPS.map((g) => ({ ...g }));
+  return DEFAULT_GROUPS.map((g) => ({ ...g }));
+}
+
 export const DEMO_PROFILE_ID = 'profile-demo';
+export const DEMO_PROFILE_NEGOCIO_ID = 'profile-demo-negocio';
+export const DEMO_PROFILE_ESTUDANTE_ID = 'profile-demo-estudante';
 export const USER_DEFAULT_PROFILE_ID = 'profile-clean-slate';
 export const EMPTY_PROFILE_ID = USER_DEFAULT_PROFILE_ID;
 
 export const INITIAL_PROFILES: FamilyProfile[] = [
   {
     id: DEMO_PROFILE_ID,
-    name: 'Perfil Demonstrativo (Exemplo)',
+    name: 'Família Demonstrativa (Exemplo)',
     profileMode: 'pessoal',
+    onboardingStatus: 'completed',
     priceAlertThresholdPercent: 10,
     membersCount: 4,
     referenceRegion: 'Brasil',
     currency: 'BRL',
+    reportedMonthlySurplus: 850,
+    surplusFrequency: 'as_vezes',
+    estimatedMonthlyExpenses: 9095.6,
     isDemo: true,
     createdAt: '2025-11-01T00:00:00.000Z',
     updatedAt: '2026-11-12T12:00:00.000Z',
@@ -586,6 +628,307 @@ export const DEMO_PLAN_C: OpportunityPlanC = {
   isSimulated: true,
 };
 
+export const DEMO_BASKET_NEGOCIO: BasketItem[] = [
+  {
+    id: 'biz-demo-01',
+    profileId: DEMO_PROFILE_NEGOCIO_ID,
+    profileMode: 'negocio',
+    name: 'Farinha de Trigo Especial (Saco 25kg)',
+    description: 'Insumo base de panificação · 20 sacos/mês × R$ 108,00',
+    group: 'Matéria-prima e Insumos',
+    classification: 'Essencial',
+    monthlySpend: 2160.0,
+    oldPrice: 92.0,
+    currentPrice: 108.0,
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
+    unit: 'saco 25kg',
+    quantity: 20,
+    baseQuantity: 20,
+    consumptionFrequency: 'mensal',
+    expenseNature: 'Variável',
+    supplierName: 'Moinho Paulista Ltda (Exemplo)',
+    dataOrigin: 'demonstrativo',
+    notes: 'Dado demonstrativo de negócio alimentício.',
+    active: true,
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
+  },
+  {
+    id: 'biz-demo-02',
+    profileId: DEMO_PROFILE_NEGOCIO_ID,
+    profileMode: 'negocio',
+    name: 'Aluguel do Ponto Comercial',
+    description: 'Loja comercial térrea (contrato anual)',
+    group: 'Estrutura, Aluguel e Energia',
+    classification: 'Essencial',
+    monthlySpend: 2800.0,
+    oldPrice: 2550.0,
+    currentPrice: 2800.0,
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
+    unit: 'mensalidade',
+    quantity: 1,
+    baseQuantity: 1,
+    consumptionFrequency: 'mensal',
+    expenseNature: 'Fixa',
+    dataOrigin: 'demonstrativo',
+    notes: 'Custo fixo mensal demonstrativo.',
+    active: true,
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
+  },
+  {
+    id: 'biz-demo-03',
+    profileId: DEMO_PROFILE_NEGOCIO_ID,
+    profileMode: 'negocio',
+    name: 'Energia Elétrica Comercial (Fornos e Balcões)',
+    description: 'Consumo de 1.100 kWh × R$ 0,98/kWh',
+    group: 'Estrutura, Aluguel e Energia',
+    classification: 'Essencial',
+    monthlySpend: 1078.0,
+    oldPrice: 0.85,
+    currentPrice: 0.98,
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
+    unit: 'kWh',
+    quantity: 1100,
+    baseQuantity: 1100,
+    consumptionFrequency: 'mensal',
+    expenseNature: 'Variável',
+    supplierName: 'Concessionária Local (Exemplo)',
+    dataOrigin: 'demonstrativo',
+    active: true,
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
+  },
+  {
+    id: 'biz-demo-04',
+    profileId: DEMO_PROFILE_NEGOCIO_ID,
+    profileMode: 'negocio',
+    name: 'Embalagens e Sacos Kraft (Cento)',
+    description: '12 centos/mês × R$ 34,00',
+    group: 'Embalagens e Descartáveis',
+    classification: 'Essencial',
+    monthlySpend: 408.0,
+    oldPrice: 29.5,
+    currentPrice: 34.0,
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
+    unit: 'cento',
+    quantity: 12,
+    baseQuantity: 12,
+    consumptionFrequency: 'mensal',
+    expenseNature: 'Variável',
+    supplierName: 'EmbalaSul Distribuidora (Exemplo)',
+    dataOrigin: 'demonstrativo',
+    active: true,
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
+  },
+  {
+    id: 'biz-demo-05',
+    profileId: DEMO_PROFILE_NEGOCIO_ID,
+    profileMode: 'negocio',
+    name: 'Gás GLP Industrial (Botijão P45)',
+    description: '3 cilindros/mês × R$ 415,00',
+    group: 'Estrutura, Aluguel e Energia',
+    classification: 'Essencial',
+    monthlySpend: 1245.0,
+    oldPrice: 380.0,
+    currentPrice: 415.0,
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
+    unit: 'cilindro',
+    quantity: 3,
+    baseQuantity: 3,
+    consumptionFrequency: 'mensal',
+    expenseNature: 'Variável',
+    supplierName: 'Brasil Gás Comercial (Exemplo)',
+    dataOrigin: 'demonstrativo',
+    active: true,
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
+  },
+];
+
+export const DEMO_BASKET_ESTUDANTE: BasketItem[] = [
+  {
+    id: 'est-demo-01',
+    profileId: DEMO_PROFILE_ESTUDANTE_ID,
+    profileMode: 'estudante',
+    name: 'Lanches e Refeições no Campus',
+    description: '20 refeições/mês × R$ 18,50',
+    group: 'Alimentação e Lanches',
+    classification: 'Essencial',
+    monthlySpend: 370.0,
+    oldPrice: 15.5,
+    currentPrice: 18.5,
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
+    unit: 'un',
+    quantity: 20,
+    baseQuantity: 20,
+    consumptionFrequency: 'mensal',
+    recurrenceType: 'Recorrente',
+    paidDirectly: true,
+    dataOrigin: 'demonstrativo',
+    active: true,
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
+  },
+  {
+    id: 'est-demo-02',
+    profileId: DEMO_PROFILE_ESTUDANTE_ID,
+    profileMode: 'estudante',
+    name: 'Transporte Público (Meia Tarifa Estudantil)',
+    description: '44 passagens/mês × R$ 2,60',
+    group: 'Transporte Estudantil',
+    classification: 'Essencial',
+    monthlySpend: 114.4,
+    oldPrice: 2.3,
+    currentPrice: 2.6,
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
+    unit: 'viagem',
+    quantity: 44,
+    baseQuantity: 44,
+    consumptionFrequency: 'mensal',
+    recurrenceType: 'Recorrente',
+    paidDirectly: true,
+    dataOrigin: 'demonstrativo',
+    active: true,
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
+  },
+  {
+    id: 'est-demo-03',
+    profileId: DEMO_PROFILE_ESTUDANTE_ID,
+    profileMode: 'estudante',
+    name: 'Cópias, Apostilas e Papelaria',
+    description: 'Material de disciplinas e impressões mensais',
+    group: 'Livros e Apostilas',
+    classification: 'Essencial',
+    monthlySpend: 85.0,
+    oldPrice: 72.0,
+    currentPrice: 85.0,
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
+    unit: 'kit',
+    quantity: 1,
+    baseQuantity: 1,
+    consumptionFrequency: 'mensal',
+    recurrenceType: 'Recorrente',
+    paidDirectly: true,
+    dataOrigin: 'demonstrativo',
+    active: true,
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
+  },
+  {
+    id: 'est-demo-04',
+    profileId: DEMO_PROFILE_ESTUDANTE_ID,
+    profileMode: 'estudante',
+    name: 'Plano de Internet Móvel e Assinaturas de Estudo',
+    description: 'Plano de dados + plataforma de exercícios',
+    group: 'Internet e Assinaturas',
+    classification: 'Essencial',
+    monthlySpend: 79.9,
+    oldPrice: 69.9,
+    currentPrice: 79.9,
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
+    unit: 'mensalidade',
+    quantity: 1,
+    baseQuantity: 1,
+    consumptionFrequency: 'mensal',
+    recurrenceType: 'Recorrente',
+    paidDirectly: true,
+    dataOrigin: 'demonstrativo',
+    active: true,
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
+  },
+  {
+    id: 'est-demo-05',
+    profileId: DEMO_PROFILE_ESTUDANTE_ID,
+    profileMode: 'estudante',
+    name: 'Curso Complementar de Idiomas',
+    description: 'Mensalidade compartilhada online',
+    group: 'Cursos e Mensalidades',
+    classification: 'Essencial',
+    monthlySpend: 180.0,
+    oldPrice: 165.0,
+    currentPrice: 180.0,
+    oldPriceDate: '2025-11-01',
+    currentPriceDate: '2026-11-01',
+    unit: 'mensalidade',
+    quantity: 1,
+    baseQuantity: 1,
+    consumptionFrequency: 'mensal',
+    recurrenceType: 'Recorrente',
+    paidDirectly: true,
+    dataOrigin: 'demonstrativo',
+    active: true,
+    createdAt: '2025-11-01',
+    updatedAt: '2026-11-01',
+  },
+];
+
+export const DEMO_INCOME_NEGOCIO: IncomeRecord[] = [
+  {
+    id: 'inc-biz-1',
+    profileId: DEMO_PROFILE_NEGOCIO_ID,
+    profileMode: 'negocio',
+    referenceDate: '2025-11-01',
+    nominalIncome: 14200,
+    source: 'Venda de produtos e serviços',
+    incomeRole: 'faturamento_negocio',
+    incomePredictability: 'variavel',
+    dataOrigin: 'demonstrativo',
+    notes: 'Faturamento bruto demonstrativo novembro/2025',
+  },
+  {
+    id: 'inc-biz-2',
+    profileId: DEMO_PROFILE_NEGOCIO_ID,
+    profileMode: 'negocio',
+    referenceDate: '2026-11-01',
+    nominalIncome: 15500,
+    source: 'Venda de produtos e serviços',
+    incomeRole: 'faturamento_negocio',
+    incomePredictability: 'variavel',
+    dataOrigin: 'demonstrativo',
+    notes: 'Faturamento bruto demonstrativo novembro/2026',
+  },
+];
+
+export const DEMO_INCOME_ESTUDANTE: IncomeRecord[] = [
+  {
+    id: 'inc-est-1',
+    profileId: DEMO_PROFILE_ESTUDANTE_ID,
+    profileMode: 'estudante',
+    referenceDate: '2025-11-01',
+    nominalIncome: 1100,
+    source: 'Bolsa de estudos e ajuda familiar',
+    incomeRole: 'renda_estudantil',
+    incomePredictability: 'fixa',
+    dataOrigin: 'demonstrativo',
+    notes: 'Referência estudantil demonstrativa novembro/2025',
+  },
+  {
+    id: 'inc-est-2',
+    profileId: DEMO_PROFILE_ESTUDANTE_ID,
+    profileMode: 'estudante',
+    referenceDate: '2026-11-01',
+    nominalIncome: 1200,
+    source: 'Estágio / Bolsa estudantil',
+    incomeRole: 'renda_estudantil',
+    incomePredictability: 'fixa',
+    dataOrigin: 'demonstrativo',
+    notes: 'Referência estudantil demonstrativa novembro/2026',
+  },
+];
+
 export const DEMO_MONTHLY_CLOSURES: MonthlyClosure[] = [
   {
     id: 'cls_demo_2026_09',
@@ -817,14 +1160,25 @@ export class StorageService {
   // ==========================================
   // GRUPOS DE CONSUMO E CATEGORIAS
   // ==========================================
-  static getGroups(): ConsumptionGroup[] {
+  static getGroups(profileMode?: ProfileMode): ConsumptionGroup[] {
     const raw = safeStorage.getItem(STORAGE_KEYS.GROUPS);
+    let groups: ConsumptionGroup[];
     if (!raw) {
-      safeStorage.setItem(STORAGE_KEYS.GROUPS, JSON.stringify(DEFAULT_GROUPS));
-      return DEFAULT_GROUPS.map((g) => ({ ...g }));
+      groups = [
+        ...DEFAULT_GROUPS,
+        ...NEGOCIO_DEFAULT_GROUPS,
+        ...ESTUDANTE_DEFAULT_GROUPS,
+      ].map((g) => ({ ...g }));
+      safeStorage.setItem(STORAGE_KEYS.GROUPS, JSON.stringify(groups));
+    } else {
+      const parsed = safeParseArray<ConsumptionGroup>(raw);
+      groups = parsed.length > 0 ? parsed : DEFAULT_GROUPS.map((g) => ({ ...g }));
     }
-    const parsed = safeParseArray<ConsumptionGroup>(raw);
-    return parsed.length > 0 ? parsed : DEFAULT_GROUPS.map((g) => ({ ...g }));
+
+    if (!profileMode) return groups;
+    const modeGroups = groups.filter((g) => (g.profileMode || 'pessoal') === profileMode);
+    if (modeGroups.length > 0) return modeGroups;
+    return getDefaultGroupsForMode(profileMode);
   }
 
   static saveGroup(group: ConsumptionGroup): void {
@@ -843,12 +1197,18 @@ export class StorageService {
     const target = groups.find((g) => g.id === groupId);
     if (!target) return { success: false, message: 'Categoria não encontrada.' };
 
+    const targetMode = target.profileMode || 'pessoal';
+    const fallbackGroup = getDefaultGroupsForMode(targetMode)[0]?.name || 'Outros';
     const allItems = this.getAllStoredItems();
-    const usingItems = allItems.filter((i) => i.group === target.name);
+    const usingItems = allItems.filter(
+      (i) => i.group === target.name && (i.profileMode || 'pessoal') === targetMode
+    );
 
     if (usingItems.length > 0) {
       const reallocated = allItems.map((item) =>
-        item.group === target.name ? { ...item, group: 'Despesas pessoais' } : item
+        item.group === target.name && (item.profileMode || 'pessoal') === targetMode
+          ? { ...item, group: fallbackGroup }
+          : item
       );
       safeStorage.setItem(STORAGE_KEYS.BASKET_ITEMS, JSON.stringify(reallocated));
     }
@@ -859,9 +1219,24 @@ export class StorageService {
       success: true,
       message:
         usingItems.length > 0
-          ? `Categoria excluída. ${usingItems.length} itens foram transferidos para "Despesas pessoais".`
+          ? `Categoria excluída. ${usingItems.length} itens foram transferidos para "${fallbackGroup}".`
           : 'Categoria excluída com sucesso.',
     };
+  }
+
+  static restoreDefaultGroupsForMode(mode: ProfileMode): ConsumptionGroup[] {
+    const allGroups = this.getGroups();
+    const otherModes = allGroups.filter((g) => (g.profileMode || 'pessoal') !== mode);
+    const customInMode = allGroups.filter(
+      (g) => (g.profileMode || 'pessoal') === mode && g.isCustom
+    );
+    const defaultsForMode = getDefaultGroupsForMode(mode);
+    const nonDuplicateCustom = customInMode.filter(
+      (cg) => !defaultsForMode.some((df) => df.id === cg.id || df.name.toLowerCase() === cg.name.toLowerCase())
+    );
+    const merged = [...otherModes, ...defaultsForMode, ...nonDuplicateCustom];
+    safeStorage.setItem(STORAGE_KEYS.GROUPS, JSON.stringify(merged));
+    return [...defaultsForMode, ...nonDuplicateCustom];
   }
 
   // ==========================================
@@ -885,6 +1260,22 @@ export class StorageService {
       const seeded = [...existingNonDemo, ...DEMO_BASKET_ITEMS];
       safeStorage.setItem(STORAGE_KEYS.BASKET_ITEMS, JSON.stringify(seeded));
       safeStorage.setItem(STORAGE_KEYS.DEMO_SEEDED_ITEMS, '1');
+    } else if (targetProfileId === DEMO_PROFILE_NEGOCIO_ID) {
+      const stored = safeParseArray<BasketItem>(raw);
+      if (!stored.some((i) => i.profileId === DEMO_PROFILE_NEGOCIO_ID)) {
+        safeStorage.setItem(
+          STORAGE_KEYS.BASKET_ITEMS,
+          JSON.stringify([...stored, ...DEMO_BASKET_NEGOCIO])
+        );
+      }
+    } else if (targetProfileId === DEMO_PROFILE_ESTUDANTE_ID) {
+      const stored = safeParseArray<BasketItem>(raw);
+      if (!stored.some((i) => i.profileId === DEMO_PROFILE_ESTUDANTE_ID)) {
+        safeStorage.setItem(
+          STORAGE_KEYS.BASKET_ITEMS,
+          JSON.stringify([...stored, ...DEMO_BASKET_ESTUDANTE])
+        );
+      }
     }
 
     const allItems = this.getAllStoredItems();
@@ -1051,6 +1442,7 @@ export class StorageService {
     origin?: string;
     source?: string;
     region?: string;
+    supplierName?: string;
     packageSize?: number;
     packageUnit?: string;
     dataOrigin?: PriceRecord['dataOrigin'];
@@ -1065,6 +1457,7 @@ export class StorageService {
       source: record.source || record.origin,
       origin: record.origin,
       region: record.region,
+      supplierName: record.supplierName,
       packageSize: record.packageSize,
       packageUnit: record.packageUnit,
       dataOrigin: record.dataOrigin || 'usuario',
@@ -1119,18 +1512,24 @@ export class StorageService {
         {
           id: 'inc-1',
           profileId: DEMO_PROFILE_ID,
+          profileMode: 'pessoal',
           referenceDate: '2025-11-01',
           nominalIncome: 10000,
           source: 'Salário CLT',
-          notes: 'Salário base novembro/2025',
+          incomeRole: 'renda_familiar',
+          dataOrigin: 'demonstrativo',
+          notes: 'Renda base novembro/2025 (demonstrativo)',
         },
         {
           id: 'inc-2',
           profileId: DEMO_PROFILE_ID,
+          profileMode: 'pessoal',
           referenceDate: '2026-11-01',
           nominalIncome: 10500,
           source: 'Salário CLT',
-          notes: 'Ajuste de dissídio coletivo (+5%)',
+          incomeRole: 'renda_familiar',
+          dataOrigin: 'demonstrativo',
+          notes: 'Reajuste demonstrativo (+5%)',
         },
       ];
       safeStorage.setItem(
@@ -1138,6 +1537,22 @@ export class StorageService {
         JSON.stringify([...existingNonDemo, ...demoInitial])
       );
       safeStorage.setItem(STORAGE_KEYS.DEMO_SEEDED_INCOME, '1');
+    } else if (targetId === DEMO_PROFILE_NEGOCIO_ID) {
+      const stored = this.getAllStoredIncome();
+      if (!stored.some((i) => i.profileId === DEMO_PROFILE_NEGOCIO_ID)) {
+        safeStorage.setItem(
+          STORAGE_KEYS.INCOME_HISTORY,
+          JSON.stringify([...stored, ...DEMO_INCOME_NEGOCIO])
+        );
+      }
+    } else if (targetId === DEMO_PROFILE_ESTUDANTE_ID) {
+      const stored = this.getAllStoredIncome();
+      if (!stored.some((i) => i.profileId === DEMO_PROFILE_ESTUDANTE_ID)) {
+        safeStorage.setItem(
+          STORAGE_KEYS.INCOME_HISTORY,
+          JSON.stringify([...stored, ...DEMO_INCOME_ESTUDANTE])
+        );
+      }
     }
 
     const allIncome = this.getAllStoredIncome();
@@ -1210,14 +1625,14 @@ export class StorageService {
           profileId,
           referenceDate: initialDate,
           nominalIncome: initial,
-          notes: 'Salário base inicial',
+          notes: 'Referência inicial de renda/faturamento',
         },
         {
           id: `inc-2-${stamp + 1}`,
           profileId,
           referenceDate: finalDate,
           nominalIncome: final,
-          notes: 'Salário após reajustes',
+          notes: 'Referência atual de renda/faturamento',
           grossIncome: options?.grossIncome,
           netIncome: options?.netIncome,
           incomeType: options?.incomeType,
@@ -1232,6 +1647,24 @@ export class StorageService {
       return;
     }
     return this.addIncomeRecord(initialOrRecord);
+  }
+
+  static replaceIncomeRecordsForProfile(profileId: string, records: IncomeRecord[]): void {
+    const others = this.getAllStoredIncome().filter((rec) => rec.profileId !== profileId);
+    const targetRecords = records.map((rec) => ({ ...rec, profileId }));
+    safeStorage.setItem(
+      STORAGE_KEYS.INCOME_HISTORY,
+      JSON.stringify([...others, ...targetRecords])
+    );
+  }
+
+  static mergePriceRecordsLocal(records: PriceRecord[]): void {
+    if (!records.length) return;
+    const existing = this.getAllPrices();
+    const existingIds = new Set(existing.map((p) => p.id));
+    const additions = records.filter((p) => !existingIds.has(p.id));
+    if (additions.length === 0) return;
+    safeStorage.setItem(STORAGE_KEYS.PRICE_HISTORY, JSON.stringify([...existing, ...additions]));
   }
 
   // ==========================================
@@ -1606,8 +2039,95 @@ export class StorageService {
     );
   }
 
-  static loadDemoBasket(): void {
-    this.resetToDemoData();
+  static loadDemoBasket(mode: ProfileMode = 'pessoal'): void {
+    if (mode === 'pessoal') {
+      this.resetToDemoData();
+      return;
+    }
+
+    const demoId = mode === 'negocio' ? DEMO_PROFILE_NEGOCIO_ID : DEMO_PROFILE_ESTUDANTE_ID;
+    const demoName =
+      mode === 'negocio'
+        ? 'Padaria Modelo (Demonstrativo)'
+        : 'Rotina Estudantil (Demonstrativo)';
+    const nowIso = new Date().toISOString();
+
+    const profiles = this.getProfiles().filter((p) => p.id !== demoId);
+    profiles.unshift({
+      id: demoId,
+      name: demoName,
+      profileMode: mode,
+      onboardingStatus: 'completed',
+      priceAlertThresholdPercent: 10,
+      membersCount: mode === 'negocio' ? 5 : 1,
+      referenceRegion: 'Brasil',
+      currency: 'BRL',
+      suppliers:
+        mode === 'negocio'
+          ? [
+              'Moinho Paulista Ltda (Exemplo)',
+              'EmbalaSul Distribuidora (Exemplo)',
+              'Brasil Gás Comercial (Exemplo)',
+            ]
+          : undefined,
+      reportedMonthlySurplus: mode === 'negocio' ? 4200 : 220,
+      surplusFrequency: 'as_vezes',
+      estimatedMonthlyExpenses: mode === 'negocio' ? 7691 : 829.3,
+      isDemo: true,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    });
+    safeStorage.setItem(STORAGE_KEYS.PROFILES, JSON.stringify(profiles));
+    safeStorage.setItem(STORAGE_KEYS.ACTIVE_PROFILE, demoId);
+
+    const nonTargetItems = this.getAllStoredItems().filter((i) => i.profileId !== demoId);
+    const seedItems = mode === 'negocio' ? DEMO_BASKET_NEGOCIO : DEMO_BASKET_ESTUDANTE;
+    safeStorage.setItem(
+      STORAGE_KEYS.BASKET_ITEMS,
+      JSON.stringify([...nonTargetItems, ...seedItems])
+    );
+
+    const nonTargetIncome = this.getAllStoredIncome().filter((i) => i.profileId !== demoId);
+    const seedIncome = mode === 'negocio' ? DEMO_INCOME_NEGOCIO : DEMO_INCOME_ESTUDANTE;
+    safeStorage.setItem(
+      STORAGE_KEYS.INCOME_HISTORY,
+      JSON.stringify([...nonTargetIncome, ...seedIncome])
+    );
+
+    const existingGroups = this.getGroups();
+    const modeDefaults = getDefaultGroupsForMode(mode);
+    const mergedGroups = [
+      ...existingGroups.filter((g) => (g.profileMode || 'pessoal') !== mode),
+      ...modeDefaults,
+    ];
+    safeStorage.setItem(STORAGE_KEYS.GROUPS, JSON.stringify(mergedGroups));
+  }
+
+  // ==========================================
+  // RASCUNHO DE QUESTIONÁRIO (RETOMADA INTERROMPIDA)
+  // ==========================================
+  static saveQuestionnaireDraftLocal(
+    userId: string,
+    profileId: string,
+    draft: QuestionnaireDataPayload
+  ): void {
+    const key = `${STORAGE_KEYS.QUESTIONNAIRE_DRAFT_PREFIX}${userId}_${profileId}`;
+    safeStorage.setItem(key, JSON.stringify(draft));
+  }
+
+  static loadQuestionnaireDraftLocal(
+    userId: string,
+    profileId: string
+  ): QuestionnaireDataPayload | null {
+    const key = `${STORAGE_KEYS.QUESTIONNAIRE_DRAFT_PREFIX}${userId}_${profileId}`;
+    const parsed = safeParseObject(safeStorage.getItem(key));
+    if (!parsed || typeof parsed.mode !== 'string') return null;
+    return parsed as unknown as QuestionnaireDataPayload;
+  }
+
+  static clearQuestionnaireDraftLocal(userId: string, profileId: string): void {
+    const key = `${STORAGE_KEYS.QUESTIONNAIRE_DRAFT_PREFIX}${userId}_${profileId}`;
+    safeStorage.removeItem(key);
   }
 
   static importItems(

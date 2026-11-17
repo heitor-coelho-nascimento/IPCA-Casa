@@ -1,5 +1,10 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { EconomicCalculationSummary, PocketImpactPerspective, ProfileMode } from '../types';
+import {
+  EconomicCalculationSummary,
+  FamilyProfile,
+  PocketImpactPerspective,
+  ProfileMode,
+} from '../types';
 import {
   calculateEstimatedMonthlyImpact,
   calculateEstimatedAnnualImpact,
@@ -17,6 +22,7 @@ import { getProfileModeCopy } from '../utils/profileMode';
 
 interface PocketImpactViewProps {
   summary: EconomicCalculationSummary;
+  activeProfile?: FamilyProfile | null;
   onUpdateIncome?: (
     initial: number,
     current: number,
@@ -49,14 +55,18 @@ function formatSignedCurrencyBR(value: number): string {
 
 export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
   summary,
+  activeProfile = null,
   onUpdateIncome,
   isDemo = false,
   profileMode = 'pessoal',
 }) => {
   const modeCopy = getProfileModeCopy(profileMode);
   const isBiz = modeCopy.mode === 'negocio';
+  const isStudent = modeCopy.mode === 'estudante';
+  const hasNoOwnIncome = Boolean(summary.hasNoOwnIncome || activeProfile?.hasNoOwnIncome);
+  const surplusBreakdown = summary.surplusBreakdown;
   const hasBasketItems = summary.calculatedItems.length > 0;
-  const hasRegisteredIncome = summary.purchasingPower.hasIncomeData;
+  const hasRegisteredIncome = summary.purchasingPower.hasIncomeData && !hasNoOwnIncome;
 
   const [initialIncomeInput, setInitialIncomeInput] = useState<number>(
     typeof summary.purchasingPower.initialIncome === 'number'
@@ -146,6 +156,7 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
   }, [perspective, observedBasketDiff, referenceSpend, activeRatePercent]);
 
   const hasValidSimIncome =
+    !hasNoOwnIncome &&
     Number.isFinite(initialIncomeInput) &&
     initialIncomeInput > 0 &&
     Number.isFinite(currentIncomeInput) &&
@@ -250,12 +261,18 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
             <span>{modeCopy.badgeLabel}</span>
           </div>
           <h1 className="text-3xl lg:text-4xl font-bold text-[#0b1c30] tracking-tight mt-1">
-            {isBiz ? 'Impacto no Resultado em Reais' : 'Impacto no seu Bolso'}
+            {isBiz
+              ? 'Impacto no Resultado em Reais'
+              : isStudent
+                ? 'Impacto no Bolso Estudantil'
+                : 'Impacto no seu Bolso'}
           </h1>
           <p className="text-xs text-[#45464d] mt-1 max-w-3xl leading-relaxed">
             {isBiz
               ? 'Veja exatamente quantos Reais (R$) a alta de insumos e custos consome do seu resultado por mês e quanto seu faturamento ou receita precisa acompanhar.'
-              : 'Veja de forma simples quantos Reais (R$) a alta de preços tira do seu orçamento por mês e quanto sua renda precisa acompanhar para manter seu padrão de vida.'}
+              : isStudent
+                ? 'Veja de forma simples quantos Reais (R$) a alta de preços tira da sua renda, bolsa ou auxílio mensal e quanto seu orçamento estudantil precisa acompanhar.'
+                : 'Veja de forma simples quantos Reais (R$) a alta de preços tira do seu orçamento por mês e quanto sua renda precisa acompanhar para manter seu padrão de vida.'}
           </p>
         </div>
 
@@ -401,24 +418,36 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
         <div className="bg-[#ffffff] rounded-2xl p-6 shadow-sm border border-[#eff4ff] flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="font-mono text-xs uppercase text-[#45464d] font-semibold">
-              Salário de Equilíbrio
+              {isBiz
+                ? 'Faturamento de Equilíbrio'
+                : isStudent
+                  ? 'Renda / Auxílio de Equilíbrio'
+                  : 'Salário de Equilíbrio'}
             </span>
             <span className="w-8 h-8 rounded-lg bg-[#eff4ff] flex items-center justify-center text-[#006a61]">
               <span className="material-symbols-outlined text-[18px]">balance</span>
             </span>
           </div>
           <div className="my-3">
-            <div className="text-3xl font-bold font-mono tracking-tight text-[#006a61]">
-              {hasValidSimIncome ? `R$ ${formatMoneyBR(incomeCalc.neededIncome)}` : 'Não informada'}
+            <div className="text-2xl xl:text-3xl font-bold font-mono tracking-tight text-[#006a61]">
+              {hasNoOwnIncome
+                ? 'Sem renda própria'
+                : hasValidSimIncome
+                  ? `R$ ${formatMoneyBR(incomeCalc.neededIncome)}`
+                  : 'Não informada'}
             </div>
             <p className="text-xs text-[#45464d] mt-1">
-              {hasValidSimIncome
-                ? 'Valor necessário para empatar com a variação de preços e preservar seu padrão de vida.'
-                : 'Informe sua renda inicial e atual abaixo para apurar o salário de equilíbrio.'}
+              {hasNoOwnIncome
+                ? 'Perfil configurado sem renda própria — acompanhamento focado exclusivamente nos gastos.'
+                : hasValidSimIncome
+                  ? 'Valor necessário para empatar com a variação de preços e preservar seu padrão.'
+                  : 'Informe o valor inicial e atual abaixo para apurar o ponto de equilíbrio.'}
             </p>
           </div>
           <div className="pt-2 border-t border-[#eff4ff] text-[11px] font-mono text-[#76777d]">
-            Fórmula: Renda Inicial × (1 + {activeRatePercent.toFixed(2).replace('.', ',')}%)
+            {hasNoOwnIncome
+              ? 'Sem divisão ou déficit salarial'
+              : `Fórmula: Base Inicial × (1 + ${activeRatePercent.toFixed(2).replace('.', ',')}%)`}
           </div>
         </div>
 
@@ -426,11 +455,11 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
         <div className="bg-[#ffffff] rounded-2xl p-6 shadow-sm border border-[#eff4ff] flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="font-mono text-xs uppercase text-[#45464d] font-semibold">
-              Saldo Real no Bolso
+              {isBiz ? 'Saldo Estimado do Negócio' : 'Saldo Real no Bolso'}
             </span>
             <span
               className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                !hasValidSimIncome
+                hasNoOwnIncome || !hasValidSimIncome
                   ? 'bg-[#eff4ff] text-[#45464d]'
                   : incomeCalc.hasLoss
                   ? 'bg-[#ffdad6]/40 text-[#ba1a1a]'
@@ -438,37 +467,91 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
               }`}
             >
               <span className="material-symbols-outlined text-[18px]">
-                {!hasValidSimIncome ? 'account_balance' : incomeCalc.hasLoss ? 'money_off' : 'attach_money'}
+                {hasNoOwnIncome || !hasValidSimIncome
+                  ? 'account_balance'
+                  : incomeCalc.hasLoss
+                    ? 'money_off'
+                    : 'attach_money'}
               </span>
             </span>
           </div>
           <div className="my-3">
             <div
-              className={`text-3xl font-bold font-mono tracking-tight ${
-                !hasValidSimIncome
+              className={`text-2xl xl:text-3xl font-bold font-mono tracking-tight ${
+                hasNoOwnIncome || !hasValidSimIncome
                   ? 'text-[#0b1c30]'
                   : incomeCalc.hasLoss
                   ? 'text-[#ba1a1a]'
                   : 'text-[#006a61]'
               }`}
             >
-              {hasValidSimIncome ? formatSignedCurrencyBR(incomeCalc.differenceReais) : 'Aguardando'}
+              {hasNoOwnIncome
+                ? 'Sem renda própria'
+                : hasValidSimIncome
+                  ? formatSignedCurrencyBR(incomeCalc.differenceReais)
+                  : 'Aguardando'}
             </div>
             <p className="text-xs text-[#45464d] mt-1">
-              {!hasValidSimIncome
-                ? hasRegisteredIncome
-                  ? 'Preencha uma renda inicial válida para calcular a diferença.'
-                  : 'Cadastre suas rendas no painel abaixo para detectar ganho ou perda real.'
-                : incomeCalc.hasLoss
-                ? 'Sua renda atual está abaixo do necessário para preservar seu poder de compra.'
-                : 'Sua renda acompanhou a inflação com ganho real de poder aquisitivo.'}
+              {hasNoOwnIncome
+                ? 'Sem renda própria informada; acompanhe a variação dos seus gastos e sobras abaixo.'
+                : !hasValidSimIncome
+                  ? hasRegisteredIncome
+                    ? 'Preencha um valor inicial válido para calcular a diferença.'
+                    : 'Cadastre os valores abaixo para detectar ganho ou perda real.'
+                  : incomeCalc.hasLoss
+                    ? `${modeCopy.incomeTermSingular} atual abaixo do necessário para acompanhar a inflação.`
+                    : `${modeCopy.incomeTermSingular} acompanhou a inflação com ganho real.`}
             </p>
           </div>
           <div className="pt-2 border-t border-[#eff4ff] text-[11px] font-mono text-[#76777d]">
-            Fórmula: Renda Atual - Salário Necessário
+            {isBiz ? modeCopy.surplusNotice : 'Fórmula: Valor Atual - Valor de Equilíbrio'}
           </div>
         </div>
       </div>
+
+      {/* Faixa de Transparência de Sobras (Informada x Estimada x Calculada) */}
+      {surplusBreakdown && (
+        <div className="bg-[#ffffff] rounded-2xl p-4 sm:p-5 border border-[#eff4ff] shadow-sm flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-mono text-xs font-semibold uppercase tracking-wider text-[#0b1c30]">
+              Comparativo de Sobra Mensal (Transparência dos Dados)
+            </span>
+            {surplusBreakdown.isBusinessEstimateNotice && (
+              <span className="px-2.5 py-0.5 rounded-full bg-[#fef3c7] text-[#92400e] font-mono text-[11px] font-semibold">
+                {modeCopy.surplusNotice}
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div className="p-3 rounded-xl bg-[#eff4ff]/60 border border-[#e5eeff]">
+              <span className="font-mono text-[11px] text-[#76777d] block">Sobra informada no questionário</span>
+              <span className="font-mono text-sm font-bold text-[#0b1c30]">
+                {surplusBreakdown.reportedMonthlySurplus !== null
+                  ? `R$ ${formatMoneyBR(surplusBreakdown.reportedMonthlySurplus)}`
+                  : 'Não informada'}
+              </span>
+            </div>
+            <div className="p-3 rounded-xl bg-[#eff4ff]/60 border border-[#e5eeff]">
+              <span className="font-mono text-[11px] text-[#76777d] block">Sobra estimada (renda − gasto total estimado)</span>
+              <span className="font-mono text-sm font-bold text-[#0b1c30]">
+                {surplusBreakdown.estimatedMonthlySurplus !== null
+                  ? `R$ ${formatMoneyBR(surplusBreakdown.estimatedMonthlySurplus)}`
+                  : 'Não apurada'}
+              </span>
+            </div>
+            <div className="p-3 rounded-xl bg-[#eff4ff]/60 border border-[#e5eeff]">
+              <span className="font-mono text-[11px] text-[#76777d] block">Saldo efetivo calculado (renda − cesta)</span>
+              <span className="font-mono text-sm font-bold text-[#006a61]">
+                {hasNoOwnIncome
+                  ? 'Sem renda própria'
+                  : surplusBreakdown.effectiveCalculatedBalance !== null
+                    ? formatSignedCurrencyBR(surplusBreakdown.effectiveCalculatedBalance)
+                    : 'Aguardando renda'}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Seção Interativa: Parâmetros de Renda & Gastos Editáveis */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -481,12 +564,18 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
               </div>
               <div>
                 <h3 className="text-base font-bold text-[#0b1c30]">
-                  {isBiz ? 'Parâmetros de Faturamento e Custos' : 'Parâmetros Financeiros da Casa'}
+                  {isBiz
+                    ? 'Parâmetros de Faturamento e Custos'
+                    : isStudent
+                      ? 'Parâmetros Financeiros Estudantis'
+                      : 'Parâmetros Financeiros da Casa'}
                 </h3>
                 <p className="text-xs text-[#45464d]">
                   {isBiz
                     ? 'Informe faturamento inicial e atual para medir a pressão nos custos.'
-                    : 'Altere a renda e os gastos para simular o impacto financeiro em tempo real.'}
+                    : isStudent
+                      ? 'Se possuir renda, bolsa ou auxílio, informe os valores abaixo para acompanhar o poder de compra.'
+                      : 'Altere a renda e os gastos para simular o impacto financeiro em tempo real.'}
                 </p>
               </div>
             </div>
@@ -495,7 +584,11 @@ export const PocketImpactView: React.FC<PocketImpactViewProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-mono text-[#45464d] font-medium">
-                {isBiz ? 'Faturamento / Sobra Inicial (R$):' : 'Renda Mensal no Início do Período (R$):'}
+                {isBiz
+                  ? 'Faturamento Inicial (R$):'
+                  : isStudent
+                    ? 'Renda / Auxílio no Início do Período (R$):'
+                    : 'Renda Mensal no Início do Período (R$):'}
               </label>
               <input
                 type="number"

@@ -82,46 +82,240 @@ export interface ToastNotification {
   timestamp?: number;
 }
 
+export interface UserAccount {
+  id: string;
+  email: string;
+  displayName: string;
+  avatarUrl?: string;
+  authProvider?: 'local' | 'google' | 'password' | 'email';
+  emailVerified?: boolean;
+  createdAt: string;
+  lastLoginAt: string;
+  profileId: string;
+}
+
+export interface AuthSession {
+  user: UserAccount;
+}
+
+export type ProfileMode = 'pessoal' | 'negocio' | 'estudante';
+
+export type OnboardingStatus = 'not_started' | 'in_progress' | 'completed' | 'skipped';
+
+export type SurplusFrequency =
+  | 'quase_sempre'
+  | 'as_vezes'
+  | 'raramente'
+  | 'nunca'
+  | 'sem_renda_propria'
+  | 'nao_sei';
+
+export type IncomeRole = 'renda_familiar' | 'faturamento_negocio' | 'renda_estudantil';
+
+export type IncomePredictability =
+  | 'fixa'
+  | 'variavel'
+  | 'sazonal'
+  | 'mista'
+  | 'sem_renda_propria';
+
+export interface DashboardPreferences {
+  basketSetupChoice: 'demonstracao' | 'propria';
+  compareIncomeVsInflation: boolean;
+  trackMonthlyBudgetImpact: boolean;
+  trackCostDrivers?: boolean;
+}
+
+export interface QuestionnaireItemEntry {
+  id: string;
+  name: string;
+  category: string;
+  unit: string;
+  quantity: number;
+  currentPrice: number | null;
+  oldPrice: number | null;
+  supplierName?: string;
+  isMajorDriver?: boolean;
+  approximateSharePercent?: number | null;
+}
+
+export interface PessoalQuestionnaireAnswers {
+  // Etapa 1 — Identificação do domicílio (P1-P4)
+  membersCount: number;
+  contributorsCount: number;
+  dependentsCount: number;
+  primaryIncomeComposition: string;
+  // Etapa 2 — Renda familiar atual e histórica (P5-P9)
+  currentMonthlyIncome: number | null;
+  unknownCurrentIncome: boolean;
+  incomeOneYearAgo: number | null;
+  unknownIncomeOneYearAgo: boolean;
+  incomePredictability: 'Fixa' | 'Variável' | 'Combinação fixa e variável';
+  incomeTrend12M: 'Aumentou' | 'Diminuiu' | 'Permaneceu igual' | 'Não sei informar';
+  incomeEarnersCount: number;
+  // Etapa 3 — Sobra mensal e despesas (P10-P16)
+  surplusFrequency: SurplusFrequency;
+  reportedMonthlySurplus: number | null;
+  shortfallBehavior: string;
+  estimatedMonthlyExpenses: number | null;
+  selectedExpenseCategories: string[];
+  categoryEstimates: Record<string, number>;
+  expenseStability: 'Estáveis' | 'Variam pouco' | 'Variam bastante' | 'Não sei informar';
+  // Etapa 4 — Cesta de consumo familiar (P17-P22)
+  selectedRegularProducts: string[];
+  shoppingFrequency: 'Diariamente' | 'Semanalmente' | 'Quinzenalmente' | 'Mensalmente' | 'Sem frequência definida';
+  itemEntries: QuestionnaireItemEntry[];
+  knowsOldPrices: 'Sim' | 'Não' | 'Apenas alguns';
+  majorBudgetDrivers: string[];
+  // Etapa 5 — Configuração final (P23-P25)
+  basketSetupChoice: 'demonstracao' | 'propria';
+  compareIncomeVsInflation: boolean;
+  trackMonthlyBudgetImpact: boolean;
+}
+
+export interface NegocioQuestionnaireAnswers {
+  // Etapa 1 — Identificação do negócio (N1-N6)
+  businessName: string;
+  businessSegment: string;
+  businessActivityDescription: string;
+  businessSize: 'MEI' | 'Microempresa' | 'Empresa de Pequeno Porte' | 'Médio porte' | 'Não sei informar';
+  workersCount: number;
+  operatingTenure: 'Menos de 1 ano' | 'De 1 a 3 anos' | 'De 3 a 5 anos' | 'Mais de 5 anos';
+  // Etapa 2 — Faturamento atual e histórico (N7-N11)
+  currentMonthlyRevenue: number | null;
+  unknownCurrentRevenue: boolean;
+  revenueOneYearAgo: number | null;
+  unknownRevenueOneYearAgo: boolean;
+  revenuePattern: 'Fixo' | 'Variável' | 'Sazonal' | 'Combinação dessas opções';
+  revenueTrend12M: 'Aumentou' | 'Diminuiu' | 'Permaneceu igual' | 'Grandes oscilações' | 'Não sei informar';
+  primaryRevenueSource: 'Venda de produtos' | 'Prestação de serviços' | 'Produtos e serviços' | 'Outra';
+  // Etapa 3 — Custos, despesas e sobra (N12-N21)
+  estimatedMonthlyOperatingSpend: number | null;
+  surplusFrequency: SurplusFrequency;
+  reportedMonthlySurplus: number | null;
+  shortfallReason: string;
+  selectedCostCategories: string[];
+  categoryEstimates: Record<string, number>;
+  fixedCostCategories: string[];
+  variableCostCategories: string[];
+  operationalCostsIncreased12M: 'Sim' | 'Não' | 'Misto' | 'Não sei informar';
+  operationalCostIncreaseAmount: string;
+  // Etapa 4 — Produtos, insumos e fornecedores (N22-N28)
+  itemEntries: QuestionnaireItemEntry[];
+  knowsOldPrices: 'Sim' | 'Não' | 'Apenas alguns';
+  buysFromSameSuppliers: 'Sim' | 'Não' | 'Depende do produto';
+  wantsToRegisterSuppliers: boolean;
+  suppliers: string[];
+  purchaseFrequency: 'Diariamente' | 'Semanalmente' | 'Quinzenalmente' | 'Mensalmente' | 'Conforme a necessidade';
+  // Etapa 5 — Configuração final (N29-N31)
+  basketSetupChoice: 'demonstracao' | 'propria';
+  compareCostsVsRevenue: boolean;
+  trackCostDrivers: boolean;
+}
+
+export interface EstudanteQuestionnaireAnswers {
+  // Etapa 1 — Identificação do estudante (E1-E4)
+  educationLevel:
+    | 'Ensino Fundamental'
+    | 'Ensino Médio'
+    | 'Ensino Técnico'
+    | 'Ensino Superior'
+    | 'Pós-graduação'
+    | 'Outro';
+  institutionType: 'Pública' | 'Particular' | 'Ambas' | 'Outra modalidade';
+  studyPeriod: 'Matutino' | 'Vespertino' | 'Noturno' | 'Integral' | 'Flexível';
+  livingSituation:
+    | 'Com pais ou responsáveis'
+    | 'Sozinho'
+    | 'Com outros familiares'
+    | 'República ou moradia estudantil'
+    | 'Outra situação';
+  // Etapa 2 — Renda atual e histórica (E5-E9)
+  hasNoOwnIncome: boolean;
+  currentMonthlyIncome: number | null;
+  incomeSources: string[];
+  incomeOneYearAgo: number | null;
+  incomeOneYearAgoStatus: 'informado' | 'nao_sei' | 'nao_possuia_renda';
+  incomePattern: 'Fixa' | 'Variável' | 'Combinação das duas' | 'Não possuo renda própria';
+  incomeTrend12M:
+    | 'Aumentou'
+    | 'Diminuiu'
+    | 'Permaneceu igual'
+    | 'Comecei recentemente'
+    | 'Não sei informar';
+  // Etapa 3 — Gastos e sobra mensal (E10-E17)
+  estimatedMonthlyExpenses: number | null;
+  surplusFrequency: SurplusFrequency;
+  reportedMonthlySurplus: number | null;
+  selectedExpenseCategories: string[];
+  categoryEstimates: Record<string, number>;
+  directPaidCategories: string[];
+  hasRecurringExpenses: boolean;
+  expensesIncreased12M: 'Sim' | 'Não' | 'Misto' | 'Não sei informar';
+  // Etapa 4 — Cesta de consumo estudantil (E18-E24)
+  selectedConsumptionCategories: string[];
+  itemEntries: QuestionnaireItemEntry[];
+  knowsOldPrices: 'Sim' | 'Não' | 'Apenas alguns';
+  majorBudgetDrivers: string[];
+  purchaseFrequency: 'Diariamente' | 'Semanalmente' | 'Quinzenalmente' | 'Mensalmente' | 'Conforme a necessidade';
+  // Etapa 5 — Configuração final (E25-E27)
+  basketSetupChoice: 'demonstracao' | 'propria';
+  compareIncomeVsInflation: boolean;
+  trackMonthlyBudgetImpact: boolean;
+}
+
+export interface QuestionnaireDataPayload {
+  mode: ProfileMode;
+  version: string;
+  completedAt?: string;
+  updatedAt: string;
+  currentStep?: number;
+  pessoal?: PessoalQuestionnaireAnswers;
+  negocio?: NegocioQuestionnaireAnswers;
+  estudante?: EstudanteQuestionnaireAnswers;
+}
+
+export interface SurplusBreakdown {
+  reportedMonthlySurplus: number | null;
+  surplusFrequency: SurplusFrequency | null;
+  estimatedMonthlySurplus: number | null;
+  estimatedMonthlyExpenses: number | null;
+  effectiveCalculatedBalance: number | null;
+  hasNoOwnIncome?: boolean;
+  isBusinessEstimateNotice?: boolean;
+}
+
 export interface ConsumptionGroup {
   id: string;
   name: string;
   description?: string;
   color: string;
   icon: string;
+  profileMode?: ProfileMode;
   nationalWeightIBGE?: number;
   isCustom?: boolean;
   active?: boolean;
 }
 
-export interface UserAccount {
-  id: string;
-  email: string;
-  displayName: string;
-  avatarUrl?: string;
-  authProvider?: 'google' | 'password' | 'email';
-  emailVerified?: boolean;
-  createdAt: string;
-  lastLoginAt: string;
-  lastSyncAt?: string;
-  profileId: string;
-}
-
-export interface AuthSession {
-  user: UserAccount;
-  token?: string;
-  expiresAt?: string;
-}
-
-export type ProfileMode = 'pessoal' | 'negocio';
-
 export interface FamilyProfile {
   id: string;
   name: string;
   profileMode?: ProfileMode;
+  onboardingStatus?: OnboardingStatus;
+  onboardingStep?: number;
+  onboardingCompletedAt?: string;
+  questionnaireVersion?: string;
   priceAlertThresholdPercent?: number;
   membersCount: number;
   referenceRegion: string;
   currency: 'BRL' | string;
+  hasNoOwnIncome?: boolean;
+  reportedMonthlySurplus?: number | null;
+  surplusFrequency?: SurplusFrequency;
+  estimatedMonthlyExpenses?: number | null;
+  suppliers?: string[];
+  dashboardPreferences?: DashboardPreferences;
+  questionnaireData?: QuestionnaireDataPayload;
   isDemo?: boolean;
   createdAt: string;
   updatedAt: string;
@@ -130,6 +324,7 @@ export interface FamilyProfile {
 export interface BasketItem {
   id: string;
   profileId?: string;
+  profileMode?: ProfileMode;
   name: string;
   description?: string;
   group: EconomicGroup;
@@ -150,6 +345,8 @@ export interface BasketItem {
   expenseNature?: ExpenseNature;
   recurrenceType?: RecurrenceType;
   accountingType?: AccountingType;
+  supplierName?: string;
+  paidDirectly?: boolean;
   comparabilityBroken?: boolean;
   comparabilityReason?: string;
   dataOrigin?: DataOrigin;
@@ -172,6 +369,7 @@ export interface PriceRecord {
   source?: string;
   origin?: string;
   region?: string;
+  supplierName?: string;
   packageSize?: number;
   packageUnit?: string;
   dataOrigin?: DataOrigin;
@@ -187,9 +385,13 @@ export type PriceHistory = PriceRecord;
 export interface IncomeRecord {
   id: string;
   profileId: string;
+  profileMode?: ProfileMode;
   referenceDate: string;
   nominalIncome: number;
   source?: string;
+  incomeRole?: IncomeRole;
+  incomePredictability?: IncomePredictability;
+  dataOrigin?: DataOrigin;
   notes?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -457,6 +659,11 @@ export interface EconomicCalculationSummary {
   methodology: LaspeyresResult;
   budgetDecomposition: BudgetDecomposition;
   householdIndicators: HouseholdIndicators;
+  surplusBreakdown?: SurplusBreakdown;
+  estimatedMonthlyExpenses?: number | null;
+  reportedMonthlySurplus?: number | null;
+  surplusFrequency?: SurplusFrequency | null;
+  hasNoOwnIncome?: boolean;
   chainedSeries: ChainedSeriesPoint[];
   groupContributions: GroupContribution[];
   calculatedItems: CalculatedBasketItem[];

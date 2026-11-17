@@ -41,6 +41,7 @@ import {
   SensitivityCell,
   StructuredRecommendation,
   SubstitutePlanA,
+  SurplusBreakdown,
   TaxMode,
   TimeframeWindow,
   WorkingDaysEquivalenceResult,
@@ -69,6 +70,8 @@ export interface ProcessEconomicsOptions {
   workingDaysPerMonth?: number;
   isDemo?: boolean;
   officialGroups?: Array<{ name: string }>;
+  profile?: FamilyProfile | null;
+  profileMode?: ProfileMode;
 }
 
 const OFFICIAL_GROUP_NAMES = new Set([
@@ -2153,22 +2156,26 @@ export function processBasketEconomics(
       ? options.incomeRecords[options.incomeRecords.length - 1]
       : undefined;
 
-  const netIncomeResolved =
-    latestIncomeRec?.netIncome !== undefined && Number.isFinite(latestIncomeRec.netIncome)
+  const hasNoOwnIncome = Boolean(options?.profile?.hasNoOwnIncome);
+  const netIncomeResolved = hasNoOwnIncome
+    ? null
+    : latestIncomeRec?.netIncome !== undefined && Number.isFinite(latestIncomeRec.netIncome)
       ? latestIncomeRec.netIncome
       : incomeFinal;
-  const grossIncomeResolved =
-    latestIncomeRec?.grossIncome !== undefined && Number.isFinite(latestIncomeRec.grossIncome)
+  const grossIncomeResolved = hasNoOwnIncome
+    ? null
+    : latestIncomeRec?.grossIncome !== undefined && Number.isFinite(latestIncomeRec.grossIncome)
       ? latestIncomeRec.grossIncome
       : null;
 
   const hasIncomeData =
+    !hasNoOwnIncome &&
     incomeInitial !== null &&
     Number.isFinite(incomeInitial) &&
     incomeInitial > 0 &&
     incomeFinal !== null &&
     Number.isFinite(incomeFinal) &&
-    incomeFinal >= 0;
+    incomeFinal > 0;
 
   const nominalIncomeGrowthPercent = hasIncomeData
     ? calculateNominalIncomeGrowth(incomeInitial, incomeFinal)
@@ -2188,17 +2195,25 @@ export function processBasketEconomics(
       ? normalizeZero(monthlyPurchasingDeficitOrGain * 12)
       : null;
 
+  const resolvedMode: ProfileMode =
+    options?.profileMode || options?.profile?.profileMode || 'pessoal';
+
   const purchasingPower: PurchasingPowerAnalysis = {
     hasIncomeData,
-    initialIncome: incomeInitial,
-    finalIncome: incomeFinal,
+    initialIncome: hasNoOwnIncome ? null : incomeInitial,
+    finalIncome: hasNoOwnIncome ? null : incomeFinal,
     grossIncome: grossIncomeResolved,
     netIncome: netIncomeResolved,
     initialDate: dateInitial,
     finalDate: dateFinal,
     nominalIncomeGrowthPercent,
     appliedInflationPercent: ipcaCasa12M,
-    inflationSource: 'IPCA-Casa',
+    inflationSource:
+      resolvedMode === 'negocio'
+        ? 'Cesta de Custos do Negócio'
+        : resolvedMode === 'estudante'
+          ? 'Cesta Estudantil'
+          : 'IPCA-Casa',
     realPurchasingPowerChangePercent,
     monthlyPurchasingDeficitOrGain,
     annualizedImpact,
@@ -2245,6 +2260,35 @@ export function processBasketEconomics(
         ? latestIncomeRec.availableReserve
         : null,
   });
+
+  const reportedMonthlySurplus =
+    options?.profile?.reportedMonthlySurplus !== undefined
+      ? options.profile.reportedMonthlySurplus
+      : null;
+  const surplusFrequency = options?.profile?.surplusFrequency ?? null;
+  const estimatedMonthlyExpenses =
+    options?.profile?.estimatedMonthlyExpenses !== undefined
+      ? options.profile.estimatedMonthlyExpenses
+      : null;
+
+  const estimatedMonthlySurplus =
+    !hasNoOwnIncome &&
+    netIncomeResolved !== null &&
+    netIncomeResolved > 0 &&
+    estimatedMonthlyExpenses !== null &&
+    estimatedMonthlyExpenses >= 0
+      ? normalizeZero(netIncomeResolved - estimatedMonthlyExpenses)
+      : null;
+
+  const surplusBreakdown: SurplusBreakdown = {
+    reportedMonthlySurplus,
+    surplusFrequency,
+    estimatedMonthlySurplus,
+    estimatedMonthlyExpenses,
+    effectiveCalculatedBalance: householdIndicators.monthlyBalance,
+    hasNoOwnIncome,
+    isBusinessEstimateNotice: resolvedMode === 'negocio',
+  };
 
   // Impacto no Bolso consolidado (§22 / §38)
   const ibgeMonthlyEffect = calculateEstimatedMonthlyImpact(totalMonthlySpend, safeOfficialIBGE12M);
@@ -2366,6 +2410,11 @@ export function processBasketEconomics(
     methodology,
     budgetDecomposition,
     householdIndicators,
+    surplusBreakdown,
+    estimatedMonthlyExpenses,
+    reportedMonthlySurplus,
+    surplusFrequency,
+    hasNoOwnIncome,
     chainedSeries,
     calculatedItems,
     groupContributions,
@@ -2607,6 +2656,7 @@ export function generateStructuredRecommendations(params: {
 } {
   const { summary, closures = [], profileMode = 'pessoal' } = params;
   const isBiz = profileMode === 'negocio';
+  const isStudent = profileMode === 'estudante';
 
   if (!summary || summary.totalMonthlySpend <= 0 || summary.eligibleItemsCount === 0) {
     return {
@@ -2616,6 +2666,8 @@ export function generateStructuredRecommendations(params: {
           ? 'Os itens cadastrados ainda não têm preço anterior para comparação. Informe o preço anterior de pelo menos 1 item para destravar as recomendações explicadas.'
           : isBiz
           ? 'Cadastre seus primeiros insumos ou custos operacionais com preço anterior e atual para gerar recomendações baseadas nos seus números.'
+          : isStudent
+          ? 'Cadastre seus principais gastos estudantis (lanches, transporte, materiais ou cursos) com preço anterior e atual.'
           : 'Cadastre seus primeiros gastos com preço anterior e atual para receber recomendações claras sobre seu orçamento.',
       recommendations: [
         {
@@ -2627,9 +2679,15 @@ export function generateStructuredRecommendations(params: {
               ? 'Já sabemos quanto você gasta no mês, mas falta o preço anterior para separar o que subiu de preço do que mudou por quantidade.'
               : isBiz
               ? 'Adicione seus principais insumos e custos fixos com preço anterior e atual.'
+              : isStudent
+              ? 'Adicione seus itens regulares da rotina de estudos com preço anterior e atual.'
               : 'Adicione seus principais gastos da casa com preço anterior e atual.',
           effectDetail: 'Sem dados suficientes de comparação temporal.',
-          actionLabel: isBiz ? 'Ir para Insumos e Custos' : 'Ir para Minha Cesta',
+          actionLabel: isBiz
+            ? 'Ir para Insumos e Custos'
+            : isStudent
+            ? 'Ir para Cesta Estudantil'
+            : 'Ir para Minha Cesta',
           targetTab: 'minha-cesta-familiar',
         },
       ],
@@ -2650,14 +2708,16 @@ export function generateStructuredRecommendations(params: {
       driverType: 'preco',
       title: `Aumento de preço em ${topPriceItem.name}`,
       summary: isBiz
-        ? `Mesmo comprando a mesma quantidade, o custo unitário de ${topPriceItem.name} subiu ${pctText} e adicionou ${formatCurrencyBR(topPriceItem.priceEffectReais)}/mês na operação.`
+        ? `Mesmo comprando a mesma quantidade, o custo unitário de ${topPriceItem.name} subiu ${pctText} e adicionou ${formatCurrencyBR(topPriceItem.priceEffectReais)}/mês na operação${topPriceItem.supplierName ? ` (fornecedor: ${topPriceItem.supplierName})` : ''}.`
+        : isStudent
+        ? `Mantendo a mesma rotina de uso, a alta de ${pctText} em ${topPriceItem.name} pesou +${formatCurrencyBR(topPriceItem.priceEffectReais)}/mês na sua cesta estudantil.`
         : `Mesmo mantendo a mesma quantidade, a alta de preço de ${topPriceItem.name} (${pctText}) encareceu seu mês em ${formatCurrencyBR(topPriceItem.priceEffectReais)}.`,
       effectDetail: `Efeito Preço puro: +${formatCurrencyBR(topPriceItem.priceEffectReais)}/mês (${topPriceItem.weightPercent.toFixed(1).replace('.', ',')}% do peso comparável).`,
       itemName: topPriceItem.name,
       categoryName: topPriceItem.group,
       amountReais: topPriceItem.priceEffectReais,
       percentValue: topPriceItem.priceChangePercent ?? undefined,
-      actionLabel: 'Avaliar substituição',
+      actionLabel: isBiz ? 'Comparar fornecedores / planos' : 'Avaliar substituição',
       targetTab: 'estrategias-de-economia',
     });
   }
@@ -2675,6 +2735,8 @@ export function generateStructuredRecommendations(params: {
       title: grewQty
         ? isBiz
           ? 'Aumento por volume consumido de insumos'
+          : isStudent
+          ? 'Seus gastos subiram por aumento de uso/frequência'
           : 'Seu gasto cresceu também por aumento na quantidade consumida'
         : isBiz
         ? 'Redução de volume físico compensou parte da alta de preços'
@@ -2696,7 +2758,7 @@ export function generateStructuredRecommendations(params: {
         title: `Diferença de ${formatCurrencyBR(Math.abs(spendDelta))} frente a ${lastClosure.monthLabel}`,
         summary:
           spendDelta > 0
-            ? `Frente ao fechamento de ${lastClosure.monthLabel} (${formatCurrencyBR(lastClosure.totalMonthlySpend)}), o gasto subiu ${formatCurrencyBR(spendDelta)}. Parte vem da inflação pura (${formatCurrencyBR(summary.budgetDecomposition.priceEffectReais)}) e o restante de novos itens ou quantidades.`
+            ? `Frente ao fechamento de ${lastClosure.monthLabel} (${formatCurrencyBR(lastClosure.totalMonthlySpend)}), o gasto subiu ${formatCurrencyBR(spendDelta)}. Parte vem da variação pura de preços (${formatCurrencyBR(summary.budgetDecomposition.priceEffectReais)}) e o restante de novos itens ou quantidades.`
             : `Frente ao fechamento de ${lastClosure.monthLabel} (${formatCurrencyBR(lastClosure.totalMonthlySpend)}), o gasto recuou ${formatCurrencyBR(Math.abs(spendDelta))}.`,
         effectDetail: `Comparação mensal real vs. fechamento ${lastClosure.monthLabel}.`,
         amountReais: spendDelta,
@@ -2714,9 +2776,11 @@ export function generateStructuredRecommendations(params: {
       driverType: 'composicao',
       title: `${topCategory.group} concentra ${topCategory.weightPercent.toFixed(1).replace('.', ',')}% do orçamento`,
       summary: isBiz
-        ? `A categoria "${topCategory.group}" responde por ${formatCurrencyBR(topCategory.totalSpend)}/mês${topCategory.groupInflationPercent !== null ? ` com variação média de ${formatSignedPercent(topCategory.groupInflationPercent)}` : ''}. Pequenos reajustes aqui movem todo o custo do negócio.`
+        ? `A categoria "${topCategory.group}" responde por ${formatCurrencyBR(topCategory.totalSpend)}/mês${topCategory.groupInflationPercent !== null ? ` com variação média de ${formatSignedPercent(topCategory.groupInflationPercent)}` : ''}. Pequenos reajustes aqui movem todo o custo operacional.`
+        : isStudent
+        ? `A categoria "${topCategory.group}" soma ${formatCurrencyBR(topCategory.totalSpend)}/mês${topCategory.groupInflationPercent !== null ? ` e variou ${formatSignedPercent(topCategory.groupInflationPercent)}` : ''}. É o grupo com maior impacto na sua rotina estudantil.`
         : `A categoria "${topCategory.group}" soma ${formatCurrencyBR(topCategory.totalSpend)}/mês${topCategory.groupInflationPercent !== null ? ` e subiu ${formatSignedPercent(topCategory.groupInflationPercent)}` : ''}. É onde qualquer economia tem o maior efeito no bolso.`,
-      effectDetail: `Peso por Categoria: ${topCategory.weightPercent.toFixed(1).replace('.', ',')}% do gasto mensal total.`,
+      effectDetail: `Peso por Categoria: ${topCategory.weightPercent.toFixed(1).replace('.', ',')}% do total mensal.`,
       categoryName: topCategory.group,
       amountReais: topCategory.totalSpend,
       percentValue: topCategory.weightPercent,
@@ -2734,20 +2798,20 @@ export function generateStructuredRecommendations(params: {
       driverType: 'equilibrio',
       title: deficit
         ? isBiz
-          ? 'Custos superam o faturamento informado'
-          : 'Gastos maiores que a renda informada'
+          ? 'Custos registrados superam o faturamento informado'
+          : 'Gastos maiores que a renda ou auxílio informado'
         : isBiz
-        ? `Margem mensal positiva de ${formatCurrencyBR(indicators.monthlyBalance)}`
-        : `Sobra mensal estimada de ${formatCurrencyBR(indicators.monthlyBalance)}`,
+        ? `Resultado estimado positivo de ${formatCurrencyBR(indicators.monthlyBalance)} (não é lucro contábil)`
+        : `Sobra estimada de ${formatCurrencyBR(indicators.monthlyBalance)}/mês`,
       summary: deficit
-        ? `Os compromissos somam ${formatCurrencyBR(indicators.totalCommitments)} frente a ${formatCurrencyBR(indicators.netIncome)} de entrada (déficit de ${formatCurrencyBR(Math.abs(indicators.monthlyBalance))}/mês).`
+        ? `Os compromissos cadastrados somam ${formatCurrencyBR(indicators.totalCommitments)} frente a ${formatCurrencyBR(indicators.netIncome)} de entrada (diferença de ${formatCurrencyBR(Math.abs(indicators.monthlyBalance))}/mês).`
         : summary.purchasingPower.realPurchasingPowerChangePercent !== null &&
           summary.purchasingPower.realPurchasingPowerChangePercent < 0
-        ? `Apesar da sobra de ${formatCurrencyBR(indicators.monthlyBalance)}, seu ganho de renda não acompanhou sua inflação (${formatSignedPercent(summary.purchasingPower.realPurchasingPowerChangePercent)} real).`
-        : `Seus gastos consomem ${(indicators.expenseToIncomePercent ?? 0).toFixed(1).replace('.', ',')}% da entrada mensal, preservando margem para reserva.`,
-      effectDetail: `Renda/Faturamento ${formatCurrencyBR(indicators.netIncome)} vs. Compromissos ${formatCurrencyBR(indicators.totalCommitments)}.`,
+        ? `Apesar do saldo positivo de ${formatCurrencyBR(indicators.monthlyBalance)}, a evolução nominal (${formatSignedPercent(summary.purchasingPower.nominalIncomeGrowthPercent ?? 0)}) ficou abaixo da variação da cesta (${formatSignedPercent(summary.purchasingPower.realPurchasingPowerChangePercent)} real).`
+        : `Seus gastos cadastrados representam ${(indicators.expenseToIncomePercent ?? 0).toFixed(1).replace('.', ',')}% da entrada mensal informada.`,
+      effectDetail: `${isBiz ? 'Faturamento' : 'Renda/Auxílio'} ${formatCurrencyBR(indicators.netIncome)} vs. Compromissos ${formatCurrencyBR(indicators.totalCommitments)}.`,
       amountReais: indicators.monthlyBalance,
-      actionLabel: isBiz ? 'Ver Faturamento e Margem' : 'Ver Renda e Poder de Compra',
+      actionLabel: isBiz ? 'Ver Faturamento e Custos' : 'Ver Renda e Poder de Compra',
       targetTab: 'renda-e-poder-de-compra',
     });
   }

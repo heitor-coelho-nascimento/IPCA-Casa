@@ -1,0 +1,1105 @@
+# PROMPT — EVOLUÇÃO DO IPCA-CASA: TRÊS PERFIS, QUESTIONÁRIOS PERSONALIZADOS E COLETA INTELIGENTE DE DADOS
+
+Implemente diretamente no projeto atual a evolução do IPCA-Casa para trabalhar com três vertentes:
+
+1. **Pessoal / Familiar:** cálculo da inflação e do impacto da variação de preços sobre o orçamento e o poder de compra das famílias.
+2. **Negócio / Pequena Empresa:** cálculo da variação dos preços dos produtos, insumos e custos de operação de pequenos negócios.
+3. **Estudante:** cálculo da variação dos preços dos produtos e serviços consumidos por estudantes e do impacto dessa variação sobre sua realidade financeira.
+
+O objetivo é manter a ideia central do projeto: **calcular uma inflação personalizada para cada realidade, acompanhar a evolução dos preços e demonstrar como essa variação afeta a renda e o poder de compra.**
+
+A evolução deve incluir três questionários iniciais diferentes, um para cada modalidade, que coletem automaticamente as informações necessárias para configurar e alimentar as funcionalidades já existentes no sistema.
+
+**Não transforme o IPCA-Casa em um aplicativo genérico de controle financeiro, ERP ou gestão empresarial.** O controle de entradas, despesas, renda, custos e metas deve existir como suporte aos cálculos de inflação, à análise do orçamento e ao acompanhamento do poder de compra.
+
+---
+
+# 1. DIRETRIZES FUNDAMENTAIS
+
+Antes de implementar:
+
+- Analise integralmente a estrutura atual do projeto.
+- Identifique todos os dados que as telas, indicadores, gráficos, relatórios e cálculos já solicitam.
+- Identifique quais informações são cadastradas manualmente pelo usuário e onde são armazenadas.
+- Analise os modelos existentes em `src/types/index.ts`.
+- Analise os cálculos de `src/services/economics.ts`.
+- Analise a persistência em `src/services/storage.ts` e `src/services/firestore.ts`.
+- Analise o onboarding atual em `src/components/OnboardingModal.tsx`.
+- Verifique os formulários e componentes que solicitam renda, despesas, produtos, preços, categorias e demais informações.
+
+Não crie um questionário desconectado da aplicação.
+
+**Cada pergunta deverá ter uma finalidade funcional clara e corresponder a um dado que será utilizado em alguma funcionalidade existente ou necessária ao cálculo do IPCA personalizado.**
+
+O questionário deve substituir e otimizar o preenchimento inicial dessas informações, evitando que o usuário precise responder novamente às mesmas perguntas em diferentes telas.
+
+Preserve:
+
+- A arquitetura atual.
+- A identidade visual.
+- Os componentes reutilizáveis.
+- Os cálculos existentes que estejam corretos.
+- A estrutura de navegação.
+- A experiência responsiva.
+- Os dados dos usuários existentes.
+- A ideia original do IPCA-Casa.
+
+Não reconstrua a aplicação do zero.
+
+# 2. TRÊS MODALIDADES INDEPENDENTES
+
+O sistema deverá trabalhar com três modalidades:
+
+- `pessoal`
+- `negocio`
+- `estudante`
+
+Cada modalidade deverá possuir:
+
+- Um questionário próprio.
+- Campos específicos.
+- Categorias adequadas.
+- Cesta de consumo ou custos própria.
+- Indicadores coerentes.
+- Cálculos adequados à sua realidade.
+- Relatórios específicos.
+- Recomendações relacionadas aos dados coletados.
+
+Não utilizar um questionário genérico com pequenas alterações de palavras.
+
+As perguntas, alternativas, campos e informações coletadas devem ser diferentes conforme a modalidade.
+
+A modalidade selecionada deve determinar qual questionário será exibido e como as respostas serão utilizadas.
+
+# 3. QUESTIONÁRIO INICIAL E PREENCHIMENTO AUTOMÁTICO
+
+## 3.1. Fluxo
+
+Após o primeiro cadastro ou login:
+
+1. Verificar se o usuário já possui uma modalidade configurada e um questionário concluído.
+2. Se não possuir, apresentar a seleção de modalidade.
+3. Após a seleção, abrir exclusivamente o questionário correspondente.
+4. Coletar as informações necessárias.
+5. Validar as respostas.
+6. Salvar as informações no Firestore.
+7. Preencher automaticamente os dados correspondentes às funcionalidades do sistema.
+8. Configurar o dashboard e os indicadores.
+9. Direcionar o usuário para a aplicação já configurada.
+
+O questionário não deve aparecer novamente em todos os logins.
+
+Caso o usuário interrompa o preenchimento, salvar o progresso e permitir que continue posteriormente.
+
+Permitir revisar e atualizar as respostas nas configurações.
+
+## 3.2. Como as respostas devem funcionar
+
+O questionário não deve ser apenas um cadastro de perfil.
+
+Ele deve funcionar como uma forma otimizada de alimentar o sistema.
+
+Exemplos:
+
+- Pergunta sobre renda atual → preenche o campo de renda atual utilizado no cálculo do poder de compra.
+- Pergunta sobre renda de um ano atrás → preenche a referência histórica de renda.
+- Pergunta sobre despesas mensais → alimenta a referência de despesas do orçamento.
+- Pergunta sobre quanto sobra no fim do mês → alimenta o indicador de saldo ou sobra mensal.
+- Pergunta sobre os principais produtos consumidos → configura a cesta de consumo.
+- Pergunta sobre preços atuais → registra os preços-base dos itens, quando o usuário fornecer valores.
+- Pergunta sobre participação dos gastos → auxilia na definição dos pesos da cesta, quando houver informações suficientes.
+
+Cada resposta deve ser vinculada ao campo correspondente do modelo de dados e à funcionalidade que utiliza essa informação.
+
+**Não criar respostas que fiquem armazenadas sem utilização.**
+
+Também não criar campos redundantes quando já existir uma estrutura adequada no projeto.
+
+## 3.3. Cuidados com as informações coletadas
+
+Diferenciar claramente:
+
+- Dados atuais.
+- Dados históricos.
+- Estimativas.
+- Registros efetivos.
+- Informações de configuração.
+
+Uma renda aproximada informada no questionário não deve ser tratada como uma movimentação financeira efetivamente recebida.
+
+Uma despesa mensal estimada não deve ser registrada como uma compra real.
+
+Os dados históricos devem preservar o período a que se referem.
+
+Quando o usuário não souber responder, permitir informar que não sabe ou deixar o campo opcional, desde que isso não impeça o funcionamento essencial.
+
+Não inventar valores para preencher campos vazios.
+
+---
+
+# 4. QUESTIONÁRIO 1 — PESSOAL / FAMILIAR
+
+**Objetivo:** coletar as informações necessárias para calcular a inflação da cesta de consumo da família, acompanhar a evolução da renda familiar e analisar o impacto da variação de preços sobre o poder de compra.
+
+As perguntas devem ser formuladas considerando que o objeto de análise é a família e seu orçamento doméstico, não apenas o indivíduo que criou a conta.
+
+## ETAPA 1 — IDENTIFICAÇÃO DO DOMICÍLIO
+
+1. Quantas pessoas moram atualmente na sua casa?
+   - Campo numérico.
+
+2. Quantas pessoas contribuem financeiramente para a renda da casa?
+   - Campo numérico.
+
+3. Quantas pessoas dependem financeiramente dessa renda?
+   - Campo numérico.
+
+4. A renda da casa é composta principalmente por:
+   - Salários.
+   - Aposentadorias ou pensões.
+   - Trabalho autônomo.
+   - Benefícios sociais.
+   - Renda empresarial.
+   - Outras fontes.
+   - Combinação de diferentes fontes.
+
+Essas respostas devem preencher as informações cadastrais do domicílio e auxiliar na contextualização dos indicadores familiares.
+
+## ETAPA 2 — RENDA FAMILIAR ATUAL E HISTÓRICA
+
+5. **Qual é a renda mensal atual da sua casa?**
+   - Campo monetário obrigatório, permitindo informar que não sabe.
+
+6. **Qual era aproximadamente a renda mensal da sua casa há 1 ano?**
+   - Campo monetário.
+   - Permitir informar que não sabe.
+
+7. A renda familiar atualmente é:
+   - Fixa.
+   - Variável.
+   - Uma combinação de renda fixa e variável.
+
+8. A renda da sua casa aumentou, diminuiu ou permaneceu igual nos últimos 12 meses?
+   - Aumentou.
+   - Diminuiu.
+   - Permaneceu aproximadamente igual.
+   - Não sei informar.
+
+9. Quantas pessoas da casa possuem alguma fonte de renda?
+   - Campo numérico.
+
+Essas respostas devem alimentar:
+
+- Renda familiar atual.
+- Renda familiar histórica.
+- Evolução nominal da renda.
+- Comparação entre evolução da renda e inflação da cesta familiar.
+- Indicadores de poder de compra.
+
+Não calcular variação histórica da renda quando não houver dados suficientes ou quando o período informado não for comparável.
+
+## ETAPA 3 — SOBRA MENSAL E DESPESAS
+
+10. **Costuma sobrar dinheiro na sua casa no final do mês?**
+   - Sim, quase sempre.
+   - Sim, às vezes.
+   - Raramente.
+   - Nunca.
+   - Não sei informar.
+
+11. **Se costuma sobrar, quanto aproximadamente sobra por mês?**
+   - Campo monetário.
+
+12. Quando não sobra dinheiro, normalmente o que acontece?
+   - A renda é totalmente utilizada nas despesas.
+   - É necessário utilizar reservas.
+   - A família precisa recorrer ao crédito ou empréstimos.
+   - A família acumula contas pendentes.
+   - Outra situação.
+
+13. **Qual é o gasto mensal aproximado da sua casa?**
+   - Campo monetário.
+
+14. Quais são as principais despesas mensais da sua casa?
+   - Alimentação.
+   - Moradia e aluguel.
+   - Água.
+   - Energia elétrica.
+   - Gás.
+   - Transporte.
+   - Saúde.
+   - Educação.
+   - Internet e telefone.
+   - Higiene e limpeza.
+   - Lazer.
+   - Vestuário.
+   - Outros.
+
+15. Qual é o valor aproximado gasto mensalmente em cada uma das categorias selecionadas?
+   - Campo monetário individual para cada categoria.
+   - Permitir pular categorias sem valor conhecido.
+
+16. As despesas da casa costumam ser:
+   - Estáveis.
+   - Variam pouco.
+   - Variam bastante.
+   - Não sei informar.
+
+Essas respostas devem alimentar os campos de renda, despesas e sobra mensal já utilizados pelo projeto.
+
+Os valores por categoria devem servir como referência inicial para a composição e participação dos gastos familiares.
+
+Não somar automaticamente valores estimados e registros reais como se fossem a mesma coisa.
+
+## ETAPA 4 — CESTA DE CONSUMO FAMILIAR
+
+17. Quais produtos sua família costuma comprar regularmente?
+
+Apresentar categorias e permitir seleção de produtos:
+
+- Arroz.
+- Feijão.
+- Açúcar.
+- Óleo.
+- Café.
+- Leite.
+- Carnes.
+- Frango.
+- Ovos.
+- Pão.
+- Frutas.
+- Verduras e legumes.
+- Produtos de limpeza.
+- Produtos de higiene.
+- Gás de cozinha.
+- Outros produtos.
+
+18. Com que frequência sua família realiza compras de mercado?
+   - Diariamente.
+   - Semanalmente.
+   - Quinzenalmente.
+   - Mensalmente.
+   - Sem frequência definida.
+
+19. Qual é a quantidade normalmente comprada de cada produto selecionado?
+   - Campo com quantidade e unidade de medida, quando aplicável.
+
+20. Qual é o preço aproximado que sua família paga atualmente por cada produto?
+   - Campo monetário individual.
+   - Permitir informar que não sabe.
+
+21. Você sabe quanto pagava por esses mesmos produtos há aproximadamente 1 ano?
+   - Sim.
+   - Não.
+   - Apenas alguns produtos.
+
+Se sim, permitir informar os preços históricos individualmente.
+
+22. Quais dessas despesas representam maior parte do orçamento da sua casa?
+   - Permitir selecionar e, quando possível, informar a participação aproximada.
+
+Essas respostas devem alimentar:
+
+- Cesta de produtos familiar.
+- Quantidades de referência.
+- Preços-base.
+- Histórico de preços, quando informado.
+- Participação dos gastos por categoria.
+- Peso dos itens na inflação personalizada.
+
+Não obrigar o usuário a informar todos os preços históricos para concluir o questionário.
+
+Quando não houver preço histórico, iniciar o acompanhamento a partir da data de cadastro.
+
+## ETAPA 5 — CONFIGURAÇÃO FINAL
+
+23. Deseja utilizar uma cesta de demonstração ou montar sua própria cesta?
+   - Utilizar cesta de demonstração.
+   - Montar minha própria cesta.
+
+24. Deseja acompanhar a evolução da renda familiar em comparação com a inflação?
+   - Sim.
+   - Não.
+
+25. Deseja acompanhar mensalmente quanto a inflação está impactando o orçamento da sua casa?
+   - Sim.
+   - Não.
+
+As respostas devem configurar as funcionalidades existentes, sem criar movimentações fictícias.
+
+---
+
+# 5. QUESTIONÁRIO 2 — NEGÓCIO / PEQUENA EMPRESA
+
+**Objetivo:** calcular a variação dos preços dos produtos, insumos e custos operacionais do negócio e analisar como essas variações afetam o faturamento, os custos e a capacidade financeira da empresa.
+
+O foco continua sendo a inflação personalizada do negócio, não a criação de um ERP ou sistema contábil completo.
+
+## ETAPA 1 — IDENTIFICAÇÃO DO NEGÓCIO
+
+1. Qual é o nome do seu negócio?
+   - Campo de texto.
+
+2. Em qual segmento sua empresa atua?
+   - Alimentação.
+   - Comércio varejista.
+   - Serviços.
+   - Beleza e estética.
+   - Saúde.
+   - Educação.
+   - Construção.
+   - Tecnologia.
+   - Indústria.
+   - Outro.
+
+3. Descreva brevemente a principal atividade do negócio.
+   - Campo de texto.
+
+4. Qual é o porte aproximado da empresa?
+   - MEI.
+   - Microempresa.
+   - Empresa de Pequeno Porte.
+   - Médio porte.
+   - Não sei informar.
+
+5. Quantas pessoas trabalham atualmente no negócio?
+   - Campo numérico.
+
+6. Há quanto tempo o negócio está em funcionamento?
+   - Menos de 1 ano.
+   - De 1 a 3 anos.
+   - De 3 a 5 anos.
+   - Mais de 5 anos.
+
+Essas informações devem preencher os dados cadastrais e auxiliar na configuração das categorias empresariais.
+
+## ETAPA 2 — FATURAMENTO ATUAL E HISTÓRICO
+
+7. **Qual é o faturamento mensal atual do seu negócio?**
+   - Campo monetário.
+
+8. **Qual era o faturamento mensal do negócio há 1 ano?**
+   - Campo monetário.
+   - Permitir informar que não sabe.
+
+9. O faturamento do negócio é:
+   - Fixo.
+   - Variável.
+   - Sazonal.
+   - Uma combinação dessas opções.
+
+10. Nos últimos 12 meses, o faturamento:
+   - Aumentou.
+   - Diminuiu.
+   - Permaneceu aproximadamente igual.
+   - Teve grandes oscilações.
+   - Não sei informar.
+
+11. Qual é a principal fonte de faturamento do negócio?
+   - Venda de produtos.
+   - Prestação de serviços.
+   - Venda de produtos e serviços.
+   - Outra.
+
+Essas respostas devem alimentar:
+
+- Faturamento atual.
+- Referência histórica de faturamento.
+- Evolução nominal do faturamento.
+- Comparação entre evolução do faturamento e variação dos custos.
+
+Não confundir faturamento com lucro ou resultado operacional.
+
+## ETAPA 3 — CUSTOS, DESPESAS E SOBRA
+
+12. **Quanto seu negócio gasta aproximadamente por mês para funcionar?**
+   - Campo monetário.
+
+13. **Costuma sobrar dinheiro no final do mês após pagar os custos e despesas do negócio?**
+   - Sim, quase sempre.
+   - Sim, às vezes.
+   - Raramente.
+   - Nunca.
+   - Não sei informar.
+
+14. **Se sobra dinheiro, qual é o valor aproximado que sobra mensalmente?**
+   - Campo monetário.
+
+15. Quando não sobra dinheiro, qual costuma ser a principal razão?
+   - Custos elevados.
+   - Despesas fixas elevadas.
+   - Baixo faturamento.
+   - Aumento dos preços dos fornecedores.
+   - Endividamento.
+   - Outros fatores.
+   - Não sei informar.
+
+16. Quais são os principais custos do negócio?
+   - Matéria-prima.
+   - Insumos.
+   - Mercadorias para revenda.
+   - Embalagens.
+   - Fornecedores.
+   - Serviços terceirizados.
+   - Aluguel.
+   - Energia elétrica.
+   - Água.
+   - Internet e telefone.
+   - Logística e frete.
+   - Combustível.
+   - Manutenção.
+   - Equipamentos.
+   - Outros.
+
+17. Qual é o gasto mensal aproximado em cada categoria selecionada?
+   - Campo monetário por categoria.
+
+18. Quais são os principais custos fixos do negócio?
+
+19. Quais são os principais custos variáveis do negócio?
+
+20. Os custos operacionais aumentaram nos últimos 12 meses?
+   - Sim.
+   - Não.
+   - Alguns aumentaram e outros diminuíram.
+   - Não sei informar.
+
+21. Se aumentaram, qual foi o percentual ou valor aproximado desse aumento?
+   - Campo percentual ou monetário.
+   - Opcional.
+
+Essas respostas devem preencher os dados de despesas, custos e resultado operacional estimado já utilizados ou necessários ao sistema.
+
+Não chamar a sobra mensal informada pelo usuário de lucro contábil. Manter sua natureza como valor informado ou resultado estimado, conforme os dados disponíveis.
+
+## ETAPA 4 — PRODUTOS, INSUMOS E FORNECEDORES
+
+22. Quais são os principais produtos, matérias-primas ou insumos utilizados pelo negócio?
+
+Permitir cadastrar cada item com:
+
+- Nome.
+- Categoria.
+- Unidade de medida.
+- Quantidade normalmente comprada.
+- Preço atual.
+- Fornecedor, se houver.
+
+23. Qual é o preço atual de cada produto ou insumo selecionado?
+   - Campo monetário individual.
+
+24. Você sabe quanto pagava por esses mesmos itens há aproximadamente 1 ano?
+   - Sim.
+   - Não.
+   - Apenas alguns itens.
+
+25. Se souber, informe os preços anteriores.
+
+26. Seu negócio costuma comprar dos mesmos fornecedores?
+   - Sim.
+   - Não.
+   - Depende do produto.
+
+27. Deseja cadastrar seus principais fornecedores?
+   - Sim.
+   - Não.
+
+28. Com que frequência realiza compras de insumos e mercadorias?
+   - Diariamente.
+   - Semanalmente.
+   - Quinzenalmente.
+   - Mensalmente.
+   - Conforme a necessidade.
+
+Essas informações devem alimentar:
+
+- Cesta de custos do negócio.
+- Histórico de preços.
+- Comparação entre períodos.
+- Comparação entre fornecedores, quando aplicável.
+- Participação dos custos no orçamento.
+- Indicadores de variação dos custos.
+
+## ETAPA 5 — CONFIGURAÇÃO FINAL
+
+29. Deseja utilizar uma cesta de demonstração adequada ao seu segmento ou cadastrar seus próprios itens?
+   - Cesta de demonstração.
+   - Cadastrar meus próprios itens.
+
+30. Deseja acompanhar a variação dos custos do negócio em comparação com a evolução do faturamento?
+   - Sim.
+   - Não.
+
+31. Deseja acompanhar quais produtos e insumos mais contribuem para o aumento dos custos?
+   - Sim.
+   - Não.
+
+---
+
+# 6. QUESTIONÁRIO 3 — ESTUDANTE
+
+**Objetivo:** calcular a variação dos preços da cesta de consumo de estudantes e analisar o impacto dessa variação sobre sua renda e seu poder de compra.
+
+A modalidade deve atender estudantes do ensino fundamental, médio, técnico e superior, independentemente de possuírem renda própria.
+
+O foco é a inflação do consumo estudantil, não transformar a plataforma em um aplicativo de tarefas escolares ou gestão acadêmica.
+
+## ETAPA 1 — IDENTIFICAÇÃO DO ESTUDANTE
+
+1. Qual é seu nível de ensino?
+   - Ensino Fundamental.
+   - Ensino Médio.
+   - Ensino Técnico.
+   - Ensino Superior.
+   - Pós-graduação.
+   - Outro.
+
+2. Você estuda em instituição:
+   - Pública.
+   - Particular.
+   - Ambas.
+   - Outra modalidade.
+
+3. Em qual período você estuda?
+   - Matutino.
+   - Vespertino.
+   - Noturno.
+   - Integral.
+   - Flexível.
+
+4. Você mora:
+   - Com seus pais ou responsáveis.
+   - Sozinho.
+   - Com outros familiares.
+   - Em república ou moradia estudantil.
+   - Outra situação.
+
+Essas informações devem ajudar a configurar a cesta de consumo estudantil, sem presumir despesas que o usuário não possui.
+
+## ETAPA 2 — RENDA ATUAL E HISTÓRICA
+
+5. **Qual é sua renda mensal atual?**
+   - Campo monetário.
+   - Permitir informar que não possui renda própria.
+
+6. De onde vem sua renda?
+   - Mesada.
+   - Bolsa de estudos.
+   - Auxílio estudantil.
+   - Estágio.
+   - Jovem Aprendiz.
+   - Emprego.
+   - Trabalho autônomo.
+   - Ajuda familiar.
+   - Outras fontes.
+   - Não possuo renda própria.
+
+7. **Qual era sua renda mensal aproximadamente há 1 ano?**
+   - Campo monetário.
+   - Permitir informar que não sabe ou não possuía renda.
+
+8. Sua renda atual é:
+   - Fixa.
+   - Variável.
+   - Uma combinação das duas.
+   - Não possuo renda própria.
+
+9. Nos últimos 12 meses, sua renda:
+   - Aumentou.
+   - Diminuiu.
+   - Permaneceu aproximadamente igual.
+   - Comecei a receber renda recentemente.
+   - Não sei informar.
+
+Essas respostas devem alimentar:
+
+- Renda atual do estudante.
+- Referência histórica de renda.
+- Evolução nominal da renda.
+- Comparação entre renda e inflação da cesta estudantil.
+
+Não utilizar obrigatoriamente a nomenclatura salário, pois a renda pode vir de mesada, bolsa, auxílio ou ajuda familiar.
+
+## ETAPA 3 — GASTOS E SOBRA MENSAL
+
+10. **Quanto você gasta aproximadamente por mês?**
+    - Campo monetário.
+
+11. **Costuma sobrar dinheiro no final do mês?**
+    - Sim, quase sempre.
+    - Sim, às vezes.
+    - Raramente.
+    - Nunca.
+    - Não possuo renda própria.
+    - Não sei informar.
+
+12. **Se sobra dinheiro, quanto aproximadamente sobra por mês?**
+    - Campo monetário.
+
+13. Quais são seus principais gastos?
+    - Alimentação.
+    - Lanches.
+    - Transporte.
+    - Material escolar.
+    - Livros e apostilas.
+    - Cursos.
+    - Internet e telefone.
+    - Tecnologia.
+    - Assinaturas digitais.
+    - Lazer.
+    - Roupas.
+    - Higiene pessoal.
+    - Saúde.
+    - Moradia.
+    - Outros.
+
+14. Quanto você gasta aproximadamente por mês em cada categoria selecionada?
+    - Campo monetário individual.
+
+15. Quais desses gastos são pagos diretamente por você?
+    - Permitir selecionar as categorias.
+
+16. Você costuma ter gastos recorrentes?
+    - Sim.
+    - Não.
+
+17. Seus gastos aumentaram nos últimos 12 meses?
+    - Sim.
+    - Não.
+    - Alguns aumentaram e outros diminuíram.
+    - Não sei informar.
+
+Essas respostas devem preencher as informações de despesas e orçamento já utilizadas pelo sistema.
+
+## ETAPA 4 — CESTA DE CONSUMO ESTUDANTIL
+
+18. Quais produtos e serviços você consome regularmente?
+
+Categorias sugeridas:
+
+- Alimentação e lanches.
+- Transporte.
+- Material escolar.
+- Livros e apostilas.
+- Cursos e mensalidades.
+- Tecnologia e acessórios.
+- Internet e telefonia.
+- Assinaturas digitais.
+- Higiene pessoal.
+- Vestuário.
+- Lazer.
+- Outros.
+
+19. Quais são os principais produtos ou serviços que você compra regularmente?
+
+Permitir cadastrar cada item com:
+
+- Nome.
+- Categoria.
+- Unidade de medida, quando aplicável.
+- Quantidade consumida.
+- Preço atual.
+
+20. Quanto você paga atualmente por cada item selecionado?
+    - Campo monetário individual.
+
+21. Você sabe quanto pagava por esses mesmos itens há aproximadamente 1 ano?
+    - Sim.
+    - Não.
+    - Apenas alguns itens.
+
+22. Se souber, informe os preços anteriores.
+
+23. Quais desses itens representam maior parte dos seus gastos?
+    - Permitir selecionar e, quando possível, informar a participação aproximada.
+
+24. Com que frequência você costuma comprar esses produtos?
+    - Diariamente.
+    - Semanalmente.
+    - Quinzenalmente.
+    - Mensalmente.
+    - Conforme a necessidade.
+
+Essas respostas devem alimentar:
+
+- Cesta de consumo estudantil.
+- Preços-base.
+- Quantidades.
+- Histórico de preços.
+- Participação dos itens no orçamento.
+- Cálculo da variação da cesta estudantil.
+
+## ETAPA 5 — CONFIGURAÇÃO FINAL
+
+25. Deseja utilizar uma cesta de demonstração estudantil ou montar sua própria cesta?
+    - Cesta de demonstração.
+    - Montar minha própria cesta.
+
+26. Deseja acompanhar a evolução da sua renda em comparação com a inflação da sua cesta?
+    - Sim.
+    - Não.
+
+27. Deseja visualizar quanto a inflação impacta seus gastos mensais?
+    - Sim.
+    - Não.
+
+---
+
+# 7. VINCULAÇÃO DAS RESPOSTAS ÀS FUNCIONALIDADES EXISTENTES
+
+Esta é uma das partes mais importantes da implementação.
+
+Antes de programar, faça um mapeamento completo das informações que o projeto já solicita.
+
+Crie uma relação entre:
+
+1. Pergunta do questionário.
+2. Campo de destino no modelo de dados.
+3. Tela ou funcionalidade que utiliza esse campo.
+4. Cálculo ou indicador alimentado.
+5. Tipo de informação: atual, histórica, estimada ou efetiva.
+
+Exemplo de mapeamento:
+
+| Pergunta | Informação preenchida | Utilização |
+|---|---|---|
+| Qual é sua renda atual? | Renda mensal atual | Poder de compra e dashboard |
+| Qual era sua renda há 1 ano? | Renda histórica | Comparação da evolução da renda |
+| Quanto gasta por mês? | Despesa mensal estimada | Análise do orçamento |
+| Costuma sobrar dinheiro? | Situação da sobra mensal | Indicador de saldo |
+| Quanto sobra por mês? | Sobra mensal estimada | Análise do orçamento |
+| Quais produtos consome? | Itens da cesta | Cesta de consumo |
+| Quanto paga por cada item? | Preço-base | Cálculo da variação de preços |
+| Quanto pagava há 1 ano? | Preço histórico | Comparação histórica |
+| Quanto gasta por categoria? | Participação das despesas | Composição da cesta e análise do orçamento |
+
+Essa tabela é apenas uma referência. O mapeamento definitivo deve ser feito a partir dos campos reais encontrados no código.
+
+**Não criar uma segunda estrutura de dados para armazenar as mesmas informações que o projeto já possui.**
+
+Se o sistema já possui um campo de renda, o questionário deve preencher esse campo.
+
+Se já possui um cadastro de produtos, o questionário deve utilizar esse cadastro.
+
+Se já possui histórico de preços, as respostas devem ser integradas à estrutura existente.
+
+O objetivo é fazer o onboarding alimentar a aplicação inteira.
+
+# 8. METODOLOGIA DOS CÁLCULOS DE INFLAÇÃO
+
+Preservar o propósito principal do IPCA-Casa: acompanhar a variação dos preços de uma cesta personalizada e analisar seu impacto financeiro.
+
+Cada modalidade terá uma cesta própria.
+
+## 8.1. Pessoal / Familiar
+
+Calcular a variação dos preços da cesta de consumo familiar, considerando os produtos, preços, quantidades e pesos correspondentes.
+
+## 8.2. Negócio / Pequena Empresa
+
+Calcular a variação dos preços dos produtos, insumos e custos selecionados pelo negócio.
+
+Não tratar faturamento como preço de produto.
+
+Não misturar custos com receitas na composição da cesta.
+
+## 8.3. Estudante
+
+Calcular a variação dos preços da cesta de consumo estudantil, considerando os produtos e serviços efetivamente selecionados pelo estudante.
+
+## 8.4. Fórmula e ponderação
+
+Revisar a metodologia de cálculo já implementada no projeto e garantir que a variação seja calculada de maneira coerente com a cesta e os pesos utilizados.
+
+Quando houver quantidades e pesos suficientes, utilizar uma metodologia consistente de comparação de preços entre períodos, preservando a comparabilidade dos itens.
+
+Não criar pesos arbitrários nem tratar valores monetários de despesas como pesos automaticamente sem uma regra metodológica definida.
+
+Se não houver dados suficientes para calcular uma variação confiável, informar a limitação e solicitar os dados faltantes.
+
+O resultado deve ser identificado como inflação ou variação personalizada da cesta correspondente, sem ser apresentado como IPCA oficial do IBGE.
+
+O IPCA oficial pode continuar sendo utilizado como referência comparativa, desde que a distinção metodológica fique explícita.
+
+# 9. RENDA, HISTÓRICO E PODER DE COMPRA
+
+Utilizar a renda atual e histórica coletada no questionário para alimentar as funcionalidades de comparação.
+
+Para cada modalidade, utilizar a nomenclatura adequada:
+
+- Família: renda familiar.
+- Negócio: faturamento do negócio, separadamente dos custos e do resultado.
+- Estudante: renda do estudante.
+
+Quando houver dados comparáveis, calcular a variação nominal da renda:
+
+\[
+\text{Variação da renda (\%)} =
+\left(\frac{\text{Renda atual}}{\text{Renda anterior}}-1\right)\times100
+\]
+
+Comparar essa evolução com a variação da cesta correspondente.
+
+Quando houver dados suficientes, demonstrar se a renda cresceu acima ou abaixo da inflação personalizada.
+
+Para empresas, apresentar separadamente a evolução do faturamento e a variação dos custos. Não chamar faturamento de poder de compra pessoal.
+
+A comparação entre renda e inflação deve respeitar a natureza de cada perfil.
+
+## 9.1. Sobra mensal
+
+Utilizar a resposta sobre sobra mensal para alimentar os indicadores de orçamento.
+
+Diferenciar:
+
+- Sobra informada pelo usuário.
+- Sobra estimada a partir de renda e despesas.
+- Saldo calculado a partir de registros efetivos.
+
+Não apresentar esses três valores como se fossem equivalentes.
+
+Quando houver renda e despesas suficientes, calcular uma sobra estimada:
+
+\[
+\text{Sobra estimada} = \text{Renda} - \text{Despesas}
+\]
+
+Para negócios, utilizar as categorias adequadas e deixar claro que se trata de uma estimativa, não de lucro contábil.
+
+# 10. DASHBOARDS E FUNCIONALIDADES POR MODALIDADE
+
+Adaptar os dashboards existentes para exibir as informações coletadas.
+
+### Pessoal / Familiar
+
+- Renda mensal familiar.
+- Renda familiar de referência histórica.
+- Despesas mensais.
+- Sobra mensal.
+- Inflação personalizada da cesta familiar.
+- Evolução dos preços.
+- Categorias que mais impactam o orçamento.
+- Comparação entre renda e inflação.
+- Poder de compra familiar.
+
+### Negócio / Pequena Empresa
+
+- Faturamento mensal.
+- Faturamento histórico.
+- Custos operacionais.
+- Despesas mensais.
+- Sobra informada ou resultado estimado.
+- Inflação personalizada da cesta de custos.
+- Evolução dos preços dos insumos.
+- Categorias que mais impactam os custos.
+- Comparação entre faturamento e custos.
+
+### Estudante
+
+- Renda mensal.
+- Renda histórica.
+- Despesas mensais.
+- Sobra mensal.
+- Inflação personalizada da cesta estudantil.
+- Evolução dos preços.
+- Categorias que mais impactam os gastos.
+- Comparação entre renda e inflação.
+- Impacto da variação dos preços no orçamento.
+
+Os indicadores devem aparecer somente quando houver dados suficientes.
+
+Não exibir números fictícios, zeros enganosos ou gráficos sem informações.
+
+# 11. ADAPTAÇÃO DAS TELAS E COMPONENTES EXISTENTES
+
+Revisar especialmente:
+
+- `src/types/index.ts`
+- `src/utils/profileMode.ts`
+- `src/components/Sidebar.tsx`
+- `src/components/Header.tsx`
+- `src/components/OnboardingModal.tsx`
+- `src/components/NewItemDrawer.tsx`
+- `src/components/CategoryManagerModal.tsx`
+- `src/views/OverviewView.tsx`
+- `src/views/BasketView.tsx`
+- `src/views/PriceHistoryView.tsx`
+- `src/views/InflationAnalysisView.tsx`
+- `src/views/PocketImpactView.tsx`
+- `src/views/PurchasingPowerView.tsx`
+- `src/views/SavingStrategiesView.tsx`
+- `src/views/ReportsView.tsx`
+- `src/views/SettingsView.tsx`
+- `src/services/economics.ts`
+- `src/services/storage.ts`
+- `src/services/firestore.ts`
+- `src/utils/csvImport.ts`
+- `firestore.rules`
+- Testes existentes.
+
+Verificar os problemas já identificados:
+
+1. A cesta de demonstração atual é utilizada independentemente da modalidade. Criar conjuntos adequados para cada perfil.
+2. A tela de poder de compra possui conceitos de salário que não se aplicam a todos os perfis. Adaptar os campos e cálculos.
+3. Os modelos de renda não diferenciam suficientemente renda familiar, faturamento empresarial e renda estudantil.
+4. O cadastro de fornecedores precisa ser estruturado para a modalidade empresarial.
+5. As configurações ainda possuem textos exclusivamente domésticos.
+6. As categorias padrão precisam ser específicas para cada modalidade.
+7. Os relatórios precisam utilizar os conceitos adequados a cada perfil.
+8. Os indicadores do dashboard devem ser revisados matematicamente, não apenas renomeados.
+9. Os fechamentos mensais devem preservar a modalidade e a natureza dos dados.
+
+Manter a mesma aplicação e identidade visual. Adaptar o conteúdo sem criar três sistemas independentes.
+
+# 12. DADOS, FIRESTORE E COMPATIBILIDADE
+
+Revisar os modelos de dados para garantir que as informações do questionário sejam armazenadas corretamente e possam alimentar as funcionalidades.
+
+Requisitos:
+
+- Persistir a modalidade.
+- Persistir as respostas do questionário.
+- Registrar a data de preenchimento.
+- Registrar a versão do questionário.
+- Permitir atualização das respostas.
+- Salvar o progresso do questionário.
+- Vincular os dados ao usuário autenticado.
+- Preservar histórico e registros existentes.
+- Garantir isolamento entre usuários.
+
+Não apagar dados antigos.
+
+Não converter automaticamente renda familiar em faturamento ou salário estudantil.
+
+Não misturar preços, categorias ou históricos de cestas de modalidades diferentes.
+
+Atualizar `firestore.rules` e os validadores necessários quando houver alterações de estrutura.
+
+# 13. TROCA DE MODALIDADE
+
+Permitir alterar a modalidade nas configurações, mediante confirmação.
+
+Ao trocar:
+
+- Não apagar registros anteriores.
+- Não converter automaticamente os dados.
+- Não misturar cestas.
+- Não reinterpretar renda ou despesas.
+- Apresentar o questionário correspondente à nova modalidade.
+- Reaproveitar apenas informações que sejam realmente compatíveis.
+- Preservar os dados antigos para eventual retorno à modalidade anterior.
+
+# 14. IMPORTAÇÃO, EXPORTAÇÃO E RELATÓRIOS
+
+Adaptar a importação e exportação para respeitar os três perfis.
+
+Garantir que:
+
+- Os dados mantenham suas categorias.
+- Os preços mantenham seus períodos.
+- Os registros históricos sejam preservados.
+- Os tipos de renda sejam identificados corretamente.
+- Os relatórios não misturem modalidades.
+- Os indicadores utilizem a mesma metodologia dos dashboards.
+
+# 15. PRIVACIDADE E SEGURANÇA
+
+Coletar somente as informações necessárias para as funcionalidades.
+
+Não solicitar CPF, documentos, endereço completo ou dados bancários sem necessidade comprovada.
+
+Garantir:
+
+- Validação de dados.
+- Isolamento por usuário.
+- Controle de acesso.
+- Proteção dos registros no Firestore.
+- Possibilidade de revisar e atualizar respostas.
+- Compatibilidade com os mecanismos de privacidade já existentes.
+- Tratamento adequado de informações de menores de idade na modalidade Estudante, conforme os requisitos legais aplicáveis.
+
+Não confundir preenchimento do questionário com consentimento para finalidades opcionais.
+
+# 16. TESTES OBRIGATÓRIOS
+
+Testar individualmente os três questionários.
+
+### Questionários
+- Seleção de modalidade.
+- Exibição do questionário correto.
+- Validação de campos.
+- Perguntas condicionais.
+- Salvamento de respostas.
+- Retomada de questionário incompleto.
+- Atualização das respostas.
+- Não repetição indevida após conclusão.
+- Preenchimento correto dos campos existentes.
+
+### Cálculos
+- Renda atual e histórica.
+- Variação nominal da renda.
+- Despesas.
+- Sobra mensal.
+- Preços atuais e históricos.
+- Variação da cesta.
+- Pesos e quantidades.
+- Comparação entre renda e inflação.
+- Tratamento de dados ausentes.
+- Tratamento de valores zero.
+
+### Modalidades
+- Família: cesta doméstica e renda familiar.
+- Negócio: cesta de custos e faturamento.
+- Estudante: cesta estudantil e renda do estudante.
+
+### Persistência
+- Firestore.
+- Isolamento entre contas.
+- Compatibilidade com dados antigos.
+- Troca de modalidade.
+- Importação e exportação.
+- Logout e novo login.
+
+Executar os testes e o build disponíveis.
+
+Não afirmar que algo foi testado sem executar.
+
+# 17. CRITÉRIOS DE CONCLUSÃO
+
+A implementação será considerada concluída quando:
+
+1. Existirem três questionários realmente diferentes.
+2. Cada pergunta tiver correspondência com um campo ou funcionalidade do sistema.
+3. As respostas preencherem automaticamente as informações já solicitadas pela aplicação.
+4. O usuário não precisar cadastrar novamente os mesmos dados em outras telas.
+5. Os dados atuais e históricos forem armazenados corretamente.
+6. As três modalidades calcularem suas próprias cestas de inflação personalizada.
+7. Os indicadores de renda, despesas e sobra respeitarem a modalidade.
+8. O IPCA-Casa mantiver seu propósito central.
+9. A aplicação preservar seus dados e funcionalidades existentes.
+10. O onboarding funcionar corretamente após o primeiro login.
+11. Os testes e o build forem executados.
+
+# 18. RELATÓRIO FINAL
+
+Ao concluir, apresentar:
+
+- O que foi implementado.
+- Os três questionários e suas perguntas.
+- O mapeamento entre perguntas e campos existentes.
+- Quais telas passaram a receber dados automaticamente.
+- Quais cálculos foram adaptados.
+- Quais estruturas de dados foram modificadas.
+- Quais arquivos foram alterados.
+- Quais testes foram executados.
+- Resultados reais dos testes.
+- Pendências e limitações.
+
+Classificar cada item como:
+
+- Concluído e testado.
+- Implementado, mas não testado.
+- Parcialmente implementado.
+- Pendente.
+
+**RESULTADO FINAL ESPERADO:** o IPCA-Casa deve continuar sendo uma plataforma de cálculo e acompanhamento da inflação personalizada, agora atendendo três realidades: famílias, negócios e estudantes. Cada usuário deverá responder a um questionário específico para seu perfil, e essas respostas deverão preencher automaticamente os dados necessários às funcionalidades, aos indicadores e aos cálculos já existentes, tornando o início do uso muito mais rápido, organizado e preciso.

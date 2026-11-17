@@ -25,7 +25,9 @@ interface SettingsViewProps {
   onDeleteProfile?: (profileId: string) => void | Promise<void>;
   onWipeAllUserData?: () => void | Promise<void>;
   onSwitchToEmptyBasket: () => void;
-  onSwitchToDemoBasket: () => void;
+  onSwitchToDemoBasket: (mode?: ProfileMode) => void;
+  onSwitchModality?: (targetMode: ProfileMode) => void | Promise<void>;
+  onOpenQuestionnaire?: () => void;
   onNotify?: (type: 'success' | 'error' | 'info', message: string) => void;
   isDemo: boolean;
   onRefreshData: () => void;
@@ -77,6 +79,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onWipeAllUserData,
   onSwitchToEmptyBasket,
   onSwitchToDemoBasket,
+  onSwitchModality,
+  onOpenQuestionnaire,
   onNotify,
   isDemo,
   onRefreshData,
@@ -110,7 +114,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [newProfileMode, setNewProfileMode] = useState<ProfileMode>('pessoal');
   const [isCreatingProfile, setIsCreatingProfile] = useState(false);
 
-  // Confirmação para excluir perfil ou limpar dados (LGPD)
+  // Confirmação para trocar modalidade sem perda, excluir perfil ou limpar dados (LGPD)
+  const [pendingModalitySwitch, setPendingModalitySwitch] = useState<ProfileMode | null>(null);
   const [profilePendingDelete, setProfilePendingDelete] = useState<FamilyProfile | null>(null);
   const [isWipeConfirmOpen, setIsWipeConfirmOpen] = useState(false);
   const [isWiping, setIsWiping] = useState(false);
@@ -331,8 +336,122 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left Column: Basket Scenario Mode, Multi-Profile & Edit Profile */}
+        {/* Left Column: Modality, Questionnaire, Basket Scenario Mode, Multi-Profile & Edit Profile */}
         <div className="lg:col-span-6 flex flex-col gap-6">
+          {/* Card: Modalidade de Uso Ativa & Questionário Inicial */}
+          <div className="bg-[#ffffff] rounded-2xl p-6 shadow-sm border border-[#eff4ff] flex flex-col gap-4">
+            <div className="flex items-center justify-between gap-2 pb-3 border-b border-[#eff4ff]">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-[#eff4ff] flex items-center justify-center text-[#006a61]">
+                  <span className="material-symbols-outlined text-[20px]">assignment_turned_in</span>
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#0b1c30]">
+                    Modalidade Ativa & Questionário Inicial
+                  </h3>
+                  <p className="text-xs text-[#45464d]">
+                    Troque entre perfis isolados de uso ou revise suas respostas do onboarding sem perder dados.
+                  </p>
+                </div>
+              </div>
+              <span className="px-2.5 py-0.5 rounded-full bg-[#eff4ff] font-mono text-[10px] font-bold text-[#006a61]">
+                {activeProfile.onboardingStatus === 'completed'
+                  ? 'Concluído'
+                  : activeProfile.onboardingStatus === 'in_progress'
+                    ? `Etapa ${activeProfile.onboardingStep || 1}/5`
+                    : activeProfile.onboardingStatus === 'skipped'
+                      ? 'Pulado'
+                      : 'Pendente'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              {(
+                [
+                  {
+                    id: 'pessoal' as ProfileMode,
+                    title: 'Pessoal / Familiar',
+                    desc: 'Compras da casa e renda familiar.',
+                    icon: 'home',
+                  },
+                  {
+                    id: 'negocio' as ProfileMode,
+                    title: 'Negócio',
+                    desc: 'Insumos, fornecedores e faturamento.',
+                    icon: 'storefront',
+                  },
+                  {
+                    id: 'estudante' as ProfileMode,
+                    title: 'Estudante',
+                    desc: 'Estudos, transporte e bolsa/auxílio.',
+                    icon: 'school',
+                  },
+                ] as const
+              ).map((m) => {
+                const activeMode = resolveProfileMode(activeProfile.profileMode) === m.id;
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => {
+                      if (activeMode) return;
+                      if (onSwitchModality) {
+                        setPendingModalitySwitch(m.id);
+                      } else {
+                        setProfileMode(m.id);
+                      }
+                    }}
+                    className={`p-3 rounded-xl border-2 text-left transition-all cursor-pointer ${
+                      activeMode
+                        ? 'border-[#000000] bg-[#eff4ff]/70 shadow-sm'
+                        : 'border-[#eff4ff] hover:border-[#c6c6cd] bg-[#ffffff]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="material-symbols-outlined text-[16px] text-[#006a61]">
+                        {m.icon}
+                      </span>
+                      {activeMode && (
+                        <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-[#006a61] text-[#ffffff]">
+                          Ativo
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs font-bold text-[#0b1c30] mt-1">{m.title}</div>
+                    <div className="text-[11px] text-[#45464d] mt-0.5">{m.desc}</div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="p-3 rounded-xl bg-[#eff4ff]/70 border border-[#e5eeff] flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex flex-col gap-0.5">
+                <span className="font-semibold text-[#0b1c30]">
+                  Preferências & Respostas ({getProfileModeCopy(activeProfile.profileMode).modeTitle})
+                </span>
+                <span className="text-[11px] font-mono text-[#76777d]">
+                  Versão: {activeProfile.questionnaireVersion || 'v2'}
+                  {activeProfile.onboardingCompletedAt
+                    ? ` • Concluído em ${formatIsoDateBR(activeProfile.onboardingCompletedAt)}`
+                    : ''}
+                  {activeProfile.suppliers && activeProfile.suppliers.length > 0
+                    ? ` • ${activeProfile.suppliers.length} fornecedor(es)`
+                    : ''}
+                  {activeProfile.hasNoOwnIncome ? ' • Sem renda própria' : ''}
+                </span>
+              </div>
+              {onOpenQuestionnaire && !isDemo && (
+                <button
+                  type="button"
+                  onClick={onOpenQuestionnaire}
+                  className="h-9 px-4 rounded-lg bg-[#006a61] hover:bg-[#004e47] text-[#ffffff] font-mono text-xs font-semibold cursor-pointer transition-colors"
+                >
+                  Revisar / Atualizar Questionário
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* Card: Inicialização da Cesta Familiar */}
           <div className="bg-[#ffffff] rounded-2xl p-6 shadow-sm border border-[#eff4ff] flex flex-col gap-4">
             <div className="flex items-center gap-3 pb-3 border-b border-[#eff4ff]">
@@ -344,39 +463,75 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   Modo da Cesta de Consumo
                 </h3>
                 <p className="text-xs text-[#45464d]">
-                  Escolha entre explorar a cesta demonstrativa de exemplo ou utilizar sua cesta personalizada.
+                  Explore cestas demonstrativas por modalidade ou utilize sua cesta personalizada.
                 </p>
               </div>
             </div>
 
             <div className="flex flex-col gap-3">
               <div
-                onClick={onSwitchToDemoBasket}
-                className={`p-4 rounded-xl border-2 transition-all cursor-pointer flex items-start justify-between gap-3 ${
+                className={`p-4 rounded-xl border-2 transition-all flex flex-col gap-2.5 ${
                   isDemo
                     ? 'border-[#000000] bg-[#eff4ff]/40 shadow-sm'
-                    : 'border-[#eff4ff] hover:border-[#c6c6cd] bg-[#ffffff]'
+                    : 'border-[#eff4ff] bg-[#ffffff]'
                 }`}
               >
-                <div className="flex flex-col">
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-[18px] text-[#497cff]">science</span>
-                    <span className="text-xs font-bold text-[#0b1c30]">
-                      Cesta Demonstrativa de Exemplo
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex flex-col">
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[18px] text-[#497cff]">science</span>
+                      <span className="text-xs font-bold text-[#0b1c30]">
+                        Cesta Demonstrativa de Exemplo
+                      </span>
+                    </div>
+                    <p className="text-xs text-[#45464d] mt-1">
+                      Explore dados didáticos separados por modalidade para testar cálculos e relatórios.
+                    </p>
+                    <span className="text-[11px] font-mono text-[#76777d] mt-0.5">
+                      * Valores didáticos de demonstração — não representam dados de usuários reais.
                     </span>
                   </div>
-                  <p className="text-xs text-[#45464d] mt-1">
-                    Cesta pré-configurada de exemplo com itens variados de alimentação, moradia, energia, transportes e saúde para explorar cálculos e relatórios.
-                  </p>
-                  <span className="text-[11px] font-mono text-[#76777d] mt-1">
-                    * Valores didáticos de demonstração — não representam dados de usuários reais.
-                  </span>
+                  {isDemo && (
+                    <span className="material-symbols-outlined text-[#006a61] text-[20px] shrink-0">
+                      check_circle
+                    </span>
+                  )}
                 </div>
-                {isDemo && (
-                  <span className="material-symbols-outlined text-[#006a61] text-[20px] shrink-0">
-                    check_circle
-                  </span>
-                )}
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onSwitchToDemoBasket('pessoal')}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-mono font-semibold cursor-pointer ${
+                      isDemo && resolveProfileMode(activeProfile.profileMode) === 'pessoal'
+                        ? 'bg-[#000000] text-[#ffffff]'
+                        : 'bg-[#eff4ff] hover:bg-[#dce9ff] text-[#0b1c30]'
+                    }`}
+                  >
+                    Demo Pessoal
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSwitchToDemoBasket('negocio')}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-mono font-semibold cursor-pointer ${
+                      isDemo && resolveProfileMode(activeProfile.profileMode) === 'negocio'
+                        ? 'bg-[#000000] text-[#ffffff]'
+                        : 'bg-[#eff4ff] hover:bg-[#dce9ff] text-[#0b1c30]'
+                    }`}
+                  >
+                    Demo Negócio
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSwitchToDemoBasket('estudante')}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-mono font-semibold cursor-pointer ${
+                      isDemo && resolveProfileMode(activeProfile.profileMode) === 'estudante'
+                        ? 'bg-[#000000] text-[#ffffff]'
+                        : 'bg-[#eff4ff] hover:bg-[#dce9ff] text-[#0b1c30]'
+                    }`}
+                  >
+                    Demo Estudante
+                  </button>
+                </div>
               </div>
 
               <div
@@ -395,7 +550,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </span>
                   </div>
                   <p className="text-xs text-[#45464d] mt-1">
-                    Comece com uma cesta limpa para cadastrar exclusivamente os produtos, serviços, boletos e despesas do seu próprio orçamento familiar.
+                    Comece com uma cesta limpa para cadastrar exclusivamente os produtos, serviços, boletos e despesas do seu próprio orçamento.
                   </p>
                 </div>
                 {!isDemo && (
@@ -460,7 +615,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       title="Número de integrantes"
                     />
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[11px] font-mono text-[#45464d]">Tipo:</span>
                     <button
                       type="button"
@@ -483,6 +638,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       }`}
                     >
                       Negócio / Pequena Empresa
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewProfileMode('estudante')}
+                      className={`px-2.5 py-1 rounded-lg font-mono text-[11px] font-semibold cursor-pointer ${
+                        newProfileMode === 'estudante'
+                          ? 'bg-[#000000] text-[#ffffff]'
+                          : 'bg-[#ffffff] text-[#45464d] border border-[#c6c6cd]'
+                      }`}
+                    >
+                      Estudante
                     </button>
                   </div>
                   <div className="flex items-center justify-between gap-2">
@@ -579,12 +745,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
 
             <form onSubmit={handleSaveProfile} className="flex flex-col gap-4">
-              {/* Seletor de Modo Pessoal vs Negócio */}
+              {/* Seletor de Modo Pessoal vs Negócio vs Estudante */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-mono text-[#45464d] font-medium">
                   Como você usa este perfil?
                 </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <button
                     type="button"
                     onClick={() => setProfileMode('pessoal')}
@@ -613,6 +779,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       Insumos, fornecedores e custos operacionais.
                     </div>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setProfileMode('estudante')}
+                    className={`p-3 rounded-xl border-2 text-left transition-all cursor-pointer ${
+                      profileMode === 'estudante'
+                        ? 'border-[#000000] bg-[#eff4ff]/60'
+                        : 'border-[#eff4ff] hover:border-[#c6c6cd]'
+                    }`}
+                  >
+                    <div className="text-xs font-bold text-[#0b1c30]">Estudante</div>
+                    <div className="text-[11px] text-[#45464d] mt-0.5">
+                      Alimentação, transporte, materiais e bolsa/auxílio.
+                    </div>
+                  </button>
                 </div>
                 <span className="text-[11px] text-[#76777d]">
                   {modeCopy.modeDescription}
@@ -621,7 +801,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-mono text-[#45464d] font-medium">
-                  {profileMode === 'negocio' ? 'Nome do Negócio ou Perfil:' : 'Nome do Perfil Familiar:'}
+                  {profileMode === 'negocio'
+                    ? 'Nome do Negócio ou Perfil:'
+                    : profileMode === 'estudante'
+                      ? 'Nome do Perfil Estudante:'
+                      : 'Nome do Perfil Familiar:'}
                 </label>
                 <input
                   type="text"
@@ -938,6 +1122,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           )}
         </div>
       </div>
+
+      {/* Confirmação de Troca Não-Destrutiva de Modalidade */}
+      <ConfirmModal
+        isOpen={Boolean(pendingModalitySwitch)}
+        title="Alternar Modalidade de Uso"
+        message={
+          pendingModalitySwitch
+            ? `Ao alternar para ${getProfileModeCopy(pendingModalitySwitch).modeTitle}, seus dados da modalidade atual (${getProfileModeCopy(activeProfile.profileMode).modeTitle}) serão integralmente preservados neste perfil isolado. Se ainda não existir um perfil configurado para a nova modalidade, um novo perfil será criado e o questionário inicial correspondente será aberto.`
+            : ''
+        }
+        confirmLabel="Sim, Alternar Modalidade"
+        cancelLabel="Cancelar"
+        onConfirm={async () => {
+          const target = pendingModalitySwitch;
+          setPendingModalitySwitch(null);
+          if (target && onSwitchModality) {
+            await onSwitchModality(target);
+          }
+        }}
+        onCancel={() => setPendingModalitySwitch(null)}
+      />
 
       {/* Confirmação de Exclusão de Perfil */}
       <ConfirmModal

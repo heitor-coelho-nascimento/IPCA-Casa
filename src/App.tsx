@@ -21,7 +21,7 @@ import {
   ToastNotification,
   UserAccount,
 } from './types';
-import { DEFAULT_GROUPS, StorageService } from './services/storage';
+import { StorageService, getDefaultGroupsForMode } from './services/storage';
 import { AuthService, LegacyLocalBundle, LegacyMigrationService } from './services/auth';
 import { processBasketEconomics } from './services/economics';
 import {
@@ -270,6 +270,8 @@ export default function App() {
   const [authModalError, setAuthModalError] = useState<string | null>(null);
   const [googleLandingLoading, setGoogleLandingLoading] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+  const [isOnboardingEditMode, setIsOnboardingEditMode] = useState(false);
+  const autoPromptedOnboardingRef = useRef<Set<string>>(new Set());
   const [isConfirmEmptyOpen, setIsConfirmEmptyOpen] = useState(false);
 
   // Governança LGPD: gate pós-login de aceite de termos e visualizador modal autenticado
@@ -312,6 +314,9 @@ export default function App() {
   const [cloudPlansB, setCloudPlansB] = useState<EfficiencyPlanB[]>([]);
   const [cloudPlansC, setCloudPlansC] = useState<OpportunityPlanC[]>([]);
   const [cloudMonthlyClosures, setCloudMonthlyClosures] = useState<MonthlyClosure[]>([]);
+  const [cloudProfilesReady, setCloudProfilesReady] = useState(false);
+  const [cloudItemsReady, setCloudItemsReady] = useState(false);
+  const [cloudIncomeReady, setCloudIncomeReady] = useState(false);
 
   // Período selecionado
   const [selectedTimeframe, setSelectedTimeframe] = useState<'12M' | 'YTD' | '1M'>('12M');
@@ -455,6 +460,9 @@ export default function App() {
             setCloudPlansB([]);
             setCloudPlansC([]);
             setCloudMonthlyClosures([]);
+            setCloudProfilesReady(false);
+            setCloudItemsReady(false);
+            setCloudIncomeReady(false);
             setCurrentUser(null);
             setPendingVerificationEmail(null);
             setIsAuthInitializing(false);
@@ -583,12 +591,15 @@ export default function App() {
         unsubscribe = FirestoreService.subscribeUserCollections(firebaseUid, {
           onProfiles: (remoteProfiles) => {
             setCloudProfiles(remoteProfiles);
+            setCloudProfilesReady(true);
           },
           onBasketItems: (remoteItems) => {
             setCloudItems(remoteItems);
+            setCloudItemsReady(true);
           },
           onIncomeHistory: (remoteIncome) => {
             setCloudIncomeHistory(remoteIncome);
+            setCloudIncomeReady(true);
           },
           onPriceHistory: (remotePrices) => {
             setCloudPriceHistory(remotePrices);
@@ -721,17 +732,24 @@ export default function App() {
     localRevision,
   ]);
 
-  // Categorias efetivas
-  const cloudEffectiveGroups = useMemo<ConsumptionGroup[] | undefined>(() => {
-    if (!isFirebaseMode) return undefined;
-    const mergedDefault = DEFAULT_GROUPS.map(
-      (def) => cloudConsumptionGroups.find((c) => c.id === def.id) || def
+  // Categorias efetivas conforme a modalidade ativa (preservando edições e categorias customizadas)
+  const effectiveGroups = useMemo<ConsumptionGroup[]>(() => {
+    const modeDefaults = getDefaultGroupsForMode(activeProfileMode);
+    if (!isFirebaseMode) {
+      if (!localStateHydrated) return modeDefaults;
+      return StorageService.getGroups(activeProfileMode);
+    }
+    const modeCloudGroups = cloudConsumptionGroups.filter(
+      (c) => !c.profileMode || c.profileMode === activeProfileMode
     );
-    const customExtras = cloudConsumptionGroups.filter(
-      (c) => !DEFAULT_GROUPS.some((def) => def.id === c.id)
+    const mergedDefault = modeDefaults.map(
+      (def) => modeCloudGroups.find((c) => c.id === def.id) || def
+    );
+    const customExtras = modeCloudGroups.filter(
+      (c) => !modeDefaults.some((def) => def.id === c.id)
     );
     return [...mergedDefault, ...customExtras];
-  }, [isFirebaseMode, cloudConsumptionGroups]);
+  }, [isFirebaseMode, activeProfileMode, localStateHydrated, localRevision, cloudConsumptionGroups]);
 
   // Estratégias efetivas do perfil ativo
   const activePlansA = useMemo<SubstitutePlanA[]>(() => {
@@ -795,6 +813,8 @@ export default function App() {
         priceHistory: activePriceHistory,
         incomeRecords: activeIncomeHistory,
         isDemo,
+        profile: activeProfile,
+        profileMode: activeProfileMode,
       }
     );
   }, [
@@ -805,6 +825,61 @@ export default function App() {
     ibgeMetadata,
     selectedTimeframe,
     isDemo,
+    activeProfile,
+    activeProfileMode,
+  ]);
+
+  // Abertura automática do questionário inicial apenas para perfis ainda não iniciados ou em andamento
+  useEffect(() => {
+    if (
+      !isAuthenticatedDashboard ||
+      isDemo ||
+      !currentUser ||
+      needsTermsAcceptanceGate ||
+      isMigrationModalOpen ||
+      isAuthModalOpen ||
+      isOnboardingOpen
+    ) {
+      return;
+    }
+    if (isFirebaseMode && (!cloudProfilesReady || !cloudItemsReady || !cloudIncomeReady)) {
+      return;
+    }
+    if (autoPromptedOnboardingRef.current.has(activeProfile.id)) {
+      return;
+    }
+
+    const status = activeProfile.onboardingStatus;
+    const needsOnboarding =
+      status === 'not_started' ||
+      status === 'in_progress' ||
+      (!status &&
+        items.length === 0 &&
+        activeIncomeHistory.length === 0 &&
+        !activeProfile.questionnaireData);
+
+    if (needsOnboarding) {
+      autoPromptedOnboardingRef.current.add(activeProfile.id);
+      setIsOnboardingEditMode(false);
+      setIsOnboardingOpen(true);
+    }
+  }, [
+    isAuthenticatedDashboard,
+    isDemo,
+    currentUser,
+    needsTermsAcceptanceGate,
+    isMigrationModalOpen,
+    isAuthModalOpen,
+    isOnboardingOpen,
+    isFirebaseMode,
+    cloudProfilesReady,
+    cloudItemsReady,
+    cloudIncomeReady,
+    activeProfile.id,
+    activeProfile.onboardingStatus,
+    activeProfile.questionnaireData,
+    items.length,
+    activeIncomeHistory.length,
   ]);
 
   // Navegação de abas dentro do painel
@@ -839,6 +914,7 @@ export default function App() {
     runLegacyScanForUser(user.id);
 
     if (isNewUser) {
+      setIsOnboardingEditMode(false);
       setIsOnboardingOpen(true);
     } else {
       const requestedTab = parseTabFromPath(routePath) || 'visao-geral';
@@ -875,6 +951,7 @@ export default function App() {
       console.warn(`Erro ao encerrar sessão Firebase (${msg})`);
     }
     scannedLegacyUidRef.current = null;
+    autoPromptedOnboardingRef.current.clear();
     setFirebaseUid(null);
     setCurrentUser(null);
     setPendingVerificationEmail(null);
@@ -883,6 +960,7 @@ export default function App() {
     setTermsGateCheckbox(false);
     setDashboardLegalDoc(null);
     setIsOnboardingOpen(false);
+    setIsOnboardingEditMode(false);
     setIsMigrationModalOpen(false);
     setPendingLegacyBundle(null);
     setCloudProfiles([]);
@@ -894,6 +972,9 @@ export default function App() {
     setCloudPlansB([]);
     setCloudPlansC([]);
     setCloudMonthlyClosures([]);
+    setCloudProfilesReady(false);
+    setCloudItemsReady(false);
+    setCloudIncomeReady(false);
     setLocalItems([]);
     setLocalProfiles([SHELL_FALLBACK_PROFILE]);
     setLocalActiveProfile(SHELL_FALLBACK_PROFILE);
@@ -907,6 +988,7 @@ export default function App() {
   // Handler após exclusão definitiva da conta pelo titular (LGPD Art. 18, VI)
   const handleAccountDeleted = useCallback(() => {
     scannedLegacyUidRef.current = null;
+    autoPromptedOnboardingRef.current.clear();
     setFirebaseUid(null);
     setCurrentUser(null);
     setPendingVerificationEmail(null);
@@ -915,6 +997,7 @@ export default function App() {
     setTermsGateCheckbox(false);
     setDashboardLegalDoc(null);
     setIsOnboardingOpen(false);
+    setIsOnboardingEditMode(false);
     setIsMigrationModalOpen(false);
     setPendingLegacyBundle(null);
     setCloudProfiles([]);
@@ -926,6 +1009,9 @@ export default function App() {
     setCloudPlansB([]);
     setCloudPlansC([]);
     setCloudMonthlyClosures([]);
+    setCloudProfilesReady(false);
+    setCloudItemsReady(false);
+    setCloudIncomeReady(false);
     setLocalItems([]);
     setLocalProfiles([SHELL_FALLBACK_PROFILE]);
     setLocalActiveProfile(SHELL_FALLBACK_PROFILE);
@@ -975,8 +1061,89 @@ export default function App() {
     navigateUrl('/demo');
   }, [hydrateLocalState, navigateUrl]);
 
-  // Conclusão do Onboarding
+  // Alternância para Cenário Demonstrativo por Modalidade (isolado por perfil demo)
+  const handleSwitchToDemoBasket = useCallback(
+    (mode: ProfileMode = 'pessoal') => {
+      StorageService.loadDemoBasket(mode);
+      if (firebaseUid) {
+        setIsDemo(true);
+      }
+      const demoId =
+        mode === 'negocio'
+          ? 'profile-demo-negocio'
+          : mode === 'estudante'
+            ? 'profile-demo-estudante'
+            : 'profile-demo';
+      const demoProfile =
+        StorageService.getProfiles().find((p) => p.id === demoId) ||
+        StorageService.getProfiles().find((p) => p.isDemo) ||
+        StorageService.getProfiles()[0];
+      hydrateLocalState(demoProfile.id);
+      handleSelectDashboardTab('visao-geral');
+    },
+    [firebaseUid, hydrateLocalState, handleSelectDashboardTab]
+  );
+
+  // Salvar Rascunho do Questionário Inicial (retomada sem perder respostas)
+  const handleSaveOnboardingDraft = useCallback(
+    async (draftProfile: FamilyProfile) => {
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          await FirestoreService.saveQuestionnaireDraft(firebaseUid, draftProfile);
+          setActiveCloudProfileId(draftProfile.id);
+        } else {
+          StorageService.saveProfile(draftProfile);
+          hydrateLocalState(draftProfile.id);
+        }
+        setIsOnboardingOpen(false);
+        setIsOnboardingEditMode(false);
+        addToast('info', 'Progresso do questionário salvo para você continuar quando quiser.');
+      } catch (err) {
+        addToast('error', 'Não foi possível salvar o rascunho do questionário.');
+        throw err;
+      }
+    },
+    [isFirebaseMode, firebaseUid, hydrateLocalState, addToast]
+  );
+
+  // Pular Questionário Inicial mantendo histórico intacto
+  const handleSkipOnboarding = useCallback(async () => {
+    const wasEditing = isOnboardingEditMode;
+    setIsOnboardingOpen(false);
+    setIsOnboardingEditMode(false);
+    if (!wasEditing && activeProfile.onboardingStatus !== 'completed') {
+      const skippedProfile: FamilyProfile = {
+        ...activeProfile,
+        onboardingStatus: 'skipped',
+        updatedAt: new Date().toISOString(),
+      };
+      try {
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          await FirestoreService.saveProfile(firebaseUid, skippedProfile);
+        } else {
+          StorageService.saveProfile(skippedProfile);
+          hydrateLocalState(skippedProfile.id);
+        }
+      } catch {
+        // Silencioso para não impedir o usuário de avançar ao painel
+      }
+      handleSelectDashboardTab('visao-geral');
+    }
+  }, [
+    isOnboardingEditMode,
+    activeProfile,
+    isFirebaseMode,
+    firebaseUid,
+    hydrateLocalState,
+    handleSelectDashboardTab,
+  ]);
+
+  // Conclusão do Questionário Inicial / Atualização via Configurações
   const handleFinishOnboarding = async (newProfile: FamilyProfile, bundle?: OnboardingBundle) => {
+    const prefill = bundle?.prefillBundle;
+    const wasEditing = isOnboardingEditMode;
     if (isFirebaseMode && firebaseUid && bundle) {
       try {
         const { FirestoreService } = await import('./services/firestore');
@@ -985,13 +1152,30 @@ export default function App() {
           profile: newProfile,
           initialIncome: bundle.initialIncome,
           currentIncome: bundle.currentIncome,
+          incomeRecords: prefill?.incomeRecords,
+          consumptionGroups: prefill?.consumptionGroups,
           items: bundle.items,
+          priceRecords: prefill?.priceRecords,
         });
         setActiveCloudProfileId(newProfile.id);
         setIsOnboardingOpen(false);
-        setActiveTab('impacto-no-bolso');
-        navigateUrl('/painel/impacto-no-bolso', true);
-        addToast('success', 'Perfil inicial salvo com segurança no Cloud Firestore!');
+        setIsOnboardingEditMode(false);
+        if (prefill?.useDemoBasket && !wasEditing) {
+          handleSwitchToDemoBasket(resolveProfileMode(newProfile.profileMode));
+          addToast(
+            'success',
+            'Questionário salvo na sua conta e cesta de demonstração carregada para exploração!'
+          );
+        } else {
+          setActiveTab('visao-geral');
+          navigateUrl('/painel/visao-geral', true);
+          addToast(
+            'success',
+            wasEditing
+              ? 'Respostas atualizadas sem duplicar seus registros existentes!'
+              : 'Questionário concluído e painel pré-preenchido com segurança no Cloud Firestore!'
+          );
+        }
       } catch (err) {
         const msg =
           err instanceof Error && err.message
@@ -1001,10 +1185,21 @@ export default function App() {
         throw err;
       }
     } else {
-      hydrateLocalState(newProfile.id);
       setIsOnboardingOpen(false);
-      setActiveTab('impacto-no-bolso');
-      addToast('success', 'Perfil inicial configurado com sucesso!');
+      setIsOnboardingEditMode(false);
+      if (prefill?.useDemoBasket && !wasEditing) {
+        handleSwitchToDemoBasket(resolveProfileMode(newProfile.profileMode));
+        addToast('success', 'Cesta de demonstração carregada para exploração!');
+      } else {
+        hydrateLocalState(newProfile.id);
+        setActiveTab('visao-geral');
+        addToast(
+          'success',
+          wasEditing
+            ? 'Questionário atualizado com sucesso!'
+            : 'Questionário inicial configurado com sucesso!'
+        );
+      }
     }
   };
 
@@ -1013,21 +1208,24 @@ export default function App() {
     async (itemData: Partial<BasketItem>) => {
       let savedItem: BasketItem;
       const nowIso = new Date().toISOString();
+      const fallbackGroup = getDefaultGroupsForMode(activeProfileMode)[0]?.name || 'Outros';
 
       if (editingItem) {
         savedItem = {
           ...editingItem,
           ...itemData,
           profileId: editingItem.profileId || activeProfile.id,
+          profileMode: editingItem.profileMode || activeProfileMode,
           updatedAt: nowIso,
         };
       } else {
         savedItem = {
           id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           profileId: activeProfile.id,
+          profileMode: activeProfileMode,
           name: itemData.name || 'Novo Item',
           description: itemData.description,
-          group: itemData.group || 'Alimentação e bebidas',
+          group: itemData.group || fallbackGroup,
           classification: itemData.classification || 'Essencial',
           monthlySpend: Number(itemData.monthlySpend) || 0,
           oldPrice: Number(itemData.oldPrice) || 0,
@@ -1038,6 +1236,10 @@ export default function App() {
           quantity: itemData.quantity,
           consumptionFrequency: itemData.consumptionFrequency,
           expenseNature: itemData.expenseNature,
+          ...(itemData.supplierName ? { supplierName: itemData.supplierName } : {}),
+          ...(typeof itemData.paidDirectly === 'boolean'
+            ? { paidDirectly: itemData.paidDirectly }
+            : {}),
           notes: itemData.notes || '',
           active: itemData.active !== false,
           isArchived: false,
@@ -1067,7 +1269,15 @@ export default function App() {
         throw err;
       }
     },
-    [editingItem, activeProfile.id, isFirebaseMode, firebaseUid, bumpLocalRevision, addToast]
+    [
+      editingItem,
+      activeProfile.id,
+      activeProfileMode,
+      isFirebaseMode,
+      firebaseUid,
+      bumpLocalRevision,
+      addToast,
+    ]
   );
 
   // Excluir/Arquivar Item
@@ -1108,10 +1318,12 @@ export default function App() {
         if (isFirebaseMode && firebaseUid) {
           const { FirestoreService } = await import('./services/firestore');
           await FirestoreService.addPriceRecord(firebaseUid, {
+            profileId: activeProfile.id,
             itemId,
             price: newPrice,
             referenceDate,
             unit: item.unit || 'un',
+            supplierName: item.supplierName,
             source: note || 'Atualização Rápida no Painel',
           });
           await FirestoreService.saveBasketItem(firebaseUid, updatedItem, false);
@@ -1121,6 +1333,7 @@ export default function App() {
             price: newPrice,
             referenceDate,
             unit: item.unit || 'un',
+            supplierName: item.supplierName,
             origin: note || 'Atualização Rápida no Painel',
           });
           StorageService.saveItem(updatedItem);
@@ -1149,6 +1362,7 @@ export default function App() {
       packageSize?: number;
       packageUnit?: string;
       origin?: string;
+      supplierName?: string;
     }) => {
       try {
         if (isFirebaseMode && firebaseUid) {
@@ -1161,6 +1375,7 @@ export default function App() {
             unit: record.unit,
             packageSize: record.packageSize,
             packageUnit: record.packageUnit,
+            supplierName: record.supplierName,
             source: record.origin,
             origin: record.origin,
           });
@@ -1279,15 +1494,19 @@ export default function App() {
     [activeProfile.id, isFirebaseMode, firebaseUid, bumpLocalRevision, addToast]
   );
 
-  // Gerenciamento de Grupos de Consumo
+  // Gerenciamento de Grupos de Consumo por Modalidade
   const handleSaveConsumptionGroup = useCallback(
     async (group: ConsumptionGroup) => {
+      const normalizedGroup: ConsumptionGroup = {
+        ...group,
+        profileMode: group.profileMode || activeProfileMode,
+      };
       try {
         if (isFirebaseMode && firebaseUid) {
           const { FirestoreService } = await import('./services/firestore');
-          await FirestoreService.saveConsumptionGroup(firebaseUid, group);
+          await FirestoreService.saveConsumptionGroup(firebaseUid, normalizedGroup);
         } else {
-          StorageService.saveGroup(group);
+          StorageService.saveGroup(normalizedGroup);
           bumpLocalRevision();
         }
       } catch (err) {
@@ -1295,8 +1514,32 @@ export default function App() {
         throw err;
       }
     },
-    [isFirebaseMode, firebaseUid, bumpLocalRevision, addToast]
+    [activeProfileMode, isFirebaseMode, firebaseUid, bumpLocalRevision, addToast]
   );
+
+  const handleRestoreDefaultGroups = useCallback(async () => {
+    try {
+      const modeDefaults = getDefaultGroupsForMode(activeProfileMode);
+      if (isFirebaseMode && firebaseUid) {
+        const { FirestoreService } = await import('./services/firestore');
+        await Promise.all(
+          modeDefaults.map((def) =>
+            FirestoreService.saveConsumptionGroup(firebaseUid, {
+              ...def,
+              profileMode: activeProfileMode,
+            })
+          )
+        );
+      } else {
+        StorageService.restoreDefaultGroupsForMode(activeProfileMode);
+        bumpLocalRevision();
+      }
+      addToast('success', 'Categorias padrão da modalidade restauradas sem excluir seus itens.');
+    } catch (err) {
+      addToast('error', 'Não foi possível restaurar as categorias padrão.');
+      throw err;
+    }
+  }, [activeProfileMode, isFirebaseMode, firebaseUid, bumpLocalRevision, addToast]);
 
   const handleDeleteConsumptionGroup = useCallback(
     async (groupId: string): Promise<{ success: boolean; message: string }> => {
@@ -1305,19 +1548,25 @@ export default function App() {
         bumpLocalRevision();
         return res;
       }
-      const target = (cloudEffectiveGroups || []).find((g) => g.id === groupId);
+      const target = effectiveGroups.find((g) => g.id === groupId);
       if (!target) {
         return { success: false, message: 'Categoria não encontrada.' };
       }
 
+      const fallbackGroup = getDefaultGroupsForMode(activeProfileMode)[0]?.name || 'Outros';
       const { FirestoreService } = await import('./services/firestore');
-      const affectedItems = cloudItems.filter((item) => !item.isArchived && item.group === target.name);
+      const affectedItems = cloudItems.filter(
+        (item) =>
+          !item.isArchived &&
+          item.profileId === activeProfile.id &&
+          item.group === target.name
+      );
       if (affectedItems.length > 0) {
         await Promise.all(
           affectedItems.map((item) =>
             FirestoreService.saveBasketItem(
               firebaseUid,
-              { ...item, group: 'Despesas pessoais', updatedAt: new Date().toISOString() },
+              { ...item, group: fallbackGroup, updatedAt: new Date().toISOString() },
               false
             )
           )
@@ -1329,11 +1578,19 @@ export default function App() {
         success: true,
         message:
           affectedItems.length > 0
-            ? `Categoria excluída. ${affectedItems.length} itens foram transferidos para "Despesas pessoais".`
+            ? `Categoria excluída. ${affectedItems.length} itens foram transferidos para "${fallbackGroup}".`
             : 'Categoria excluída com sucesso.',
       };
     },
-    [isFirebaseMode, firebaseUid, cloudEffectiveGroups, cloudItems, bumpLocalRevision]
+    [
+      isFirebaseMode,
+      firebaseUid,
+      effectiveGroups,
+      activeProfileMode,
+      activeProfile.id,
+      cloudItems,
+      bumpLocalRevision,
+    ]
   );
 
   // CRUD completo das Estratégias A, B e C
@@ -1492,17 +1749,88 @@ export default function App() {
     }
   }, [isFirebaseMode, firebaseUid, items, hydrateLocalState, handleSelectDashboardTab, addToast]);
 
-  // Alternância para Cenário Demonstrativo
-  const handleSwitchToDemoBasket = useCallback(() => {
-    StorageService.loadDemoBasket();
-    if (firebaseUid) {
-      setIsDemo(true);
-    }
-    const demoProfile =
-      StorageService.getProfiles().find((p) => p.isDemo) || StorageService.getProfiles()[0];
-    hydrateLocalState(demoProfile.id);
-    handleSelectDashboardTab('visao-geral');
-  }, [firebaseUid, hydrateLocalState, handleSelectDashboardTab]);
+  // Alternância não destrutiva de modalidade entre perfis isolados (Pessoal, Negócio, Estudante)
+  const handleSwitchModality = useCallback(
+    async (targetMode: ProfileMode) => {
+      if (isDemo) {
+        handleSwitchToDemoBasket(targetMode);
+        addToast('info', `Demonstração alternada para a modalidade "${targetMode}".`);
+        return;
+      }
+
+      const existingTarget = profiles.find(
+        (p) => !p.isDemo && resolveProfileMode(p.profileMode) === targetMode
+      );
+
+      if (existingTarget) {
+        if (isFirebaseMode) {
+          setActiveCloudProfileId(existingTarget.id);
+        } else {
+          hydrateLocalState(existingTarget.id);
+        }
+        addToast(
+          'info',
+          `Modalidade alternada para "${existingTarget.name}". Os dados anteriores foram mantidos intactos.`
+        );
+        return;
+      }
+
+      const nowIso = new Date().toISOString();
+      const defaultName =
+        targetMode === 'negocio'
+          ? 'Meu Negócio'
+          : targetMode === 'estudante'
+            ? 'Perfil Estudante'
+            : 'Orçamento Pessoal';
+
+      const newProfile: FamilyProfile = {
+        id: sanitizeFirestoreId(`prof_${targetMode}_${Date.now()}`, 'prof'),
+        name: defaultName,
+        membersCount: targetMode === 'pessoal' ? 2 : 1,
+        referenceRegion: activeProfile.referenceRegion || 'Brasil',
+        currency: 'BRL',
+        profileMode: targetMode,
+        onboardingStatus: 'not_started',
+        onboardingStep: 1,
+        priceAlertThresholdPercent: activeProfile.priceAlertThresholdPercent ?? 10,
+        isDemo: false,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+
+      try {
+        autoPromptedOnboardingRef.current.add(newProfile.id);
+        if (isFirebaseMode && firebaseUid) {
+          const { FirestoreService } = await import('./services/firestore');
+          await FirestoreService.saveProfile(firebaseUid, newProfile);
+          setActiveCloudProfileId(newProfile.id);
+        } else {
+          StorageService.saveProfile(newProfile);
+          hydrateLocalState(newProfile.id);
+        }
+        setIsOnboardingEditMode(false);
+        setIsOnboardingOpen(true);
+        addToast(
+          'success',
+          `Novo perfil criado para "${defaultName}" sem apagar seus dados anteriores.`
+        );
+      } catch (err) {
+        addToast('error', 'Não foi possível criar o perfil da nova modalidade.');
+        throw err;
+      }
+    },
+    [
+      isDemo,
+      handleSwitchToDemoBasket,
+      profiles,
+      isFirebaseMode,
+      firebaseUid,
+      activeProfile.referenceRegion,
+      activeProfile.priceAlertThresholdPercent,
+      hydrateLocalState,
+      addToast,
+    ]
+  );
 
   // Abertura do Histórico de Preços para Item Específico
   const handleViewPriceHistory = useCallback(
@@ -2044,6 +2372,7 @@ export default function App() {
                 onOpenQuickPrice={() => setIsQuickPriceOpen(true)}
                 isDemo={isDemo}
                 profileMode={activeProfileMode}
+                activeProfile={activeProfile}
                 priceRecords={activePriceHistory}
                 monthlyClosures={activeMonthlyClosures}
                 alertThresholdPercent={alertThresholdPercent}
@@ -2054,6 +2383,7 @@ export default function App() {
             {activeTab === 'impacto-no-bolso' && (
               <PocketImpactView
                 summary={effectiveSummary}
+                activeProfile={activeProfile}
                 onUpdateIncome={handleUpdateIncome}
                 isDemo={isDemo}
                 profileMode={activeProfileMode}
@@ -2085,9 +2415,10 @@ export default function App() {
                   }
                 }}
                 isDemo={isDemo}
-                groups={cloudEffectiveGroups}
+                groups={effectiveGroups}
                 onSaveGroup={handleSaveConsumptionGroup}
                 onDeleteGroup={handleDeleteConsumptionGroup}
+                onRestoreDefaultGroups={handleRestoreDefaultGroups}
                 externalSearchTerm={globalSearchTerm}
                 onExternalSearchChange={setGlobalSearchTerm}
                 profileMode={activeProfileMode}
@@ -2105,6 +2436,7 @@ export default function App() {
                 }}
                 isDemo={isDemo}
                 profileMode={activeProfileMode}
+                suppliers={activeProfile.suppliers || []}
                 selectedItemForHistory={selectedItemForHistory}
                 priceRecords={activePriceHistory}
                 onAddPriceRecord={handleAddPriceRecordFromView}
@@ -2128,7 +2460,12 @@ export default function App() {
             {activeTab === 'renda-e-poder-de-compra' && (
               <PurchasingPowerView
                 summary={effectiveSummary}
+                activeProfile={activeProfile}
                 onUpdateIncome={handleUpdateIncome}
+                onOpenQuestionnaire={() => {
+                  setIsOnboardingEditMode(true);
+                  setIsOnboardingOpen(true);
+                }}
                 isDemo={isDemo}
                 profileMode={activeProfileMode}
               />
@@ -2186,6 +2523,11 @@ export default function App() {
                 onWipeAllUserData={handleWipeAllUserData}
                 onSwitchToEmptyBasket={handleRequestEmptyBasket}
                 onSwitchToDemoBasket={handleSwitchToDemoBasket}
+                onSwitchModality={handleSwitchModality}
+                onOpenQuestionnaire={() => {
+                  setIsOnboardingEditMode(true);
+                  setIsOnboardingOpen(true);
+                }}
                 onNotify={addToast}
                 isDemo={isDemo}
                 isFirebaseMode={isFirebaseMode}
@@ -2207,7 +2549,7 @@ export default function App() {
                     ? () => ({
                         profile: activeProfile,
                         profiles,
-                        groups: cloudEffectiveGroups,
+                        groups: effectiveGroups,
                         items,
                         prices: cloudPriceHistory,
                         income: activeIncomeHistory,
@@ -2216,7 +2558,7 @@ export default function App() {
                         plansB: activePlansB,
                         planC: activePlanC,
                         exportedAt: new Date().toISOString(),
-                        version: '3.3.0-firebase',
+                        version: '3.4.0-firebase',
                       })
                     : undefined
                 }
@@ -2290,8 +2632,9 @@ export default function App() {
             onSave={handleSaveItem}
             editingItem={editingItem}
             totalMonthlySpend={effectiveSummary.totalMonthlySpend}
-            groups={cloudEffectiveGroups}
+            groups={effectiveGroups}
             profileMode={activeProfileMode}
+            suppliers={activeProfile.suppliers || []}
           />
         </Suspense>
       )}
@@ -2328,7 +2671,7 @@ export default function App() {
             title="Iniciar Cesta em Branco"
             message={
               isFirebaseMode
-                ? 'Deseja arquivar os itens atuais desta cesta pessoal e recomeçar do zero?'
+                ? 'Deseja arquivar os itens atuais desta cesta e recomeçar do zero?'
                 : 'Deseja iniciar uma cesta em branco? Os itens atuais serão preservados no histórico.'
             }
             confirmLabel="Sim, Iniciar em Branco"
@@ -2357,18 +2700,25 @@ export default function App() {
         </Suspense>
       )}
 
-      {currentUser && isOnboardingOpen && (
+      {(currentUser || (!isFirebaseMode && !isDemo)) && isOnboardingOpen && (
         <Suspense fallback={null}>
           <OnboardingModal
             isOpen={isOnboardingOpen && !isMigrationModalOpen}
-            userDisplayName={currentUser.displayName}
-            targetProfileId={currentUser.profileId}
+            userId={firebaseUid || 'local'}
+            userDisplayName={currentUser?.displayName || activeProfile.name || 'Usuário'}
+            targetProfileId={activeProfile.id}
+            initialProfile={activeProfile}
+            initialMode={isOnboardingEditMode ? activeProfileMode : activeProfile.profileMode}
+            allowModalitySelection={!isOnboardingEditMode}
+            isEditingFromSettings={isOnboardingEditMode}
+            existingGroups={effectiveGroups}
+            existingItems={items}
+            existingIncomeRecords={activeIncomeHistory}
+            existingPriceRecords={activePriceHistory}
             skipLocalPersistence={isFirebaseMode}
+            onSaveDraft={handleSaveOnboardingDraft}
             onFinish={handleFinishOnboarding}
-            onSkip={() => {
-              setIsOnboardingOpen(false);
-              handleSelectDashboardTab('impacto-no-bolso');
-            }}
+            onSkip={handleSkipOnboarding}
           />
         </Suspense>
       )}

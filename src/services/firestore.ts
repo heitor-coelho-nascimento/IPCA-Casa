@@ -30,23 +30,33 @@ import type {
   ConsentRecord,
   ConsumptionFrequency,
   ConsumptionGroup,
+  DashboardPreferences,
   DataOrigin,
   DepositTiming,
   EfficiencyPlanB,
+  EstudanteQuestionnaireAnswers,
   ExpenseNature,
   FamilyProfile,
+  IncomePredictability,
   IncomeRecord,
+  IncomeRole,
   InvestmentProductType,
   ItemClassification,
   MonthlyClosure,
+  NegocioQuestionnaireAnswers,
+  OnboardingStatus,
   OpportunityPlanC,
+  PessoalQuestionnaireAnswers,
   PriceRecord,
   PrivacyRequestRecord,
   PrivacyRightType,
   ProfileMode,
+  QuestionnaireDataPayload,
+  QuestionnaireItemEntry,
   RecurrenceType,
   StrategyStatus,
   SubstitutePlanA,
+  SurplusFrequency,
   TaxMode,
   TermsAcceptanceRecord,
   UserAccount,
@@ -55,6 +65,7 @@ import type {
 import { POLICY_VERSION, TERMS_VERSION } from '../config/privacy';
 import { extractIsoDatePrefix, getMonthsAgoIsoDate, getTodayIsoDate } from '../utils/dates';
 import type { LegacyLocalBundle } from './auth';
+import type { PrefillBundleResult } from './questionnairePrefill';
 
 export { BLUEPRINT_LIMITS, sanitizeFirestoreId };
 
@@ -97,7 +108,12 @@ export function clampMembersCount(value: unknown): number {
 }
 
 export function sanitizeClassification(value: unknown): ItemClassification {
-  if (value === 'Essencial' || value === 'Supérfluo' || value === 'Não classificado') {
+  if (
+    value === 'Essencial' ||
+    value === 'Supérfluo' ||
+    value === 'Discricionário' ||
+    value === 'Não classificado'
+  ) {
     return value;
   }
   return 'Não classificado';
@@ -237,8 +253,568 @@ function timestampToIso(value: unknown): string {
 }
 
 function sanitizeProfileMode(value: unknown): ProfileMode | undefined {
-  if (value === 'pessoal' || value === 'negocio') return value;
+  if (value === 'pessoal' || value === 'negocio' || value === 'estudante') return value;
   return undefined;
+}
+
+function sanitizeOnboardingStatus(value: unknown): OnboardingStatus | undefined {
+  if (
+    value === 'not_started' ||
+    value === 'in_progress' ||
+    value === 'completed' ||
+    value === 'skipped'
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function sanitizeSurplusFrequency(value: unknown): SurplusFrequency | undefined {
+  if (
+    value === 'quase_sempre' ||
+    value === 'as_vezes' ||
+    value === 'raramente' ||
+    value === 'nunca' ||
+    value === 'sem_renda_propria' ||
+    value === 'nao_sei'
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function sanitizeIncomeRole(value: unknown): IncomeRole | undefined {
+  if (
+    value === 'renda_familiar' ||
+    value === 'faturamento_negocio' ||
+    value === 'renda_estudantil'
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function sanitizeIncomePredictability(value: unknown): IncomePredictability | undefined {
+  if (
+    value === 'fixa' ||
+    value === 'variavel' ||
+    value === 'sazonal' ||
+    value === 'mista' ||
+    value === 'sem_renda_propria'
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function sanitizeStringArray(value: unknown, maxItems: number, maxLen: number): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const raw of value) {
+    if (typeof raw !== 'string') continue;
+    const trimmed = raw.trim().slice(0, maxLen);
+    if (trimmed) out.push(trimmed);
+    if (out.length >= maxItems) break;
+  }
+  return out;
+}
+
+function serializeCategoryEstimates(
+  estimates: Record<string, number> | undefined
+): { categoryEstimateNames: string[]; categoryEstimateValues: number[] } {
+  const names: string[] = [];
+  const values: number[] = [];
+  if (!estimates || typeof estimates !== 'object') {
+    return { categoryEstimateNames: names, categoryEstimateValues: values };
+  }
+  for (const [k, v] of Object.entries(estimates)) {
+    const cleanKey = k.trim().slice(0, BLUEPRINT_LIMITS.SHORT_OPTION_MAX);
+    const num = Number(v);
+    if (!cleanKey || !Number.isFinite(num) || num < 0) continue;
+    names.push(cleanKey);
+    values.push(Math.min(MAX_FIRESTORE_NUMBER, num));
+    if (names.length >= BLUEPRINT_LIMITS.CATEGORIES_LIST_MAX) break;
+  }
+  return { categoryEstimateNames: names, categoryEstimateValues: values };
+}
+
+function deserializeCategoryEstimates(raw: Record<string, unknown>): Record<string, number> {
+  const names = Array.isArray(raw.categoryEstimateNames) ? raw.categoryEstimateNames : [];
+  const values = Array.isArray(raw.categoryEstimateValues) ? raw.categoryEstimateValues : [];
+  const result: Record<string, number> = {};
+  const len = Math.min(names.length, values.length);
+  for (let i = 0; i < len; i += 1) {
+    const k = typeof names[i] === 'string' ? names[i].trim() : '';
+    const v = Number(values[i]);
+    if (k && Number.isFinite(v) && v >= 0) {
+      result[k] = v;
+    }
+  }
+  return result;
+}
+
+function serializeDraftItemArrays(entries: QuestionnaireItemEntry[] | undefined): Record<string, unknown> {
+  const safe = Array.isArray(entries) ? entries.slice(0, BLUEPRINT_LIMITS.DRAFT_ITEMS_LIST_MAX) : [];
+  return {
+    itemDraftIds: safe.map((e, i) => clampString(e.id || `d_${i + 1}`, BLUEPRINT_LIMITS.ID_MAX)),
+    itemDraftNames: safe.map((e) => clampString(e.name, BLUEPRINT_LIMITS.ITEM_NAME_MAX, 'Item')),
+    itemDraftCategories: safe.map((e) => clampString(e.category, BLUEPRINT_LIMITS.GROUP_NAME_MAX, 'Outros')),
+    itemDraftUnits: safe.map((e) => clampString(e.unit, BLUEPRINT_LIMITS.UNIT_MAX, 'un')),
+    itemDraftQuantities: safe.map((e) => nonNegativeNumber(e.quantity, 1)),
+    itemDraftCurrentPrices: safe.map((e) =>
+      typeof e.currentPrice === 'number' && Number.isFinite(e.currentPrice) && e.currentPrice >= 0
+        ? nonNegativeNumber(e.currentPrice, 0)
+        : -1
+    ),
+    itemDraftOldPrices: safe.map((e) =>
+      typeof e.oldPrice === 'number' && Number.isFinite(e.oldPrice) && e.oldPrice >= 0
+        ? nonNegativeNumber(e.oldPrice, 0)
+        : -1
+    ),
+    itemDraftSuppliers: safe.map((e) => clampString(e.supplierName || '', BLUEPRINT_LIMITS.SUPPLIER_NAME_MAX)),
+    itemDraftMajorDrivers: safe.map((e) => Boolean(e.isMajorDriver)),
+    itemDraftSharePercents: safe.map((e) =>
+      typeof e.approximateSharePercent === 'number' &&
+      Number.isFinite(e.approximateSharePercent) &&
+      e.approximateSharePercent >= 0
+        ? boundedNumber(e.approximateSharePercent, 0, 100, 0)
+        : -1
+    ),
+  };
+}
+
+function deserializeDraftItemArrays(raw: Record<string, unknown>): QuestionnaireItemEntry[] {
+  const names = Array.isArray(raw.itemDraftNames) ? raw.itemDraftNames : [];
+  const ids = Array.isArray(raw.itemDraftIds) ? raw.itemDraftIds : [];
+  const cats = Array.isArray(raw.itemDraftCategories) ? raw.itemDraftCategories : [];
+  const units = Array.isArray(raw.itemDraftUnits) ? raw.itemDraftUnits : [];
+  const qtys = Array.isArray(raw.itemDraftQuantities) ? raw.itemDraftQuantities : [];
+  const currs = Array.isArray(raw.itemDraftCurrentPrices) ? raw.itemDraftCurrentPrices : [];
+  const olds = Array.isArray(raw.itemDraftOldPrices) ? raw.itemDraftOldPrices : [];
+  const suppliers = Array.isArray(raw.itemDraftSuppliers) ? raw.itemDraftSuppliers : [];
+  const majors = Array.isArray(raw.itemDraftMajorDrivers) ? raw.itemDraftMajorDrivers : [];
+  const shares = Array.isArray(raw.itemDraftSharePercents) ? raw.itemDraftSharePercents : [];
+
+  const result: QuestionnaireItemEntry[] = [];
+  for (let i = 0; i < names.length; i += 1) {
+    const name = typeof names[i] === 'string' ? names[i].trim() : '';
+    if (!name) continue;
+    const curr = Number(currs[i]);
+    const old = Number(olds[i]);
+    const share = Number(shares[i]);
+    const supplier = typeof suppliers[i] === 'string' ? suppliers[i].trim() : '';
+    result.push({
+      id: typeof ids[i] === 'string' && ids[i] ? String(ids[i]) : `d_${i + 1}`,
+      name,
+      category: typeof cats[i] === 'string' && cats[i] ? String(cats[i]) : 'Outros',
+      unit: typeof units[i] === 'string' && units[i] ? String(units[i]) : 'un',
+      quantity: Number.isFinite(Number(qtys[i])) ? Math.max(0.01, Number(qtys[i])) : 1,
+      currentPrice: Number.isFinite(curr) && curr >= 0 ? curr : null,
+      oldPrice: Number.isFinite(old) && old >= 0 ? old : null,
+      ...(supplier ? { supplierName: supplier } : {}),
+      isMajorDriver: Boolean(majors[i]),
+      approximateSharePercent: Number.isFinite(share) && share >= 0 ? share : null,
+    });
+  }
+  return result;
+}
+
+export function serializeQuestionnaireDataForFirestore(
+  qd: QuestionnaireDataPayload
+): Record<string, unknown> {
+  const mode = sanitizeProfileMode(qd.mode) || 'pessoal';
+  const out: Record<string, unknown> = {
+    mode,
+    version: clampString(qd.version || '2.0.0', BLUEPRINT_LIMITS.VERSION_MAX, '2.0.0'),
+    updatedAt: clampString(qd.updatedAt || new Date().toISOString(), BLUEPRINT_LIMITS.VERSION_MAX),
+  };
+  if (typeof qd.completedAt === 'string' && qd.completedAt.trim()) {
+    out.completedAt = clampString(qd.completedAt, BLUEPRINT_LIMITS.VERSION_MAX);
+  }
+  if (typeof qd.currentStep === 'number' && Number.isFinite(qd.currentStep)) {
+    out.currentStep = Math.round(boundedNumber(qd.currentStep, 1, 5, 1));
+  }
+
+  if (qd.pessoal) {
+    const a = qd.pessoal;
+    const pMap: Record<string, unknown> = {
+      membersCount: clampMembersCount(a.membersCount),
+      contributorsCount: Math.round(boundedNumber(a.contributorsCount, 0, 50, 0)),
+      dependentsCount: Math.round(boundedNumber(a.dependentsCount, 0, 50, 0)),
+      primaryIncomeComposition: clampString(a.primaryIncomeComposition, BLUEPRINT_LIMITS.SHORT_OPTION_MAX),
+      unknownCurrentIncome: Boolean(a.unknownCurrentIncome),
+      unknownIncomeOneYearAgo: Boolean(a.unknownIncomeOneYearAgo),
+      incomePredictability: clampString(a.incomePredictability, BLUEPRINT_LIMITS.SHORT_OPTION_MAX),
+      incomeTrend12M: clampString(a.incomeTrend12M, BLUEPRINT_LIMITS.SHORT_OPTION_MAX),
+      incomeEarnersCount: Math.round(boundedNumber(a.incomeEarnersCount, 0, 50, 0)),
+      surplusFrequency: sanitizeSurplusFrequency(a.surplusFrequency) || 'nao_sei',
+      shortfallBehavior: clampString(a.shortfallBehavior, 160),
+      selectedExpenseCategories: sanitizeStringArray(
+        a.selectedExpenseCategories,
+        BLUEPRINT_LIMITS.CATEGORIES_LIST_MAX,
+        BLUEPRINT_LIMITS.SHORT_OPTION_MAX
+      ),
+      ...serializeCategoryEstimates(a.categoryEstimates),
+      expenseStability: clampString(a.expenseStability, BLUEPRINT_LIMITS.SHORT_OPTION_MAX),
+      selectedRegularProducts: sanitizeStringArray(
+        a.selectedRegularProducts,
+        BLUEPRINT_LIMITS.DRAFT_ITEMS_LIST_MAX,
+        BLUEPRINT_LIMITS.ITEM_NAME_MAX
+      ),
+      shoppingFrequency: clampString(a.shoppingFrequency, BLUEPRINT_LIMITS.SHORT_OPTION_MAX),
+      knowsOldPrices: clampString(a.knowsOldPrices, 60),
+      majorBudgetDrivers: sanitizeStringArray(
+        a.majorBudgetDrivers,
+        BLUEPRINT_LIMITS.DRAFT_ITEMS_LIST_MAX,
+        BLUEPRINT_LIMITS.ITEM_NAME_MAX
+      ),
+      ...serializeDraftItemArrays(a.itemEntries),
+      basketSetupChoice: a.basketSetupChoice === 'demonstracao' ? 'demonstracao' : 'propria',
+      compareIncomeVsInflation: Boolean(a.compareIncomeVsInflation),
+      trackMonthlyBudgetImpact: Boolean(a.trackMonthlyBudgetImpact),
+    };
+    if (typeof a.currentMonthlyIncome === 'number' && Number.isFinite(a.currentMonthlyIncome)) {
+      pMap.currentMonthlyIncome = nonNegativeNumber(a.currentMonthlyIncome, 0);
+    }
+    if (typeof a.incomeOneYearAgo === 'number' && Number.isFinite(a.incomeOneYearAgo)) {
+      pMap.incomeOneYearAgo = nonNegativeNumber(a.incomeOneYearAgo, 0);
+    }
+    if (typeof a.reportedMonthlySurplus === 'number' && Number.isFinite(a.reportedMonthlySurplus)) {
+      pMap.reportedMonthlySurplus = nonNegativeNumber(a.reportedMonthlySurplus, 0);
+    }
+    if (
+      typeof a.estimatedMonthlyExpenses === 'number' &&
+      Number.isFinite(a.estimatedMonthlyExpenses)
+    ) {
+      pMap.estimatedMonthlyExpenses = nonNegativeNumber(a.estimatedMonthlyExpenses, 0);
+    }
+    out.pessoal = pMap;
+  }
+
+  if (qd.negocio) {
+    const a = qd.negocio;
+    const nMap: Record<string, unknown> = {
+      businessName: clampString(a.businessName, BLUEPRINT_LIMITS.PROFILE_NAME_MAX),
+      businessSegment: clampString(a.businessSegment, BLUEPRINT_LIMITS.SHORT_OPTION_MAX),
+      businessActivityDescription: clampString(
+        a.businessActivityDescription,
+        BLUEPRINT_LIMITS.ACTIVITY_DESC_MAX
+      ),
+      businessSize: clampString(a.businessSize, BLUEPRINT_LIMITS.SHORT_OPTION_MAX),
+      workersCount: Math.round(boundedNumber(a.workersCount, 1, 500, 1)),
+      operatingTenure: clampString(a.operatingTenure, BLUEPRINT_LIMITS.SHORT_OPTION_MAX),
+      unknownCurrentRevenue: Boolean(a.unknownCurrentRevenue),
+      unknownRevenueOneYearAgo: Boolean(a.unknownRevenueOneYearAgo),
+      revenuePattern: clampString(a.revenuePattern, BLUEPRINT_LIMITS.SHORT_OPTION_MAX),
+      revenueTrend12M: clampString(a.revenueTrend12M, BLUEPRINT_LIMITS.SHORT_OPTION_MAX),
+      primaryRevenueSource: clampString(a.primaryRevenueSource, BLUEPRINT_LIMITS.SHORT_OPTION_MAX),
+      surplusFrequency: sanitizeSurplusFrequency(a.surplusFrequency) || 'nao_sei',
+      shortfallReason: clampString(a.shortfallReason, 160),
+      selectedCostCategories: sanitizeStringArray(
+        a.selectedCostCategories,
+        BLUEPRINT_LIMITS.CATEGORIES_LIST_MAX,
+        BLUEPRINT_LIMITS.SHORT_OPTION_MAX
+      ),
+      ...serializeCategoryEstimates(a.categoryEstimates),
+      fixedCostCategories: sanitizeStringArray(
+        a.fixedCostCategories,
+        BLUEPRINT_LIMITS.CATEGORIES_LIST_MAX,
+        BLUEPRINT_LIMITS.SHORT_OPTION_MAX
+      ),
+      variableCostCategories: sanitizeStringArray(
+        a.variableCostCategories,
+        BLUEPRINT_LIMITS.CATEGORIES_LIST_MAX,
+        BLUEPRINT_LIMITS.SHORT_OPTION_MAX
+      ),
+      operationalCostsIncreased12M: clampString(a.operationalCostsIncreased12M, 60),
+      operationalCostIncreaseAmount: clampString(
+        a.operationalCostIncreaseAmount,
+        BLUEPRINT_LIMITS.SHORT_OPTION_MAX
+      ),
+      knowsOldPrices: clampString(a.knowsOldPrices, 60),
+      buysFromSameSuppliers: clampString(a.buysFromSameSuppliers, 60),
+      wantsToRegisterSuppliers: Boolean(a.wantsToRegisterSuppliers),
+      suppliers: sanitizeStringArray(
+        a.suppliers,
+        BLUEPRINT_LIMITS.SUPPLIERS_LIST_MAX,
+        BLUEPRINT_LIMITS.SUPPLIER_NAME_MAX
+      ),
+      purchaseFrequency: clampString(a.purchaseFrequency, BLUEPRINT_LIMITS.SHORT_OPTION_MAX),
+      ...serializeDraftItemArrays(a.itemEntries),
+      basketSetupChoice: a.basketSetupChoice === 'demonstracao' ? 'demonstracao' : 'propria',
+      compareCostsVsRevenue: Boolean(a.compareCostsVsRevenue),
+      trackCostDrivers: Boolean(a.trackCostDrivers),
+    };
+    if (typeof a.currentMonthlyRevenue === 'number' && Number.isFinite(a.currentMonthlyRevenue)) {
+      nMap.currentMonthlyRevenue = nonNegativeNumber(a.currentMonthlyRevenue, 0);
+    }
+    if (typeof a.revenueOneYearAgo === 'number' && Number.isFinite(a.revenueOneYearAgo)) {
+      nMap.revenueOneYearAgo = nonNegativeNumber(a.revenueOneYearAgo, 0);
+    }
+    if (
+      typeof a.estimatedMonthlyOperatingSpend === 'number' &&
+      Number.isFinite(a.estimatedMonthlyOperatingSpend)
+    ) {
+      nMap.estimatedMonthlyOperatingSpend = nonNegativeNumber(a.estimatedMonthlyOperatingSpend, 0);
+    }
+    if (typeof a.reportedMonthlySurplus === 'number' && Number.isFinite(a.reportedMonthlySurplus)) {
+      nMap.reportedMonthlySurplus = nonNegativeNumber(a.reportedMonthlySurplus, 0);
+    }
+    out.negocio = nMap;
+  }
+
+  if (qd.estudante) {
+    const a = qd.estudante;
+    const eMap: Record<string, unknown> = {
+      educationLevel: clampString(a.educationLevel, BLUEPRINT_LIMITS.SHORT_OPTION_MAX),
+      institutionType: clampString(a.institutionType, BLUEPRINT_LIMITS.SHORT_OPTION_MAX),
+      studyPeriod: clampString(a.studyPeriod, BLUEPRINT_LIMITS.SHORT_OPTION_MAX),
+      livingSituation: clampString(a.livingSituation, BLUEPRINT_LIMITS.SHORT_OPTION_MAX),
+      hasNoOwnIncome: Boolean(a.hasNoOwnIncome),
+      incomeSources: sanitizeStringArray(
+        a.incomeSources,
+        BLUEPRINT_LIMITS.CATEGORIES_LIST_MAX,
+        BLUEPRINT_LIMITS.SHORT_OPTION_MAX
+      ),
+      incomeOneYearAgoStatus:
+        a.incomeOneYearAgoStatus === 'informado' ||
+        a.incomeOneYearAgoStatus === 'nao_possuia_renda'
+          ? a.incomeOneYearAgoStatus
+          : 'nao_sei',
+      incomePattern: clampString(a.incomePattern, BLUEPRINT_LIMITS.SHORT_OPTION_MAX),
+      incomeTrend12M: clampString(a.incomeTrend12M, BLUEPRINT_LIMITS.SHORT_OPTION_MAX),
+      surplusFrequency: sanitizeSurplusFrequency(a.surplusFrequency) || 'nao_sei',
+      selectedExpenseCategories: sanitizeStringArray(
+        a.selectedExpenseCategories,
+        BLUEPRINT_LIMITS.CATEGORIES_LIST_MAX,
+        BLUEPRINT_LIMITS.SHORT_OPTION_MAX
+      ),
+      ...serializeCategoryEstimates(a.categoryEstimates),
+      directPaidCategories: sanitizeStringArray(
+        a.directPaidCategories,
+        BLUEPRINT_LIMITS.CATEGORIES_LIST_MAX,
+        BLUEPRINT_LIMITS.SHORT_OPTION_MAX
+      ),
+      hasRecurringExpenses: Boolean(a.hasRecurringExpenses),
+      expensesIncreased12M: clampString(a.expensesIncreased12M, 60),
+      selectedConsumptionCategories: sanitizeStringArray(
+        a.selectedConsumptionCategories,
+        BLUEPRINT_LIMITS.CATEGORIES_LIST_MAX,
+        BLUEPRINT_LIMITS.SHORT_OPTION_MAX
+      ),
+      knowsOldPrices: clampString(a.knowsOldPrices, 60),
+      majorBudgetDrivers: sanitizeStringArray(
+        a.majorBudgetDrivers,
+        BLUEPRINT_LIMITS.DRAFT_ITEMS_LIST_MAX,
+        BLUEPRINT_LIMITS.ITEM_NAME_MAX
+      ),
+      purchaseFrequency: clampString(a.purchaseFrequency, BLUEPRINT_LIMITS.SHORT_OPTION_MAX),
+      ...serializeDraftItemArrays(a.itemEntries),
+      basketSetupChoice: a.basketSetupChoice === 'demonstracao' ? 'demonstracao' : 'propria',
+      compareIncomeVsInflation: Boolean(a.compareIncomeVsInflation),
+      trackMonthlyBudgetImpact: Boolean(a.trackMonthlyBudgetImpact),
+    };
+    if (typeof a.currentMonthlyIncome === 'number' && Number.isFinite(a.currentMonthlyIncome)) {
+      eMap.currentMonthlyIncome = nonNegativeNumber(a.currentMonthlyIncome, 0);
+    }
+    if (typeof a.incomeOneYearAgo === 'number' && Number.isFinite(a.incomeOneYearAgo)) {
+      eMap.incomeOneYearAgo = nonNegativeNumber(a.incomeOneYearAgo, 0);
+    }
+    if (
+      typeof a.estimatedMonthlyExpenses === 'number' &&
+      Number.isFinite(a.estimatedMonthlyExpenses)
+    ) {
+      eMap.estimatedMonthlyExpenses = nonNegativeNumber(a.estimatedMonthlyExpenses, 0);
+    }
+    if (typeof a.reportedMonthlySurplus === 'number' && Number.isFinite(a.reportedMonthlySurplus)) {
+      eMap.reportedMonthlySurplus = nonNegativeNumber(a.reportedMonthlySurplus, 0);
+    }
+    out.estudante = eMap;
+  }
+
+  return out;
+}
+
+export function deserializeQuestionnaireDataFromFirestore(
+  raw: unknown
+): QuestionnaireDataPayload | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const obj = raw as Record<string, unknown>;
+  const mode = sanitizeProfileMode(obj.mode);
+  if (!mode) return undefined;
+
+  const payload: QuestionnaireDataPayload = {
+    mode,
+    version: String(obj.version || '2.0.0'),
+    updatedAt: String(obj.updatedAt || new Date().toISOString()),
+    ...(typeof obj.completedAt === 'string' && obj.completedAt
+      ? { completedAt: obj.completedAt }
+      : {}),
+    ...(typeof obj.currentStep === 'number' ? { currentStep: obj.currentStep } : {}),
+  };
+
+  if (obj.pessoal && typeof obj.pessoal === 'object') {
+    const p = obj.pessoal as Record<string, unknown>;
+    payload.pessoal = {
+      membersCount: finiteNumber(p.membersCount, 1),
+      contributorsCount: finiteNumber(p.contributorsCount, 1),
+      dependentsCount: finiteNumber(p.dependentsCount, 0),
+      primaryIncomeComposition: String(p.primaryIncomeComposition || 'Salário fixo'),
+      currentMonthlyIncome:
+        typeof p.currentMonthlyIncome === 'number' ? p.currentMonthlyIncome : null,
+      unknownCurrentIncome: Boolean(p.unknownCurrentIncome),
+      incomeOneYearAgo: typeof p.incomeOneYearAgo === 'number' ? p.incomeOneYearAgo : null,
+      unknownIncomeOneYearAgo: Boolean(p.unknownIncomeOneYearAgo),
+      incomePredictability: String(
+        p.incomePredictability || 'Fixa'
+      ) as PessoalQuestionnaireAnswers['incomePredictability'],
+      incomeTrend12M: String(
+        p.incomeTrend12M || 'Não sei informar'
+      ) as PessoalQuestionnaireAnswers['incomeTrend12M'],
+      incomeEarnersCount: finiteNumber(p.incomeEarnersCount, 1),
+      surplusFrequency: sanitizeSurplusFrequency(p.surplusFrequency) || 'nao_sei',
+      reportedMonthlySurplus:
+        typeof p.reportedMonthlySurplus === 'number' ? p.reportedMonthlySurplus : null,
+      shortfallBehavior: String(p.shortfallBehavior || ''),
+      estimatedMonthlyExpenses:
+        typeof p.estimatedMonthlyExpenses === 'number' ? p.estimatedMonthlyExpenses : null,
+      selectedExpenseCategories: sanitizeStringArray(p.selectedExpenseCategories, 40, 120),
+      categoryEstimates: deserializeCategoryEstimates(p),
+      expenseStability: String(
+        p.expenseStability || 'Variam pouco'
+      ) as PessoalQuestionnaireAnswers['expenseStability'],
+      selectedRegularProducts: sanitizeStringArray(p.selectedRegularProducts, 60, 200),
+      shoppingFrequency: String(
+        p.shoppingFrequency || 'Semanalmente'
+      ) as PessoalQuestionnaireAnswers['shoppingFrequency'],
+      itemEntries: deserializeDraftItemArrays(p),
+      knowsOldPrices: String(p.knowsOldPrices || 'Não') as PessoalQuestionnaireAnswers['knowsOldPrices'],
+      majorBudgetDrivers: sanitizeStringArray(p.majorBudgetDrivers, 60, 200),
+      basketSetupChoice: p.basketSetupChoice === 'demonstracao' ? 'demonstracao' : 'propria',
+      compareIncomeVsInflation: Boolean(p.compareIncomeVsInflation),
+      trackMonthlyBudgetImpact: Boolean(p.trackMonthlyBudgetImpact),
+    };
+  }
+
+  if (obj.negocio && typeof obj.negocio === 'object') {
+    const n = obj.negocio as Record<string, unknown>;
+    payload.negocio = {
+      businessName: String(n.businessName || ''),
+      businessSegment: String(n.businessSegment || ''),
+      businessActivityDescription: String(n.businessActivityDescription || ''),
+      businessSize: String(
+        n.businessSize || 'Não sei informar'
+      ) as NegocioQuestionnaireAnswers['businessSize'],
+      workersCount: finiteNumber(n.workersCount, 1),
+      operatingTenure: String(
+        n.operatingTenure || 'De 1 a 3 anos'
+      ) as NegocioQuestionnaireAnswers['operatingTenure'],
+      currentMonthlyRevenue:
+        typeof n.currentMonthlyRevenue === 'number' ? n.currentMonthlyRevenue : null,
+      unknownCurrentRevenue: Boolean(n.unknownCurrentRevenue),
+      revenueOneYearAgo: typeof n.revenueOneYearAgo === 'number' ? n.revenueOneYearAgo : null,
+      unknownRevenueOneYearAgo: Boolean(n.unknownRevenueOneYearAgo),
+      revenuePattern: String(
+        n.revenuePattern || 'Variável'
+      ) as NegocioQuestionnaireAnswers['revenuePattern'],
+      revenueTrend12M: String(
+        n.revenueTrend12M || 'Não sei informar'
+      ) as NegocioQuestionnaireAnswers['revenueTrend12M'],
+      primaryRevenueSource: String(
+        n.primaryRevenueSource || 'Venda de produtos'
+      ) as NegocioQuestionnaireAnswers['primaryRevenueSource'],
+      estimatedMonthlyOperatingSpend:
+        typeof n.estimatedMonthlyOperatingSpend === 'number'
+          ? n.estimatedMonthlyOperatingSpend
+          : null,
+      surplusFrequency: sanitizeSurplusFrequency(n.surplusFrequency) || 'nao_sei',
+      reportedMonthlySurplus:
+        typeof n.reportedMonthlySurplus === 'number' ? n.reportedMonthlySurplus : null,
+      shortfallReason: String(n.shortfallReason || ''),
+      selectedCostCategories: sanitizeStringArray(n.selectedCostCategories, 40, 120),
+      categoryEstimates: deserializeCategoryEstimates(n),
+      fixedCostCategories: sanitizeStringArray(n.fixedCostCategories, 40, 120),
+      variableCostCategories: sanitizeStringArray(n.variableCostCategories, 40, 120),
+      operationalCostsIncreased12M: String(
+        n.operationalCostsIncreased12M || 'Não sei informar'
+      ) as NegocioQuestionnaireAnswers['operationalCostsIncreased12M'],
+      operationalCostIncreaseAmount: String(n.operationalCostIncreaseAmount || ''),
+      itemEntries: deserializeDraftItemArrays(n),
+      knowsOldPrices: String(n.knowsOldPrices || 'Não') as NegocioQuestionnaireAnswers['knowsOldPrices'],
+      buysFromSameSuppliers: String(
+        n.buysFromSameSuppliers || 'Sim'
+      ) as NegocioQuestionnaireAnswers['buysFromSameSuppliers'],
+      wantsToRegisterSuppliers: Boolean(n.wantsToRegisterSuppliers),
+      suppliers: sanitizeStringArray(n.suppliers, 40, 160),
+      purchaseFrequency: String(
+        n.purchaseFrequency || 'Semanalmente'
+      ) as NegocioQuestionnaireAnswers['purchaseFrequency'],
+      basketSetupChoice: n.basketSetupChoice === 'demonstracao' ? 'demonstracao' : 'propria',
+      compareCostsVsRevenue: Boolean(n.compareCostsVsRevenue),
+      trackCostDrivers: Boolean(n.trackCostDrivers),
+    };
+  }
+
+  if (obj.estudante && typeof obj.estudante === 'object') {
+    const e = obj.estudante as Record<string, unknown>;
+    payload.estudante = {
+      educationLevel: String(
+        e.educationLevel || 'Ensino Superior'
+      ) as EstudanteQuestionnaireAnswers['educationLevel'],
+      institutionType: String(
+        e.institutionType || 'Pública'
+      ) as EstudanteQuestionnaireAnswers['institutionType'],
+      studyPeriod: String(e.studyPeriod || 'Noturno') as EstudanteQuestionnaireAnswers['studyPeriod'],
+      livingSituation: String(
+        e.livingSituation || 'Com pais ou responsáveis'
+      ) as EstudanteQuestionnaireAnswers['livingSituation'],
+      hasNoOwnIncome: Boolean(e.hasNoOwnIncome),
+      currentMonthlyIncome:
+        typeof e.currentMonthlyIncome === 'number' ? e.currentMonthlyIncome : null,
+      incomeSources: sanitizeStringArray(e.incomeSources, 40, 120),
+      incomeOneYearAgo: typeof e.incomeOneYearAgo === 'number' ? e.incomeOneYearAgo : null,
+      incomeOneYearAgoStatus: (e.incomeOneYearAgoStatus === 'informado' ||
+      e.incomeOneYearAgoStatus === 'nao_possuia_renda'
+        ? e.incomeOneYearAgoStatus
+        : 'nao_sei') as EstudanteQuestionnaireAnswers['incomeOneYearAgoStatus'],
+      incomePattern: String(
+        e.incomePattern || 'Variável'
+      ) as EstudanteQuestionnaireAnswers['incomePattern'],
+      incomeTrend12M: String(
+        e.incomeTrend12M || 'Não sei informar'
+      ) as EstudanteQuestionnaireAnswers['incomeTrend12M'],
+      estimatedMonthlyExpenses:
+        typeof e.estimatedMonthlyExpenses === 'number' ? e.estimatedMonthlyExpenses : null,
+      surplusFrequency: sanitizeSurplusFrequency(e.surplusFrequency) || 'nao_sei',
+      reportedMonthlySurplus:
+        typeof e.reportedMonthlySurplus === 'number' ? e.reportedMonthlySurplus : null,
+      selectedExpenseCategories: sanitizeStringArray(e.selectedExpenseCategories, 40, 120),
+      categoryEstimates: deserializeCategoryEstimates(e),
+      directPaidCategories: sanitizeStringArray(e.directPaidCategories, 40, 120),
+      hasRecurringExpenses: Boolean(e.hasRecurringExpenses),
+      expensesIncreased12M: String(
+        e.expensesIncreased12M || 'Não sei informar'
+      ) as EstudanteQuestionnaireAnswers['expensesIncreased12M'],
+      selectedConsumptionCategories: sanitizeStringArray(
+        e.selectedConsumptionCategories,
+        40,
+        120
+      ),
+      itemEntries: deserializeDraftItemArrays(e),
+      knowsOldPrices: String(
+        e.knowsOldPrices || 'Não'
+      ) as EstudanteQuestionnaireAnswers['knowsOldPrices'],
+      majorBudgetDrivers: sanitizeStringArray(e.majorBudgetDrivers, 60, 200),
+      purchaseFrequency: String(
+        e.purchaseFrequency || 'Mensalmente'
+      ) as EstudanteQuestionnaireAnswers['purchaseFrequency'],
+      basketSetupChoice: e.basketSetupChoice === 'demonstracao' ? 'demonstracao' : 'propria',
+      compareIncomeVsInflation: Boolean(e.compareIncomeVsInflation),
+      trackMonthlyBudgetImpact: Boolean(e.trackMonthlyBudgetImpact),
+    };
+  }
+
+  return payload;
 }
 
 export function buildProfileWritePayload(
@@ -259,6 +835,25 @@ export function buildProfileWritePayload(
   if (mode) {
     base.profileMode = mode;
   }
+  const onboardingStatus = sanitizeOnboardingStatus(profile.onboardingStatus);
+  if (onboardingStatus) {
+    base.onboardingStatus = onboardingStatus;
+  }
+  if (typeof profile.onboardingStep === 'number' && Number.isFinite(profile.onboardingStep)) {
+    base.onboardingStep = Math.round(boundedNumber(profile.onboardingStep, 1, 5, 1));
+  }
+  if (typeof profile.onboardingCompletedAt === 'string' && profile.onboardingCompletedAt.trim()) {
+    base.onboardingCompletedAt = clampString(
+      profile.onboardingCompletedAt,
+      BLUEPRINT_LIMITS.VERSION_MAX
+    );
+  }
+  if (typeof profile.questionnaireVersion === 'string' && profile.questionnaireVersion.trim()) {
+    base.questionnaireVersion = clampString(
+      profile.questionnaireVersion,
+      BLUEPRINT_LIMITS.VERSION_MAX
+    );
+  }
   if (
     typeof profile.priceAlertThresholdPercent === 'number' &&
     Number.isFinite(profile.priceAlertThresholdPercent)
@@ -269,6 +864,47 @@ export function buildProfileWritePayload(
       500,
       10
     );
+  }
+  if (typeof profile.hasNoOwnIncome === 'boolean') {
+    base.hasNoOwnIncome = profile.hasNoOwnIncome;
+  }
+  if (
+    typeof profile.reportedMonthlySurplus === 'number' &&
+    Number.isFinite(profile.reportedMonthlySurplus)
+  ) {
+    base.reportedMonthlySurplus = nonNegativeNumber(profile.reportedMonthlySurplus, 0);
+  }
+  const surplusFreq = sanitizeSurplusFrequency(profile.surplusFrequency);
+  if (surplusFreq) {
+    base.surplusFrequency = surplusFreq;
+  }
+  if (
+    typeof profile.estimatedMonthlyExpenses === 'number' &&
+    Number.isFinite(profile.estimatedMonthlyExpenses)
+  ) {
+    base.estimatedMonthlyExpenses = nonNegativeNumber(profile.estimatedMonthlyExpenses, 0);
+  }
+  if (Array.isArray(profile.suppliers) && profile.suppliers.length > 0) {
+    base.suppliers = sanitizeStringArray(
+      profile.suppliers,
+      BLUEPRINT_LIMITS.SUPPLIERS_LIST_MAX,
+      BLUEPRINT_LIMITS.SUPPLIER_NAME_MAX
+    );
+  }
+  if (profile.dashboardPreferences && typeof profile.dashboardPreferences === 'object') {
+    const dp: DashboardPreferences = profile.dashboardPreferences;
+    const prefPayload: Record<string, unknown> = {
+      basketSetupChoice: dp.basketSetupChoice === 'demonstracao' ? 'demonstracao' : 'propria',
+      compareIncomeVsInflation: Boolean(dp.compareIncomeVsInflation),
+      trackMonthlyBudgetImpact: Boolean(dp.trackMonthlyBudgetImpact),
+    };
+    if (typeof dp.trackCostDrivers === 'boolean') {
+      prefPayload.trackCostDrivers = dp.trackCostDrivers;
+    }
+    base.dashboardPreferences = prefPayload;
+  }
+  if (profile.questionnaireData && typeof profile.questionnaireData === 'object') {
+    base.questionnaireData = serializeQuestionnaireDataForFirestore(profile.questionnaireData);
   }
 
   if (isCreate) {
@@ -418,6 +1054,8 @@ export function buildBasketItemWritePayload(
     updatedAt: serverTimestamp(),
   };
 
+  const itemMode = sanitizeProfileMode(item.profileMode);
+  if (itemMode) mutable.profileMode = itemMode;
   if (typeof item.description === 'string') {
     mutable.description = item.description.trim().slice(0, BLUEPRINT_LIMITS.ITEM_DESC_MAX);
   }
@@ -447,6 +1085,12 @@ export function buildBasketItemWritePayload(
   if (recurrence) mutable.recurrenceType = recurrence;
   const accType = sanitizeAccountingType(item.accountingType);
   if (accType) mutable.accountingType = accType;
+  if (typeof item.supplierName === 'string' && item.supplierName.trim()) {
+    mutable.supplierName = clampString(item.supplierName, BLUEPRINT_LIMITS.SUPPLIER_NAME_MAX);
+  }
+  if (typeof item.paidDirectly === 'boolean') {
+    mutable.paidDirectly = item.paidDirectly;
+  }
   if (typeof item.comparabilityBroken === 'boolean') {
     mutable.comparabilityBroken = item.comparabilityBroken;
   }
@@ -484,6 +1128,7 @@ export function buildPriceRecordWritePayload(
     source?: string;
     origin?: string;
     region?: string;
+    supplierName?: string;
     packageSize?: number;
     packageUnit?: string;
     dataOrigin?: DataOrigin;
@@ -516,6 +1161,9 @@ export function buildPriceRecordWritePayload(
   }
   if (typeof record.region === 'string') {
     mutable.region = clampString(record.region, BLUEPRINT_LIMITS.REGION_MAX);
+  }
+  if (typeof record.supplierName === 'string' && record.supplierName.trim()) {
+    mutable.supplierName = clampString(record.supplierName, BLUEPRINT_LIMITS.SUPPLIER_NAME_MAX);
   }
   if (typeof record.packageSize === 'number' && Number.isFinite(record.packageSize)) {
     mutable.packageSize = nonNegativeNumber(record.packageSize, 0);
@@ -552,9 +1200,13 @@ export function buildIncomeRecordWritePayload(
   record: {
     id?: string;
     profileId: string;
+    profileMode?: ProfileMode;
     referenceDate: string;
     nominalIncome: number;
     source?: string;
+    incomeRole?: IncomeRole;
+    incomePredictability?: IncomePredictability;
+    dataOrigin?: DataOrigin;
     notes?: string;
     grossIncome?: number;
     netIncome?: number;
@@ -580,9 +1232,17 @@ export function buildIncomeRecordWritePayload(
     updatedAt: serverTimestamp(),
   };
 
+  const mode = sanitizeProfileMode(record.profileMode);
+  if (mode) mutable.profileMode = mode;
   if (typeof record.source === 'string') {
     mutable.source = clampString(record.source, BLUEPRINT_LIMITS.PRICE_SOURCE_MAX);
   }
+  const role = sanitizeIncomeRole(record.incomeRole);
+  if (role) mutable.incomeRole = role;
+  const pred = sanitizeIncomePredictability(record.incomePredictability);
+  if (pred) mutable.incomePredictability = pred;
+  const incOrigin = sanitizeDataOrigin(record.dataOrigin);
+  if (incOrigin) mutable.dataOrigin = incOrigin;
   if (typeof record.notes === 'string') {
     mutable.notes = clampString(record.notes, BLUEPRINT_LIMITS.PRICE_NOTES_MAX);
   }
@@ -1054,10 +1714,25 @@ export class FirestoreService {
         (snapshot) => {
           const profiles: FamilyProfile[] = snapshot.docs.map((d) => {
             const raw = d.data();
+            const rawPrefs =
+              raw.dashboardPreferences && typeof raw.dashboardPreferences === 'object'
+                ? (raw.dashboardPreferences as Record<string, unknown>)
+                : null;
             return {
               id: raw.id || d.id,
               name: String(raw.name || 'Meu Orçamento Familiar'),
               profileMode: sanitizeProfileMode(raw.profileMode),
+              onboardingStatus: sanitizeOnboardingStatus(raw.onboardingStatus),
+              onboardingStep:
+                typeof raw.onboardingStep === 'number' ? raw.onboardingStep : undefined,
+              onboardingCompletedAt:
+                typeof raw.onboardingCompletedAt === 'string'
+                  ? raw.onboardingCompletedAt
+                  : undefined,
+              questionnaireVersion:
+                typeof raw.questionnaireVersion === 'string'
+                  ? raw.questionnaireVersion
+                  : undefined,
               priceAlertThresholdPercent:
                 typeof raw.priceAlertThresholdPercent === 'number'
                   ? raw.priceAlertThresholdPercent
@@ -1065,6 +1740,32 @@ export class FirestoreService {
               membersCount: finiteNumber(raw.membersCount, 1),
               referenceRegion: String(raw.referenceRegion || 'Brasil'),
               currency: String(raw.currency || 'BRL'),
+              hasNoOwnIncome:
+                typeof raw.hasNoOwnIncome === 'boolean' ? raw.hasNoOwnIncome : undefined,
+              reportedMonthlySurplus:
+                typeof raw.reportedMonthlySurplus === 'number'
+                  ? raw.reportedMonthlySurplus
+                  : undefined,
+              surplusFrequency: sanitizeSurplusFrequency(raw.surplusFrequency),
+              estimatedMonthlyExpenses:
+                typeof raw.estimatedMonthlyExpenses === 'number'
+                  ? raw.estimatedMonthlyExpenses
+                  : undefined,
+              suppliers: Array.isArray(raw.suppliers)
+                ? sanitizeStringArray(raw.suppliers, BLUEPRINT_LIMITS.SUPPLIERS_LIST_MAX, BLUEPRINT_LIMITS.SUPPLIER_NAME_MAX)
+                : undefined,
+              dashboardPreferences: rawPrefs
+                ? {
+                    basketSetupChoice:
+                      rawPrefs.basketSetupChoice === 'demonstracao' ? 'demonstracao' : 'propria',
+                    compareIncomeVsInflation: Boolean(rawPrefs.compareIncomeVsInflation),
+                    trackMonthlyBudgetImpact: Boolean(rawPrefs.trackMonthlyBudgetImpact),
+                    ...(typeof rawPrefs.trackCostDrivers === 'boolean'
+                      ? { trackCostDrivers: rawPrefs.trackCostDrivers }
+                      : {}),
+                  }
+                : undefined,
+              questionnaireData: deserializeQuestionnaireDataFromFirestore(raw.questionnaireData),
               isDemo: false,
               createdAt: timestampToIso(raw.createdAt),
               updatedAt: timestampToIso(raw.updatedAt),
@@ -1086,6 +1787,7 @@ export class FirestoreService {
             return {
               id: raw.id || d.id,
               profileId: String(raw.profileId || ''),
+              profileMode: sanitizeProfileMode(raw.profileMode),
               name: String(raw.name || ''),
               description: typeof raw.description === 'string' ? raw.description : undefined,
               group: String(raw.group || 'Alimentação e bebidas'),
@@ -1106,6 +1808,8 @@ export class FirestoreService {
               expenseNature: sanitizeExpenseNature(raw.expenseNature),
               recurrenceType: sanitizeRecurrenceType(raw.recurrenceType),
               accountingType: sanitizeAccountingType(raw.accountingType),
+              supplierName: typeof raw.supplierName === 'string' ? raw.supplierName : undefined,
+              paidDirectly: typeof raw.paidDirectly === 'boolean' ? raw.paidDirectly : undefined,
               comparabilityBroken:
                 typeof raw.comparabilityBroken === 'boolean' ? raw.comparabilityBroken : undefined,
               comparabilityReason:
@@ -1135,9 +1839,13 @@ export class FirestoreService {
               return {
                 id: raw.id || d.id,
                 profileId: String(raw.profileId || ''),
+                profileMode: sanitizeProfileMode(raw.profileMode),
                 referenceDate: String(raw.referenceDate || ''),
                 nominalIncome: finiteNumber(raw.nominalIncome, 0),
                 source: typeof raw.source === 'string' ? raw.source : undefined,
+                incomeRole: sanitizeIncomeRole(raw.incomeRole),
+                incomePredictability: sanitizeIncomePredictability(raw.incomePredictability),
+                dataOrigin: sanitizeDataOrigin(raw.dataOrigin),
                 notes: typeof raw.notes === 'string' ? raw.notes : undefined,
                 grossIncome: typeof raw.grossIncome === 'number' ? raw.grossIncome : undefined,
                 netIncome: typeof raw.netIncome === 'number' ? raw.netIncome : undefined,
@@ -1182,6 +1890,7 @@ export class FirestoreService {
                 source: typeof raw.source === 'string' ? raw.source : undefined,
                 origin: typeof raw.origin === 'string' ? raw.origin : undefined,
                 region: typeof raw.region === 'string' ? raw.region : undefined,
+                supplierName: typeof raw.supplierName === 'string' ? raw.supplierName : undefined,
                 packageSize: typeof raw.packageSize === 'number' ? raw.packageSize : undefined,
                 packageUnit: typeof raw.packageUnit === 'string' ? raw.packageUnit : undefined,
                 dataOrigin: sanitizeDataOrigin(raw.dataOrigin),
@@ -1212,6 +1921,7 @@ export class FirestoreService {
               description: String(raw.description || ''),
               color: String(raw.color || '#000000'),
               icon: String(raw.icon || 'category'),
+              profileMode: sanitizeProfileMode(raw.profileMode),
               nationalWeightIBGE:
                 typeof raw.nationalWeightIBGE === 'number' ? raw.nationalWeightIBGE : undefined,
               isCustom: typeof raw.isCustom === 'boolean' ? raw.isCustom : true,
@@ -1651,6 +2361,7 @@ export class FirestoreService {
             price: item.currentPrice,
             referenceDate: nextDate,
             unit: item.unit,
+            supplierName: item.supplierName,
             packageSize: item.packageSize,
             packageUnit: item.packageUnit,
             dataOrigin: item.dataOrigin || 'usuario',
@@ -1706,6 +2417,7 @@ export class FirestoreService {
       source?: string;
       origin?: string;
       region?: string;
+      supplierName?: string;
       packageSize?: number;
       packageUnit?: string;
       dataOrigin?: DataOrigin;
@@ -1773,6 +2485,9 @@ export class FirestoreService {
       }
       if (updated.region !== undefined) {
         payload.region = clampString(updated.region, BLUEPRINT_LIMITS.REGION_MAX);
+      }
+      if (updated.supplierName !== undefined) {
+        payload.supplierName = clampString(updated.supplierName, BLUEPRINT_LIMITS.SUPPLIER_NAME_MAX);
       }
       if (updated.packageSize !== undefined && Number.isFinite(updated.packageSize)) {
         payload.packageSize = nonNegativeNumber(updated.packageSize, 0);
@@ -1883,6 +2598,22 @@ export class FirestoreService {
     if (updated.availableReserve !== undefined) {
       payload.availableReserve = nonNegativeNumber(updated.availableReserve, 0);
     }
+    if (updated.profileMode !== undefined) {
+      const mode = sanitizeProfileMode(updated.profileMode);
+      if (mode) payload.profileMode = mode;
+    }
+    if (updated.incomeRole !== undefined) {
+      const role = sanitizeIncomeRole(updated.incomeRole);
+      if (role) payload.incomeRole = role;
+    }
+    if (updated.incomePredictability !== undefined) {
+      const pred = sanitizeIncomePredictability(updated.incomePredictability);
+      if (pred) payload.incomePredictability = pred;
+    }
+    if (updated.dataOrigin !== undefined) {
+      const origin = sanitizeDataOrigin(updated.dataOrigin);
+      if (origin) payload.dataOrigin = origin;
+    }
     if (updated.workingDaysPerMonth !== undefined) {
       payload.workingDaysPerMonth = boundedNumber(updated.workingDaysPerMonth, 1, 31, 22);
     }
@@ -1922,6 +2653,7 @@ export class FirestoreService {
       transfers?: number;
       availableReserve?: number;
       workingDaysPerMonth?: number;
+      profileMode?: ProfileMode;
     }
   ): Promise<void> {
     if (!db) return;
@@ -1965,15 +2697,17 @@ export class FirestoreService {
 
     await saveOne(inc1Id, {
       profileId: profId,
+      profileMode: dates?.profileMode,
       referenceDate: initialDate,
       nominalIncome: nonNegativeNumber(initialIncome, 0),
-      notes: 'Salário base inicial',
+      notes: 'Referência inicial informada',
     });
     await saveOne(inc2Id, {
       profileId: profId,
+      profileMode: dates?.profileMode,
       referenceDate: finalDate,
       nominalIncome: nonNegativeNumber(finalIncome, 0),
-      notes: 'Salário após reajustes',
+      notes: 'Referência mensal atual informada',
       grossIncome: dates?.grossIncome,
       netIncome: dates?.netIncome,
       incomeType: dates?.incomeType,
@@ -2001,6 +2735,10 @@ export class FirestoreService {
       active: group.active !== false,
       updatedAt: serverTimestamp(),
     };
+    const grpMode = sanitizeProfileMode(group.profileMode);
+    if (grpMode) {
+      mutable.profileMode = grpMode;
+    }
     if (
       typeof group.nationalWeightIBGE === 'number' &&
       Number.isFinite(group.nationalWeightIBGE)
@@ -2187,6 +2925,8 @@ export class FirestoreService {
           active: grp.active !== false,
           updatedAt: serverTimestamp(),
         };
+        const grpMode = sanitizeProfileMode(grp.profileMode);
+        if (grpMode) mutable.profileMode = grpMode;
         if (typeof grp.nationalWeightIBGE === 'number' && Number.isFinite(grp.nationalWeightIBGE)) {
           mutable.nationalWeightIBGE = boundedNumber(grp.nationalWeightIBGE, 0, 100, 0);
         }
@@ -2312,25 +3052,87 @@ export class FirestoreService {
     }
   }
 
+  static async saveQuestionnaireDraft(userId: string, profile: FamilyProfile): Promise<void> {
+    await this.saveProfile(userId, profile);
+  }
+
   static async saveOnboardingBundle(params: {
     userId: string;
     profile: FamilyProfile;
-    initialIncome: number;
-    currentIncome: number;
+    initialIncome?: number;
+    currentIncome?: number;
+    incomeRecords?: IncomeRecord[];
+    consumptionGroups?: ConsumptionGroup[];
     items: BasketItem[];
+    priceRecords?: PriceRecord[];
   }): Promise<void> {
-    await this.saveProfile(params.userId, params.profile);
-    await this.saveIncomeRange(
-      params.userId,
-      params.profile.id,
-      params.initialIncome,
-      params.currentIncome
-    );
-    await Promise.all(
-      params.items.map((item) =>
-        this.saveBasketItem(params.userId, { ...item, profileId: params.profile.id }, false)
-      )
-    );
+    const { userId, profile } = params;
+    await this.saveProfile(userId, profile);
+
+    if (params.consumptionGroups && params.consumptionGroups.length > 0) {
+      await Promise.all(
+        params.consumptionGroups
+          .filter((g) => g.isCustom)
+          .map((g) => this.saveConsumptionGroup(userId, g))
+      );
+    }
+
+    if (params.incomeRecords && params.incomeRecords.length > 0) {
+      const uid = sanitizeFirestoreId(userId, 'usr');
+      for (const rec of params.incomeRecords) {
+        if (!db) continue;
+        const incId = sanitizeFirestoreId(rec.id, 'inc');
+        const path = `users/${uid}/incomeHistory/${incId}`;
+        const ref = doc(db, path);
+        const snap = await getDoc(ref);
+        const payload = buildIncomeRecordWritePayload(
+          { ...rec, id: incId, profileId: profile.id },
+          uid,
+          !snap.exists()
+        );
+        if (snap.exists()) {
+          await updateDoc(ref, payload);
+        } else {
+          await setDoc(ref, payload);
+        }
+      }
+    } else if (
+      typeof params.initialIncome === 'number' &&
+      typeof params.currentIncome === 'number' &&
+      (params.initialIncome > 0 || params.currentIncome > 0)
+    ) {
+      await this.saveIncomeRange(userId, profile.id, params.initialIncome, params.currentIncome, {
+        profileMode: profile.profileMode,
+      });
+    }
+
+    if (params.items.length > 0) {
+      await Promise.all(
+        params.items.map((item) =>
+          this.saveBasketItem(userId, { ...item, profileId: profile.id }, !params.priceRecords?.length)
+        )
+      );
+    }
+
+    if (params.priceRecords && params.priceRecords.length > 0 && db) {
+      const uid = sanitizeFirestoreId(userId, 'usr');
+      for (const pr of params.priceRecords) {
+        const priceId = sanitizeFirestoreId(pr.id, 'price');
+        const path = `users/${uid}/priceHistory/${priceId}`;
+        const ref = doc(db, path);
+        const snap = await getDoc(ref);
+        const payload = buildPriceRecordWritePayload(
+          { ...pr, id: priceId, profileId: profile.id },
+          uid,
+          !snap.exists()
+        );
+        if (snap.exists()) {
+          await updateDoc(ref, payload);
+        } else {
+          await setDoc(ref, payload);
+        }
+      }
+    }
   }
 
   static async recordConsent(

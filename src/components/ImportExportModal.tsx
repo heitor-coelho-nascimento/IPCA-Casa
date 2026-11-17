@@ -66,6 +66,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
 
   const targetProfileId = activeProfileId || items[0]?.profileId || 'profile-clean-slate';
   const isBiz = profileMode === 'negocio';
+  const isStudent = profileMode === 'estudante';
 
   // Exportar CSV formatado para planilhas em Português do Brasil (separador ponto e vírgula)
   const handleExportCSV = () => {
@@ -81,6 +82,8 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
       'Data Preço Atual',
       'Unidade',
       'Observações',
+      'Fornecedor',
+      'Modalidade',
     ];
 
     const rows = items.map((i) => [
@@ -95,6 +98,8 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
       i.currentPriceDate,
       `"${String(i.unit || 'unidade').replace(/"/g, '""')}"`,
       `"${(i.notes || '').replace(/"/g, '""')}"`,
+      `"${(i.supplierName || '').replace(/"/g, '""')}"`,
+      `"${i.profileMode || profileMode}"`,
     ]);
 
     const csvContent = '\uFEFF' + [headers.join(';'), ...rows.map((r) => r.join(';'))].join('\r\n');
@@ -102,21 +107,25 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `ipca_casa_cesta_${getTodayIsoDate()}.csv`;
+    link.download = `ipca_casa_${profileMode}_${getTodayIsoDate()}.csv`;
     link.click();
     URL.revokeObjectURL(url);
     trackExportData('csv');
-    setFeedback({ type: 'success', message: `${items.length} itens exportados em CSV.` });
+    setFeedback({ type: 'success', message: `${items.length} itens da modalidade "${profileMode}" exportados em CSV.` });
   };
 
   // Exportar Backup JSON
   const handleExportJSON = () => {
-    const jsonContent = JSON.stringify(items, null, 2);
+    const scopedItems = items.map((item) => ({
+      ...item,
+      profileMode: item.profileMode || profileMode,
+    }));
+    const jsonContent = JSON.stringify(scopedItems, null, 2);
     const blob = new Blob([jsonContent], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `ipca_casa_backup_${getTodayIsoDate()}.json`;
+    link.download = `ipca_casa_${profileMode}_backup_${getTodayIsoDate()}.json`;
     link.click();
     URL.revokeObjectURL(url);
     trackExportData('json');
@@ -139,6 +148,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
         text: pendingCsvText,
         existingItems: items,
         targetProfileId,
+        profileMode,
         ambiguityPreference: pref,
       });
       setCsvPreview(updated);
@@ -221,6 +231,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
             validItems.push({
               id,
               profileId: targetProfileId,
+              profileMode,
               name,
               description: typeof raw.description === 'string' ? raw.description : undefined,
               group,
@@ -231,6 +242,9 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
               oldPriceDate: extractIsoDatePrefix(raw.oldPriceDate) || defaultOldDate,
               currentPriceDate: extractIsoDatePrefix(raw.currentPriceDate) || defaultCurrentDate,
               unit,
+              ...(typeof raw.supplierName === 'string' && raw.supplierName.trim()
+                ? { supplierName: raw.supplierName.trim() }
+                : {}),
               notes: typeof raw.notes === 'string' ? raw.notes : 'Importado via JSON',
               dataOrigin: 'usuario',
               active: raw.active !== false,
@@ -252,6 +266,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
             text,
             existingItems: items,
             targetProfileId,
+            profileMode,
             ambiguityPreference: 'ask',
           });
           setPendingCsvText(text);
@@ -337,6 +352,8 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                 ? 'Prévia e Validação de Importação'
                 : isBiz
                 ? 'Importar / Exportar Insumos e Custos'
+                : isStudent
+                ? 'Importar / Exportar Cesta Estudantil'
                 : 'Importar / Exportar Cesta'}
             </span>
           </div>

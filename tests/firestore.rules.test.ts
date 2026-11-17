@@ -12,9 +12,16 @@ import {
   buildBasketItemWritePayload,
   buildPriceRecordWritePayload,
   buildMonthlyClosureWritePayload,
+  serializeQuestionnaireDataForFirestore,
+  deserializeQuestionnaireDataFromFirestore,
 } from '../src/services/firestore';
+import {
+  createDefaultEstudanteAnswers,
+  createDefaultNegocioAnswers,
+  createDefaultPessoalAnswers,
+} from '../src/config/questionnaires';
 import { handleFirestoreError, OperationType } from '../src/lib/firebase';
-import type { BasketItem, FamilyProfile, MonthlyClosure } from '../src/types';
+import type { BasketItem, FamilyProfile, MonthlyClosure, QuestionnaireDataPayload } from '../src/types';
 
 const ROOT_DIR = path.resolve(process.cwd());
 const RULES_TEXT = fs.readFileSync(path.join(ROOT_DIR, 'firestore.rules'), 'utf-8');
@@ -174,23 +181,124 @@ describe('Segurança Firestore, Blueprint e Guardrails Anti-Dirty-Dozen (IPCA-Ca
     expect('createdAt' in updatePayload).toBe(false);
     expect('isDemo' in updatePayload).toBe(false);
 
-    // Suporte a Modo Negócio e limite de alerta de aumento de preços
+    // Suporte a Modo Negócio, Estudante e limite de alerta de aumento de preços
     const bizProfile: FamilyProfile = {
       ...dirtyProfile,
       profileMode: 'negocio',
       priceAlertThresholdPercent: 12.5,
+      suppliers: ['Moinho Paulista', 'EmbalaSul'],
+      reportedMonthlySurplus: 2400,
+      surplusFrequency: 'as_vezes',
+      estimatedMonthlyExpenses: 5600,
     };
     const bizPayload = buildProfileWritePayload(bizProfile, 'uid_abc', true);
     expect(bizPayload.profileMode).toBe('negocio');
     expect(bizPayload.priceAlertThresholdPercent).toBe(12.5);
+    expect(bizPayload.suppliers).toEqual(['Moinho Paulista', 'EmbalaSul']);
+    expect(bizPayload.reportedMonthlySurplus).toBe(2400);
+    expect(bizPayload.surplusFrequency).toBe('as_vezes');
+    expect(bizPayload.estimatedMonthlyExpenses).toBe(5600);
+
+    const studentProfile: FamilyProfile = {
+      ...dirtyProfile,
+      profileMode: 'estudante',
+      hasNoOwnIncome: true,
+      surplusFrequency: 'sem_renda_propria',
+      onboardingStatus: 'completed',
+      onboardingStep: 5,
+    };
+    const studentPayload = buildProfileWritePayload(studentProfile, 'uid_abc', true);
+    expect(studentPayload.profileMode).toBe('estudante');
+    expect(studentPayload.hasNoOwnIncome).toBe(true);
+    expect(studentPayload.surplusFrequency).toBe('sem_renda_propria');
+    expect(studentPayload.onboardingStatus).toBe('completed');
+    expect(studentPayload.onboardingStep).toBe(5);
   });
 
-  it('Constrói payloads seguros de BasketItem respeitando chaves permitidas em create/update', () => {
+  it('Aceita modalidade estudante em firestore.rules e firebase-blueprint.json e preserva round-trip de questionnaireData', () => {
+    expect(RULES_TEXT).toContain("'estudante'");
+    expect(BLUEPRINT_JSON.entities.FamilyProfile.properties.profileMode.enum).toEqual([
+      'pessoal',
+      'negocio',
+      'estudante',
+    ]);
+    expect(BLUEPRINT_JSON.entities.MonthlyClosure.properties.profileMode.enum).toEqual([
+      'pessoal',
+      'negocio',
+      'estudante',
+    ]);
+
+    const qdPessoal: QuestionnaireDataPayload = {
+      mode: 'pessoal',
+      version: '2.0.0',
+      updatedAt: '2026-11-16T12:00:00.000Z',
+      currentStep: 5,
+      pessoal: {
+        ...createDefaultPessoalAnswers(3),
+        currentMonthlyIncome: 6500,
+        categoryEstimates: { 'Alimentação': 1800, 'Moradia e aluguel': 2100 },
+        itemEntries: [
+          {
+            id: 'q1',
+            name: 'Arroz 5kg',
+            category: 'Alimentação',
+            unit: 'pct 5kg',
+            quantity: 2,
+            currentPrice: 28.9,
+            oldPrice: 24.5,
+          },
+        ],
+      },
+    };
+    const serializedPessoal = serializeQuestionnaireDataForFirestore(qdPessoal);
+    const deserializedPessoal = deserializeQuestionnaireDataFromFirestore(serializedPessoal);
+    expect(deserializedPessoal?.mode).toBe('pessoal');
+    expect(deserializedPessoal?.pessoal?.currentMonthlyIncome).toBe(6500);
+    expect(deserializedPessoal?.pessoal?.categoryEstimates['Alimentação']).toBe(1800);
+    expect(deserializedPessoal?.pessoal?.itemEntries[0]?.name).toBe('Arroz 5kg');
+
+    const qdNegocio: QuestionnaireDataPayload = {
+      mode: 'negocio',
+      version: '2.0.0',
+      updatedAt: '2026-11-16T12:00:00.000Z',
+      currentStep: 5,
+      negocio: {
+        ...createDefaultNegocioAnswers('Padaria Central'),
+        currentMonthlyRevenue: 24000,
+        suppliers: ['Moinho Paulista'],
+      },
+    };
+    const deserializedNegocio = deserializeQuestionnaireDataFromFirestore(
+      serializeQuestionnaireDataForFirestore(qdNegocio)
+    );
+    expect(deserializedNegocio?.negocio?.businessName).toBe('Padaria Central');
+    expect(deserializedNegocio?.negocio?.suppliers).toEqual(['Moinho Paulista']);
+
+    const qdEstudante: QuestionnaireDataPayload = {
+      mode: 'estudante',
+      version: '2.0.0',
+      updatedAt: '2026-11-16T12:00:00.000Z',
+      currentStep: 5,
+      estudante: {
+        ...createDefaultEstudanteAnswers(),
+        hasNoOwnIncome: true,
+        currentMonthlyIncome: null,
+      },
+    };
+    const deserializedEstudante = deserializeQuestionnaireDataFromFirestore(
+      serializeQuestionnaireDataForFirestore(qdEstudante)
+    );
+    expect(deserializedEstudante?.estudante?.hasNoOwnIncome).toBe(true);
+    expect(deserializedEstudante?.estudante?.currentMonthlyIncome).toBeNull();
+  });
+
+  it('Constrói payloads seguros de BasketItem respeitando chaves permitidas em create/update e campos por modalidade', () => {
     const item: BasketItem = {
       id: 'item_01',
       profileId: 'prof_01',
+      profileMode: 'negocio',
       name: 'Café Torrado',
-      group: 'Alimentação e bebidas',
+      group: 'Matéria-prima',
       classification: 'Essencial',
       monthlySpend: -10, // valor inválido negativo deve virar 0
       oldPrice: 18.5,
@@ -198,6 +306,8 @@ describe('Segurança Firestore, Blueprint e Guardrails Anti-Dirty-Dozen (IPCA-Ca
       oldPriceDate: '2024-01-01',
       currentPriceDate: '2025-01-01',
       unit: 'kg',
+      supplierName: 'Torrefação Sul',
+      paidDirectly: false,
       notes: 'X'.repeat(2500),
       active: true,
       isArchived: false,
@@ -208,6 +318,9 @@ describe('Segurança Firestore, Blueprint e Guardrails Anti-Dirty-Dozen (IPCA-Ca
     const createPayload = buildBasketItemWritePayload(item, 'uid_1', true);
     expect(createPayload.userId).toBe('uid_1');
     expect(createPayload.profileId).toBe('prof_01');
+    expect(createPayload.profileMode).toBe('negocio');
+    expect(createPayload.supplierName).toBe('Torrefação Sul');
+    expect(createPayload.paidDirectly).toBe(false);
     expect(createPayload.monthlySpend).toBe(0);
     expect((createPayload.notes as string).length).toBe(BLUEPRINT_LIMITS.NOTES_MAX);
 
@@ -217,6 +330,7 @@ describe('Segurança Firestore, Blueprint e Guardrails Anti-Dirty-Dozen (IPCA-Ca
     expect('profileId' in updatePayload).toBe(false);
     expect('createdAt' in updatePayload).toBe(false);
     expect('description' in updatePayload).toBe(false);
+    expect(updatePayload.supplierName).toBe('Torrefação Sul');
   });
 
   it('Constrói payloads seguros de PriceRecord estritamente alinhados ao Blueprint e às chaves permitidas em firestore.rules', () => {
@@ -232,6 +346,7 @@ describe('Segurança Firestore, Blueprint e Guardrails Anti-Dirty-Dozen (IPCA-Ca
         price: 24.9,
         referenceDate: '2026-11-12',
         unit: 'unidade',
+        supplierName: 'Atacadão Regional',
         dataOrigin: 'usuario',
         source: 'Atualização da Cesta',
       },
@@ -250,6 +365,7 @@ describe('Segurança Firestore, Blueprint e Guardrails Anti-Dirty-Dozen (IPCA-Ca
     expect(payload.userId).toBe('8Zpz6IkKLKSqlnfoMmk7zR4I69f2');
     expect(payload.price).toBe(24.9);
     expect(payload.referenceDate).toBe('2026-11-12');
+    expect(payload.supplierName).toBe('Atacadão Regional');
     expect(payload.dataOrigin).toBe('usuario');
   });
 
@@ -283,26 +399,26 @@ describe('Segurança Firestore, Blueprint e Guardrails Anti-Dirty-Dozen (IPCA-Ca
       profileId: 'prof_1',
       monthKey: '2026-10',
       monthLabel: 'Out/26',
-      profileMode: 'negocio',
-      totalMonthlySpend: 4200,
-      comparableBaseCost: 3900,
-      ipcaCasaPercent: 7.69,
+      profileMode: 'estudante',
+      totalMonthlySpend: 1200,
+      comparableBaseCost: 1120,
+      ipcaCasaPercent: 7.14,
       ipcaOficialPercent: 4.34,
-      spreadPP: 3.35,
-      itemsCount: 12,
-      eligibleItemsCount: 12,
-      monthlyIncome: 8500,
-      monthlyBalance: 4300,
-      topCategory: 'Alimentação e bebidas',
-      topDriverName: 'Farinha de Trigo',
-      topDriverChangePercent: 14.5,
-      priceEffectReais: 300,
+      spreadPP: 2.8,
+      itemsCount: 8,
+      eligibleItemsCount: 8,
+      monthlyIncome: 1500,
+      monthlyBalance: 300,
+      topCategory: 'Alimentação e Lanches',
+      topDriverName: 'Bandeco / Almoço',
+      topDriverChangePercent: 12.5,
+      priceEffectReais: 80,
       quantityEffectReais: 0,
       mixEffectReais: 0,
       ibgeSourceMode: 'live',
       ibgeReferenceMonth: 'Out/26',
       dataOrigin: 'usuario',
-      notes: 'Fechamento da padaria',
+      notes: 'Fechamento estudantil',
       closedAt: '2026-10-31',
     };
 
@@ -313,7 +429,7 @@ describe('Segurança Firestore, Blueprint e Guardrails Anti-Dirty-Dozen (IPCA-Ca
     for (const key of Object.keys(createPayload)) {
       expect(allowedKeys).toContain(key);
     }
-    expect(createPayload.profileMode).toBe('negocio');
+    expect(createPayload.profileMode).toBe('estudante');
     expect(createPayload.monthKey).toBe('2026-10');
 
     const updatePayload = buildMonthlyClosureWritePayload(closure, 'uid_1', false);

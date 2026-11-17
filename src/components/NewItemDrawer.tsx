@@ -19,6 +19,7 @@ interface NewItemDrawerProps {
   totalMonthlySpend: number;
   groups?: ConsumptionGroup[];
   profileMode?: ProfileMode;
+  suppliers?: string[];
 }
 
 type EntryMode = 'consumo' | 'fixo';
@@ -31,14 +32,20 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
   totalMonthlySpend,
   groups: propGroups,
   profileMode = 'pessoal',
+  suppliers = [],
 }) => {
   const modeCopy = getProfileModeCopy(profileMode);
   const isBiz = modeCopy.mode === 'negocio';
+  const isStudent = modeCopy.mode === 'estudante';
+
+  const resolvedInitialGroups = propGroups && propGroups.length > 0
+    ? propGroups
+    : StorageService.getGroups(modeCopy.mode);
 
   const [entryMode, setEntryMode] = useState<EntryMode>('consumo');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [group, setGroup] = useState('Alimentação e bebidas');
+  const [group, setGroup] = useState(resolvedInitialGroups[0]?.name || 'Alimentação e bebidas');
   const [classification, setClassification] = useState<ItemClassification>('Essencial');
 
   // Modo Consumo: Preço Unitário x Quantidade x Frequência
@@ -47,6 +54,10 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
   const [quantity, setQuantity] = useState<number | ''>(1);
   const [frequency, setFrequency] = useState<ConsumptionFrequency>('mensal');
   const [unit, setUnit] = useState('unidade');
+
+  // Campos específicos por modalidade
+  const [supplierName, setSupplierName] = useState('');
+  const [paidDirectly, setPaidDirectly] = useState(true);
 
   // Permite ajuste manual explícito apenas quando realmente diferente do cálculo automático
   const [manualSpendOverride, setManualSpendOverride] = useState<number | ''>('');
@@ -63,10 +74,12 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [saving, setSaving] = useState(false);
-  const [groups, setGroups] = useState<ConsumptionGroup[]>(() => propGroups ?? StorageService.getGroups());
+  const [groups, setGroups] = useState<ConsumptionGroup[]>(() => resolvedInitialGroups);
 
   useEffect(() => {
-    setGroups(propGroups ?? StorageService.getGroups());
+    const activeGroups =
+      propGroups && propGroups.length > 0 ? propGroups : StorageService.getGroups(modeCopy.mode);
+    setGroups(activeGroups);
     const defaultOldDate = getMonthsAgoIsoDate(12);
     const defaultCurrentDate = getTodayIsoDate();
 
@@ -79,10 +92,11 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
       setCurrentPriceDate(editingItem.currentPriceDate || defaultCurrentDate);
       setUnit(editingItem.unit || 'unidade');
       setNotes(editingItem.notes || '');
+      setSupplierName(editingItem.supplierName || '');
+      setPaidDirectly(editingItem.paidDirectly !== false);
 
       const isFixed =
         editingItem.unit === 'mensalidade' ||
-        editingItem.group === 'Habitação' ||
         (editingItem.consumptionFrequency === 'mensal' && !editingItem.quantity);
 
       if (isFixed) {
@@ -120,13 +134,15 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
       setEntryMode('consumo');
       setName('');
       setDescription('');
-      setGroup('Alimentação e bebidas');
+      setGroup(activeGroups[0]?.name || 'Alimentação e bebidas');
       setClassification('Essencial');
       setCurrentPrice('');
       setOldPrice('');
       setQuantity(1);
       setFrequency('mensal');
       setUnit('unidade');
+      setSupplierName('');
+      setPaidDirectly(true);
       setFixedCurrentSpend('');
       setFixedOldSpend('');
       setManualSpendOverride('');
@@ -138,7 +154,7 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
     }
     setErrorMsg('');
     setSaving(false);
-  }, [editingItem, isOpen, propGroups]);
+  }, [editingItem, isOpen, propGroups, modeCopy.mode]);
 
   // Multiplicador centralizado em src/services/units.ts (convenção explícita de 30 dias e ÷ 12 para anual)
   const freqInfo = frequencyToMonthlyMultiplier(frequency);
@@ -221,6 +237,7 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
     try {
       await onSave({
         id: editingItem?.id,
+        profileMode: modeCopy.mode,
         name: name.trim(),
         description: description.trim() || undefined,
         group,
@@ -234,6 +251,8 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
         quantity: entryMode === 'fixo' ? 1 : numQty,
         consumptionFrequency: entryMode === 'fixo' ? 'mensal' : frequency,
         expenseNature: entryMode === 'fixo' ? 'Fixa' : 'Variável',
+        ...(isBiz && supplierName.trim() ? { supplierName: supplierName.trim() } : {}),
+        ...(isStudent ? { paidDirectly } : {}),
         notes: notes.trim(),
         active: true,
       });
@@ -261,9 +280,13 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
               {editingItem
                 ? isBiz
                   ? 'Editar Insumo ou Custo'
+                  : isStudent
+                  ? 'Editar Gasto Estudantil'
                   : 'Editar Gasto da Cesta'
                 : isBiz
                 ? 'Novo Insumo ou Custo'
+                : isStudent
+                ? 'Novo Gasto Estudantil'
                 : 'Novo Gasto ou Produto'}
             </span>
             <span className="text-xs text-[#45464d] mt-0.5">
@@ -304,7 +327,9 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
                 }`}
               >
                 <span className="material-symbols-outlined text-[16px]">shopping_cart</span>
-                <span>{isBiz ? 'Insumo (Preço × Qtd)' : 'Produto (Preço × Qtd)'}</span>
+                <span>
+                  {isBiz ? 'Insumo (Preço × Qtd)' : isStudent ? 'Item / Lanche (Preço × Qtd)' : 'Produto (Preço × Qtd)'}
+                </span>
               </button>
               <button
                 type="button"
@@ -316,7 +341,7 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
                 }`}
               >
                 <span className="material-symbols-outlined text-[16px]">receipt_long</span>
-                <span>{isBiz ? 'Conta Fixa da Operação' : 'Conta ou Mensalidade'}</span>
+                <span>{isBiz ? 'Conta Fixa da Operação' : isStudent ? 'Curso / Mensalidade' : 'Conta ou Mensalidade'}</span>
               </button>
             </div>
           </div>
@@ -327,9 +352,13 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
               {entryMode === 'consumo'
                 ? isBiz
                   ? 'Qual insumo ou material? *'
+                  : isStudent
+                  ? 'O que você costuma pagar ou comprar? *'
                   : 'O que você compra? *'
                 : isBiz
                 ? 'Qual é o custo fixo da operação? *'
+                : isStudent
+                ? 'Qual é o curso, mensalidade ou conta? *'
                 : 'Qual é a conta ou despesa? *'}
             </label>
             <input
@@ -341,14 +370,58 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
                 entryMode === 'consumo'
                   ? isBiz
                     ? 'Ex: Farinha de Trigo 25kg, Manteiga, Café, Embalagem...'
+                    : isStudent
+                    ? 'Ex: Lanche no campus, Passagem, Apostila, Caderno...'
                     : 'Ex: Café em Grão 1kg, Leite, Carne Moída, Gasolina...'
                   : isBiz
                   ? 'Ex: Aluguel do ponto, Energia elétrica, Internet, Contador...'
+                  : isStudent
+                  ? 'Ex: Mensalidade da faculdade, Internet móvel, República...'
                   : 'Ex: Aluguel, Condomínio, Internet, Escola, Plano de Saúde...'
               }
               className="h-10 px-3 bg-[#eff4ff] rounded-lg text-[#0b1c30] text-sm focus:outline-none focus:bg-[#ffffff] focus:ring-1 focus:ring-[#006a61] transition-all"
             />
           </div>
+
+          {isBiz && (
+            <div className="flex flex-col gap-1">
+              <label className="font-mono text-xs font-semibold text-[#0b1c30] uppercase tracking-wider">
+                Fornecedor (Opcional)
+              </label>
+              <input
+                type="text"
+                list="drawer-suppliers-list"
+                value={supplierName}
+                onChange={(e) => setSupplierName(e.target.value)}
+                placeholder="Ex: Moinho Paulista, Distribuidora Central..."
+                className="h-10 px-3 bg-[#eff4ff] rounded-lg text-[#0b1c30] text-sm focus:outline-none focus:bg-[#ffffff] focus:ring-1 focus:ring-[#006a61] transition-all"
+              />
+              {suppliers.length > 0 && (
+                <datalist id="drawer-suppliers-list">
+                  {suppliers.map((sup) => (
+                    <option key={sup} value={sup} />
+                  ))}
+                </datalist>
+              )}
+            </div>
+          )}
+
+          {isStudent && (
+            <label className="flex items-start gap-2.5 p-3 rounded-xl bg-[#f8faff] border border-[#e5eeff] text-xs text-[#0b1c30] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={paidDirectly}
+                onChange={(e) => setPaidDirectly(e.target.checked)}
+                className="mt-0.5 accent-[#006a61]"
+              />
+              <span>
+                <strong>Pago diretamente por mim</strong>
+                <span className="block text-[11px] text-[#45464d]">
+                  Desmarque se este gasto for coberto diretamente por familiares ou bolsa institucional.
+                </span>
+              </span>
+            </label>
+          )}
 
           {/* Categoria IBGE */}
           <div className="flex flex-col gap-1">
@@ -593,7 +666,13 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
                 }`}
               >
                 <span className="material-symbols-outlined text-[16px]">verified</span>
-                <span>{isBiz ? 'Essencial (produção/base)' : 'Essencial (básico da casa)'}</span>
+                <span>
+                  {isBiz
+                    ? 'Essencial (produção/base)'
+                    : isStudent
+                    ? 'Essencial (rotina de estudos)'
+                    : 'Essencial (básico da casa)'}
+                </span>
               </button>
               <button
                 type="button"
@@ -605,7 +684,13 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
                 }`}
               >
                 <span className="material-symbols-outlined text-[16px]">star</span>
-                <span>{isBiz ? 'Opcional / Complementar' : 'Supérfluo / Opcional'}</span>
+                <span>
+                  {isBiz
+                    ? 'Opcional / Complementar'
+                    : isStudent
+                    ? 'Opcional / Lazer'
+                    : 'Supérfluo / Opcional'}
+                </span>
               </button>
             </div>
           </div>
@@ -661,7 +746,9 @@ export const NewItemDrawer: React.FC<NewItemDrawerProps> = ({
                     onChange={(e) => setNotes(e.target.value)}
                     placeholder={
                       isBiz
-                        ? 'Ex: Fornecedor habitual, marca ou condição de entrega...'
+                        ? 'Ex: Marca, condição de entrega ou observação do fornecedor...'
+                        : isStudent
+                        ? 'Ex: Cantina do bloco B, desconto de meia-entrada...'
                         : 'Ex: Marca habitual comprada no mercado X...'
                     }
                     className="p-2.5 bg-[#ffffff] rounded-lg text-[#0b1c30] text-xs border border-[#c6c6cd]/30 resize-none"

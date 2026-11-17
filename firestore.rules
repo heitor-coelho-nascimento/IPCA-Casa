@@ -43,6 +43,202 @@ service cloud.firestore {
       return val in ['usuario', 'oficial_ibge', 'demonstrativo', 'estimado', 'simulado', 'cache'];
     }
 
+    function isValidProfileMode(val) {
+      return val in ['pessoal', 'negocio', 'estudante'];
+    }
+
+    function isValidSurplusFrequency(val) {
+      return val in ['quase_sempre', 'as_vezes', 'raramente', 'nunca', 'sem_renda_propria', 'nao_sei'];
+    }
+
+    function isStringList(val, maxSize) {
+      return val is list && val.size() <= maxSize && (val.size() == 0 || val[0] is string);
+    }
+
+    function isNumberList(val, maxSize) {
+      return val is list && val.size() <= maxSize && (val.size() == 0 || (val[0] is int || val[0] is float));
+    }
+
+    function isBoolList(val, maxSize) {
+      return val is list && val.size() <= maxSize && (val.size() == 0 || val[0] is bool);
+    }
+
+    function isValidDashboardPreferences(pref) {
+      return pref is map &&
+        pref.keys().hasAll(['basketSetupChoice', 'compareIncomeVsInflation', 'trackMonthlyBudgetImpact']) &&
+        pref.keys().hasOnly(['basketSetupChoice', 'compareIncomeVsInflation', 'trackMonthlyBudgetImpact', 'trackCostDrivers']) &&
+        pref.basketSetupChoice in ['demonstracao', 'propria'] &&
+        pref.compareIncomeVsInflation is bool &&
+        pref.trackMonthlyBudgetImpact is bool &&
+        (!('trackCostDrivers' in pref) || pref.trackCostDrivers is bool);
+    }
+
+    function isValidQuestionnaireDraftArrays(q) {
+      return (!('itemDraftIds' in q) || isStringList(q.itemDraftIds, 60)) &&
+        (!('itemDraftNames' in q) || isStringList(q.itemDraftNames, 60)) &&
+        (!('itemDraftCategories' in q) || isStringList(q.itemDraftCategories, 60)) &&
+        (!('itemDraftUnits' in q) || isStringList(q.itemDraftUnits, 60)) &&
+        (!('itemDraftQuantities' in q) || isNumberList(q.itemDraftQuantities, 60)) &&
+        (!('itemDraftCurrentPrices' in q) || isNumberList(q.itemDraftCurrentPrices, 60)) &&
+        (!('itemDraftOldPrices' in q) || isNumberList(q.itemDraftOldPrices, 60)) &&
+        (!('itemDraftSuppliers' in q) || isStringList(q.itemDraftSuppliers, 60)) &&
+        (!('itemDraftMajorDrivers' in q) || isBoolList(q.itemDraftMajorDrivers, 60)) &&
+        (!('itemDraftSharePercents' in q) || isNumberList(q.itemDraftSharePercents, 60));
+    }
+
+    function isValidPessoalQuestionnaire(q) {
+      return q is map &&
+        q.keys().hasOnly([
+          'membersCount', 'contributorsCount', 'dependentsCount', 'primaryIncomeComposition',
+          'currentMonthlyIncome', 'unknownCurrentIncome', 'incomeOneYearAgo', 'unknownIncomeOneYearAgo',
+          'incomePredictability', 'incomeTrend12M', 'incomeEarnersCount',
+          'surplusFrequency', 'reportedMonthlySurplus', 'shortfallBehavior', 'estimatedMonthlyExpenses',
+          'selectedExpenseCategories', 'categoryEstimateNames', 'categoryEstimateValues', 'expenseStability',
+          'selectedRegularProducts', 'shoppingFrequency', 'knowsOldPrices', 'majorBudgetDrivers',
+          'itemDraftIds', 'itemDraftNames', 'itemDraftCategories', 'itemDraftUnits',
+          'itemDraftQuantities', 'itemDraftCurrentPrices', 'itemDraftOldPrices',
+          'itemDraftSuppliers', 'itemDraftMajorDrivers', 'itemDraftSharePercents',
+          'basketSetupChoice', 'compareIncomeVsInflation', 'trackMonthlyBudgetImpact'
+        ]) &&
+        (!('membersCount' in q) || (q.membersCount is int && q.membersCount >= 1 && q.membersCount <= 50)) &&
+        (!('contributorsCount' in q) || (q.contributorsCount is int && q.contributorsCount >= 0 && q.contributorsCount <= 50)) &&
+        (!('dependentsCount' in q) || (q.dependentsCount is int && q.dependentsCount >= 0 && q.dependentsCount <= 50)) &&
+        (!('primaryIncomeComposition' in q) || isBoundedString(q.primaryIncomeComposition, 0, 120)) &&
+        (!('currentMonthlyIncome' in q) || isNonNegativeNumber(q.currentMonthlyIncome)) &&
+        (!('unknownCurrentIncome' in q) || q.unknownCurrentIncome is bool) &&
+        (!('incomeOneYearAgo' in q) || isNonNegativeNumber(q.incomeOneYearAgo)) &&
+        (!('unknownIncomeOneYearAgo' in q) || q.unknownIncomeOneYearAgo is bool) &&
+        (!('incomePredictability' in q) || isBoundedString(q.incomePredictability, 0, 120)) &&
+        (!('incomeTrend12M' in q) || isBoundedString(q.incomeTrend12M, 0, 120)) &&
+        (!('incomeEarnersCount' in q) || (q.incomeEarnersCount is int && q.incomeEarnersCount >= 0 && q.incomeEarnersCount <= 50)) &&
+        (!('surplusFrequency' in q) || isValidSurplusFrequency(q.surplusFrequency)) &&
+        (!('reportedMonthlySurplus' in q) || isNonNegativeNumber(q.reportedMonthlySurplus)) &&
+        (!('shortfallBehavior' in q) || isBoundedString(q.shortfallBehavior, 0, 160)) &&
+        (!('estimatedMonthlyExpenses' in q) || isNonNegativeNumber(q.estimatedMonthlyExpenses)) &&
+        (!('selectedExpenseCategories' in q) || isStringList(q.selectedExpenseCategories, 40)) &&
+        (!('categoryEstimateNames' in q) || isStringList(q.categoryEstimateNames, 40)) &&
+        (!('categoryEstimateValues' in q) || isNumberList(q.categoryEstimateValues, 40)) &&
+        (!('expenseStability' in q) || isBoundedString(q.expenseStability, 0, 120)) &&
+        (!('selectedRegularProducts' in q) || isStringList(q.selectedRegularProducts, 60)) &&
+        (!('shoppingFrequency' in q) || isBoundedString(q.shoppingFrequency, 0, 120)) &&
+        (!('knowsOldPrices' in q) || isBoundedString(q.knowsOldPrices, 0, 60)) &&
+        (!('majorBudgetDrivers' in q) || isStringList(q.majorBudgetDrivers, 60)) &&
+        isValidQuestionnaireDraftArrays(q) &&
+        (!('basketSetupChoice' in q) || q.basketSetupChoice in ['demonstracao', 'propria']) &&
+        (!('compareIncomeVsInflation' in q) || q.compareIncomeVsInflation is bool) &&
+        (!('trackMonthlyBudgetImpact' in q) || q.trackMonthlyBudgetImpact is bool);
+    }
+
+    function isValidNegocioQuestionnaire(q) {
+      return q is map &&
+        q.keys().hasOnly([
+          'businessName', 'businessSegment', 'businessActivityDescription', 'businessSize',
+          'workersCount', 'operatingTenure',
+          'currentMonthlyRevenue', 'unknownCurrentRevenue', 'revenueOneYearAgo', 'unknownRevenueOneYearAgo',
+          'revenuePattern', 'revenueTrend12M', 'primaryRevenueSource',
+          'estimatedMonthlyOperatingSpend', 'surplusFrequency', 'reportedMonthlySurplus', 'shortfallReason',
+          'selectedCostCategories', 'categoryEstimateNames', 'categoryEstimateValues',
+          'fixedCostCategories', 'variableCostCategories', 'operationalCostsIncreased12M', 'operationalCostIncreaseAmount',
+          'knowsOldPrices', 'buysFromSameSuppliers', 'wantsToRegisterSuppliers', 'suppliers', 'purchaseFrequency',
+          'itemDraftIds', 'itemDraftNames', 'itemDraftCategories', 'itemDraftUnits',
+          'itemDraftQuantities', 'itemDraftCurrentPrices', 'itemDraftOldPrices',
+          'itemDraftSuppliers', 'itemDraftMajorDrivers', 'itemDraftSharePercents',
+          'basketSetupChoice', 'compareCostsVsRevenue', 'trackCostDrivers'
+        ]) &&
+        (!('businessName' in q) || isBoundedString(q.businessName, 0, 120)) &&
+        (!('businessSegment' in q) || isBoundedString(q.businessSegment, 0, 120)) &&
+        (!('businessActivityDescription' in q) || isBoundedString(q.businessActivityDescription, 0, 300)) &&
+        (!('businessSize' in q) || isBoundedString(q.businessSize, 0, 120)) &&
+        (!('workersCount' in q) || (q.workersCount is int && q.workersCount >= 1 && q.workersCount <= 500)) &&
+        (!('operatingTenure' in q) || isBoundedString(q.operatingTenure, 0, 120)) &&
+        (!('currentMonthlyRevenue' in q) || isNonNegativeNumber(q.currentMonthlyRevenue)) &&
+        (!('unknownCurrentRevenue' in q) || q.unknownCurrentRevenue is bool) &&
+        (!('revenueOneYearAgo' in q) || isNonNegativeNumber(q.revenueOneYearAgo)) &&
+        (!('unknownRevenueOneYearAgo' in q) || q.unknownRevenueOneYearAgo is bool) &&
+        (!('revenuePattern' in q) || isBoundedString(q.revenuePattern, 0, 120)) &&
+        (!('revenueTrend12M' in q) || isBoundedString(q.revenueTrend12M, 0, 120)) &&
+        (!('primaryRevenueSource' in q) || isBoundedString(q.primaryRevenueSource, 0, 120)) &&
+        (!('estimatedMonthlyOperatingSpend' in q) || isNonNegativeNumber(q.estimatedMonthlyOperatingSpend)) &&
+        (!('surplusFrequency' in q) || isValidSurplusFrequency(q.surplusFrequency)) &&
+        (!('reportedMonthlySurplus' in q) || isNonNegativeNumber(q.reportedMonthlySurplus)) &&
+        (!('shortfallReason' in q) || isBoundedString(q.shortfallReason, 0, 160)) &&
+        (!('selectedCostCategories' in q) || isStringList(q.selectedCostCategories, 40)) &&
+        (!('categoryEstimateNames' in q) || isStringList(q.categoryEstimateNames, 40)) &&
+        (!('categoryEstimateValues' in q) || isNumberList(q.categoryEstimateValues, 40)) &&
+        (!('fixedCostCategories' in q) || isStringList(q.fixedCostCategories, 40)) &&
+        (!('variableCostCategories' in q) || isStringList(q.variableCostCategories, 40)) &&
+        (!('operationalCostsIncreased12M' in q) || isBoundedString(q.operationalCostsIncreased12M, 0, 60)) &&
+        (!('operationalCostIncreaseAmount' in q) || isBoundedString(q.operationalCostIncreaseAmount, 0, 120)) &&
+        (!('knowsOldPrices' in q) || isBoundedString(q.knowsOldPrices, 0, 60)) &&
+        (!('buysFromSameSuppliers' in q) || isBoundedString(q.buysFromSameSuppliers, 0, 60)) &&
+        (!('wantsToRegisterSuppliers' in q) || q.wantsToRegisterSuppliers is bool) &&
+        (!('suppliers' in q) || isStringList(q.suppliers, 40)) &&
+        (!('purchaseFrequency' in q) || isBoundedString(q.purchaseFrequency, 0, 120)) &&
+        isValidQuestionnaireDraftArrays(q) &&
+        (!('basketSetupChoice' in q) || q.basketSetupChoice in ['demonstracao', 'propria']) &&
+        (!('compareCostsVsRevenue' in q) || q.compareCostsVsRevenue is bool) &&
+        (!('trackCostDrivers' in q) || q.trackCostDrivers is bool);
+    }
+
+    function isValidEstudanteQuestionnaire(q) {
+      return q is map &&
+        q.keys().hasOnly([
+          'educationLevel', 'institutionType', 'studyPeriod', 'livingSituation',
+          'hasNoOwnIncome', 'currentMonthlyIncome', 'incomeSources', 'incomeOneYearAgo',
+          'incomeOneYearAgoStatus', 'incomePattern', 'incomeTrend12M',
+          'estimatedMonthlyExpenses', 'surplusFrequency', 'reportedMonthlySurplus',
+          'selectedExpenseCategories', 'categoryEstimateNames', 'categoryEstimateValues',
+          'directPaidCategories', 'hasRecurringExpenses', 'expensesIncreased12M',
+          'selectedConsumptionCategories', 'knowsOldPrices', 'majorBudgetDrivers', 'purchaseFrequency',
+          'itemDraftIds', 'itemDraftNames', 'itemDraftCategories', 'itemDraftUnits',
+          'itemDraftQuantities', 'itemDraftCurrentPrices', 'itemDraftOldPrices',
+          'itemDraftSuppliers', 'itemDraftMajorDrivers', 'itemDraftSharePercents',
+          'basketSetupChoice', 'compareIncomeVsInflation', 'trackMonthlyBudgetImpact'
+        ]) &&
+        (!('educationLevel' in q) || isBoundedString(q.educationLevel, 0, 120)) &&
+        (!('institutionType' in q) || isBoundedString(q.institutionType, 0, 120)) &&
+        (!('studyPeriod' in q) || isBoundedString(q.studyPeriod, 0, 120)) &&
+        (!('livingSituation' in q) || isBoundedString(q.livingSituation, 0, 120)) &&
+        (!('hasNoOwnIncome' in q) || q.hasNoOwnIncome is bool) &&
+        (!('currentMonthlyIncome' in q) || isNonNegativeNumber(q.currentMonthlyIncome)) &&
+        (!('incomeSources' in q) || isStringList(q.incomeSources, 40)) &&
+        (!('incomeOneYearAgo' in q) || isNonNegativeNumber(q.incomeOneYearAgo)) &&
+        (!('incomeOneYearAgoStatus' in q) || q.incomeOneYearAgoStatus in ['informado', 'nao_sei', 'nao_possuia_renda']) &&
+        (!('incomePattern' in q) || isBoundedString(q.incomePattern, 0, 120)) &&
+        (!('incomeTrend12M' in q) || isBoundedString(q.incomeTrend12M, 0, 120)) &&
+        (!('estimatedMonthlyExpenses' in q) || isNonNegativeNumber(q.estimatedMonthlyExpenses)) &&
+        (!('surplusFrequency' in q) || isValidSurplusFrequency(q.surplusFrequency)) &&
+        (!('reportedMonthlySurplus' in q) || isNonNegativeNumber(q.reportedMonthlySurplus)) &&
+        (!('selectedExpenseCategories' in q) || isStringList(q.selectedExpenseCategories, 40)) &&
+        (!('categoryEstimateNames' in q) || isStringList(q.categoryEstimateNames, 40)) &&
+        (!('categoryEstimateValues' in q) || isNumberList(q.categoryEstimateValues, 40)) &&
+        (!('directPaidCategories' in q) || isStringList(q.directPaidCategories, 40)) &&
+        (!('hasRecurringExpenses' in q) || q.hasRecurringExpenses is bool) &&
+        (!('expensesIncreased12M' in q) || isBoundedString(q.expensesIncreased12M, 0, 60)) &&
+        (!('selectedConsumptionCategories' in q) || isStringList(q.selectedConsumptionCategories, 40)) &&
+        (!('knowsOldPrices' in q) || isBoundedString(q.knowsOldPrices, 0, 60)) &&
+        (!('majorBudgetDrivers' in q) || isStringList(q.majorBudgetDrivers, 60)) &&
+        (!('purchaseFrequency' in q) || isBoundedString(q.purchaseFrequency, 0, 120)) &&
+        isValidQuestionnaireDraftArrays(q) &&
+        (!('basketSetupChoice' in q) || q.basketSetupChoice in ['demonstracao', 'propria']) &&
+        (!('compareIncomeVsInflation' in q) || q.compareIncomeVsInflation is bool) &&
+        (!('trackMonthlyBudgetImpact' in q) || q.trackMonthlyBudgetImpact is bool);
+    }
+
+    function isValidQuestionnaireData(qd) {
+      return qd is map &&
+        qd.keys().hasAll(['mode', 'version', 'updatedAt']) &&
+        qd.keys().hasOnly(['mode', 'version', 'completedAt', 'updatedAt', 'currentStep', 'pessoal', 'negocio', 'estudante']) &&
+        isValidProfileMode(qd.mode) &&
+        isBoundedString(qd.version, 1, 40) &&
+        (!('completedAt' in qd) || isBoundedString(qd.completedAt, 0, 40)) &&
+        isBoundedString(qd.updatedAt, 1, 40) &&
+        (!('currentStep' in qd) || (qd.currentStep is int && qd.currentStep >= 1 && qd.currentStep <= 5)) &&
+        (!('pessoal' in qd) || isValidPessoalQuestionnaire(qd.pessoal)) &&
+        (!('negocio' in qd) || isValidNegocioQuestionnaire(qd.negocio)) &&
+        (!('estudante' in qd) || isValidEstudanteQuestionnaire(qd.estudante));
+    }
+
     function userExists(userId) {
       return exists(/databases/$(database)/documents/users/$(userId));
     }
@@ -92,21 +288,35 @@ service cloud.firestore {
           'id', 'userId', 'name', 'membersCount', 'referenceRegion', 'currency', 'isDemo', 'createdAt', 'updatedAt'
         ]) &&
         data.keys().hasOnly([
-          'id', 'userId', 'name', 'profileMode', 'priceAlertThresholdPercent',
-          'membersCount', 'referenceRegion', 'currency', 'isDemo', 'createdAt', 'updatedAt'
+          'id', 'userId', 'name', 'profileMode', 'onboardingStatus', 'onboardingStep',
+          'onboardingCompletedAt', 'questionnaireVersion', 'priceAlertThresholdPercent',
+          'membersCount', 'referenceRegion', 'currency', 'hasNoOwnIncome',
+          'reportedMonthlySurplus', 'surplusFrequency', 'estimatedMonthlyExpenses',
+          'suppliers', 'dashboardPreferences', 'questionnaireData', 'isDemo', 'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.id) &&
         data.id == profileId &&
         data.userId == request.auth.uid &&
         data.userId == userId &&
         isBoundedString(data.name, 1, 120) &&
-        (!('profileMode' in data) || data.profileMode in ['pessoal', 'negocio']) &&
+        (!('profileMode' in data) || isValidProfileMode(data.profileMode)) &&
+        (!('onboardingStatus' in data) || data.onboardingStatus in ['not_started', 'in_progress', 'completed', 'skipped']) &&
+        (!('onboardingStep' in data) || (data.onboardingStep is int && data.onboardingStep >= 1 && data.onboardingStep <= 5)) &&
+        (!('onboardingCompletedAt' in data) || isBoundedString(data.onboardingCompletedAt, 0, 40)) &&
+        (!('questionnaireVersion' in data) || isBoundedString(data.questionnaireVersion, 0, 40)) &&
         (!('priceAlertThresholdPercent' in data) || isBoundedNumber(data.priceAlertThresholdPercent, 0.1, 500)) &&
         data.membersCount is int &&
         data.membersCount >= 1 &&
         data.membersCount <= 50 &&
         isBoundedString(data.referenceRegion, 1, 120) &&
         isBoundedString(data.currency, 1, 10) &&
+        (!('hasNoOwnIncome' in data) || data.hasNoOwnIncome is bool) &&
+        (!('reportedMonthlySurplus' in data) || isNonNegativeNumber(data.reportedMonthlySurplus)) &&
+        (!('surplusFrequency' in data) || isValidSurplusFrequency(data.surplusFrequency)) &&
+        (!('estimatedMonthlyExpenses' in data) || isNonNegativeNumber(data.estimatedMonthlyExpenses)) &&
+        (!('suppliers' in data) || isStringList(data.suppliers, 40)) &&
+        (!('dashboardPreferences' in data) || isValidDashboardPreferences(data.dashboardPreferences)) &&
+        (!('questionnaireData' in data) || isValidQuestionnaireData(data.questionnaireData)) &&
         data.isDemo is bool &&
         data.isDemo == false &&
         data.createdAt is timestamp &&
@@ -120,11 +330,12 @@ service cloud.firestore {
           'unit', 'active', 'isArchived', 'createdAt', 'updatedAt'
         ]) &&
         data.keys().hasOnly([
-          'id', 'userId', 'profileId', 'name', 'description', 'group', 'subcategory', 'classification',
+          'id', 'userId', 'profileId', 'profileMode', 'name', 'description', 'group', 'subcategory', 'classification',
           'monthlySpend', 'oldPrice', 'currentPrice', 'oldPriceDate', 'currentPriceDate',
           'unit', 'quantity', 'baseQuantity', 'packageSize', 'packageUnit',
           'consumptionFrequency', 'frequencyDays', 'expenseNature', 'recurrenceType',
-          'accountingType', 'comparabilityBroken', 'comparabilityReason', 'dataOrigin',
+          'accountingType', 'supplierName', 'paidDirectly',
+          'comparabilityBroken', 'comparabilityReason', 'dataOrigin',
           'notes', 'active', 'isArchived', 'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.id) &&
@@ -132,11 +343,12 @@ service cloud.firestore {
         data.userId == request.auth.uid &&
         data.userId == userId &&
         isValidId(data.profileId) &&
+        (!('profileMode' in data) || isValidProfileMode(data.profileMode)) &&
         isBoundedString(data.name, 1, 200) &&
         (!('description' in data) || isBoundedString(data.description, 0, 500)) &&
         isBoundedString(data.group, 1, 120) &&
         (!('subcategory' in data) || isBoundedString(data.subcategory, 0, 120)) &&
-        data.classification in ['Essencial', 'Supérfluo', 'Não classificado'] &&
+        data.classification in ['Essencial', 'Supérfluo', 'Discricionário', 'Não classificado'] &&
         isNonNegativeNumber(data.monthlySpend) &&
         isNonNegativeNumber(data.oldPrice) &&
         isNonNegativeNumber(data.currentPrice) &&
@@ -152,6 +364,8 @@ service cloud.firestore {
         (!('expenseNature' in data) || data.expenseNature in ['Fixa', 'Variável']) &&
         (!('recurrenceType' in data) || data.recurrenceType in ['Recorrente', 'Eventual']) &&
         (!('accountingType' in data) || data.accountingType in ['Consumo', 'Amortização de dívida', 'Aplicação financeira', 'Transferência']) &&
+        (!('supplierName' in data) || isBoundedString(data.supplierName, 0, 160)) &&
+        (!('paidDirectly' in data) || data.paidDirectly is bool) &&
         (!('comparabilityBroken' in data) || data.comparabilityBroken is bool) &&
         (!('comparabilityReason' in data) || isBoundedString(data.comparabilityReason, 0, 250)) &&
         (!('dataOrigin' in data) || isValidDataOrigin(data.dataOrigin)) &&
@@ -166,7 +380,7 @@ service cloud.firestore {
       return data.keys().hasAll(['id', 'userId', 'itemId', 'price', 'referenceDate', 'createdAt', 'updatedAt']) &&
         data.keys().hasOnly([
           'id', 'userId', 'profileId', 'itemId', 'price', 'referenceDate', 'unit', 'source',
-          'origin', 'region', 'packageSize', 'packageUnit', 'dataOrigin', 'comparabilityBroken',
+          'origin', 'region', 'supplierName', 'packageSize', 'packageUnit', 'dataOrigin', 'comparabilityBroken',
           'notes', 'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.id) &&
@@ -181,6 +395,7 @@ service cloud.firestore {
         (!('source' in data) || isBoundedString(data.source, 0, 255)) &&
         (!('origin' in data) || isBoundedString(data.origin, 0, 255)) &&
         (!('region' in data) || isBoundedString(data.region, 0, 120)) &&
+        (!('supplierName' in data) || isBoundedString(data.supplierName, 0, 160)) &&
         (!('packageSize' in data) || isNonNegativeNumber(data.packageSize)) &&
         (!('packageUnit' in data) || isBoundedString(data.packageUnit, 0, 40)) &&
         (!('dataOrigin' in data) || isValidDataOrigin(data.dataOrigin)) &&
@@ -193,7 +408,8 @@ service cloud.firestore {
     function isValidIncomeRecord(data, userId, incomeId) {
       return data.keys().hasAll(['id', 'userId', 'profileId', 'referenceDate', 'nominalIncome', 'createdAt', 'updatedAt']) &&
         data.keys().hasOnly([
-          'id', 'userId', 'profileId', 'referenceDate', 'nominalIncome', 'source', 'notes',
+          'id', 'userId', 'profileId', 'profileMode', 'referenceDate', 'nominalIncome', 'source',
+          'incomeRole', 'incomePredictability', 'dataOrigin', 'notes',
           'grossIncome', 'netIncome', 'incomeType', 'debtObligations', 'financialApplications',
           'transfers', 'availableReserve', 'workingDaysPerMonth',
           'createdAt', 'updatedAt'
@@ -203,9 +419,13 @@ service cloud.firestore {
         data.userId == request.auth.uid &&
         data.userId == userId &&
         isValidId(data.profileId) &&
+        (!('profileMode' in data) || isValidProfileMode(data.profileMode)) &&
         isBoundedString(data.referenceDate, 1, 32) &&
         isNonNegativeNumber(data.nominalIncome) &&
         (!('source' in data) || isBoundedString(data.source, 0, 255)) &&
+        (!('incomeRole' in data) || data.incomeRole in ['renda_familiar', 'faturamento_negocio', 'renda_estudantil']) &&
+        (!('incomePredictability' in data) || data.incomePredictability in ['fixa', 'variavel', 'sazonal', 'mista', 'sem_renda_propria']) &&
+        (!('dataOrigin' in data) || isValidDataOrigin(data.dataOrigin)) &&
         (!('notes' in data) || isBoundedString(data.notes, 0, 500)) &&
         (!('grossIncome' in data) || isNonNegativeNumber(data.grossIncome)) &&
         (!('netIncome' in data) || isNonNegativeNumber(data.netIncome)) &&
@@ -222,7 +442,7 @@ service cloud.firestore {
     function isValidConsumptionGroup(data, userId, groupId) {
       return data.keys().hasAll(['id', 'userId', 'name', 'description', 'color', 'icon', 'createdAt', 'updatedAt']) &&
         data.keys().hasOnly([
-          'id', 'userId', 'name', 'description', 'color', 'icon', 'nationalWeightIBGE', 'isCustom', 'active', 'createdAt', 'updatedAt'
+          'id', 'userId', 'name', 'description', 'color', 'icon', 'profileMode', 'nationalWeightIBGE', 'isCustom', 'active', 'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.id) &&
         data.id == groupId &&
@@ -232,6 +452,7 @@ service cloud.firestore {
         isBoundedString(data.description, 0, 300) &&
         isBoundedString(data.color, 1, 32) &&
         isBoundedString(data.icon, 1, 64) &&
+        (!('profileMode' in data) || isValidProfileMode(data.profileMode)) &&
         (!('nationalWeightIBGE' in data) || (isNonNegativeNumber(data.nationalWeightIBGE) && data.nationalWeightIBGE <= 100)) &&
         (!('isCustom' in data) || data.isCustom is bool) &&
         (!('active' in data) || data.active is bool) &&
@@ -336,7 +557,7 @@ service cloud.firestore {
         isBoundedString(data.monthKey, 7, 10) &&
         data.monthKey.matches('^[0-9]{4}-[0-9]{2}$') &&
         isBoundedString(data.monthLabel, 1, 32) &&
-        (!('profileMode' in data) || data.profileMode in ['pessoal', 'negocio']) &&
+        (!('profileMode' in data) || isValidProfileMode(data.profileMode)) &&
         isNonNegativeNumber(data.totalMonthlySpend) &&
         isNonNegativeNumber(data.comparableBaseCost) &&
         isBoundedNumber(data.ipcaCasaPercent, -100, 100000) &&
@@ -506,7 +727,11 @@ service cloud.firestore {
           incoming().createdAt == existing().createdAt &&
           incoming().updatedAt == request.time &&
           incoming().diff(existing()).affectedKeys().hasOnly([
-            'name', 'profileMode', 'priceAlertThresholdPercent', 'membersCount', 'referenceRegion', 'currency', 'updatedAt'
+            'name', 'profileMode', 'onboardingStatus', 'onboardingStep',
+            'onboardingCompletedAt', 'questionnaireVersion', 'priceAlertThresholdPercent',
+            'membersCount', 'referenceRegion', 'currency', 'hasNoOwnIncome',
+            'reportedMonthlySurplus', 'surplusFrequency', 'estimatedMonthlyExpenses',
+            'suppliers', 'dashboardPreferences', 'questionnaireData', 'updatedAt'
           ]);
         allow delete: if isOwner(userId) && isValidId(profileId) && userExists(userId);
       }
@@ -532,11 +757,12 @@ service cloud.firestore {
           incoming().createdAt == existing().createdAt &&
           incoming().updatedAt == request.time &&
           incoming().diff(existing()).affectedKeys().hasOnly([
-            'name', 'description', 'group', 'subcategory', 'classification', 'monthlySpend',
+            'profileMode', 'name', 'description', 'group', 'subcategory', 'classification', 'monthlySpend',
             'oldPrice', 'currentPrice', 'oldPriceDate', 'currentPriceDate',
             'unit', 'quantity', 'baseQuantity', 'packageSize', 'packageUnit',
             'consumptionFrequency', 'frequencyDays', 'expenseNature', 'recurrenceType',
-            'accountingType', 'comparabilityBroken', 'comparabilityReason', 'dataOrigin',
+            'accountingType', 'supplierName', 'paidDirectly',
+            'comparabilityBroken', 'comparabilityReason', 'dataOrigin',
             'notes', 'active', 'isArchived', 'updatedAt'
           ]);
         allow delete: if isOwner(userId) && isValidId(itemId) && userExists(userId);
@@ -563,7 +789,7 @@ service cloud.firestore {
           incoming().createdAt == existing().createdAt &&
           incoming().updatedAt == request.time &&
           incoming().diff(existing()).affectedKeys().hasOnly([
-            'price', 'referenceDate', 'unit', 'source', 'origin', 'region',
+            'price', 'referenceDate', 'unit', 'source', 'origin', 'region', 'supplierName',
             'packageSize', 'packageUnit', 'dataOrigin', 'comparabilityBroken', 'notes', 'updatedAt'
           ]);
         allow delete: if isOwner(userId) && isValidId(priceId) && userExists(userId);
@@ -590,7 +816,8 @@ service cloud.firestore {
           incoming().createdAt == existing().createdAt &&
           incoming().updatedAt == request.time &&
           incoming().diff(existing()).affectedKeys().hasOnly([
-            'referenceDate', 'nominalIncome', 'source', 'notes',
+            'profileMode', 'referenceDate', 'nominalIncome', 'source', 'incomeRole',
+            'incomePredictability', 'dataOrigin', 'notes',
             'grossIncome', 'netIncome', 'incomeType', 'debtObligations', 'financialApplications',
             'transfers', 'availableReserve', 'workingDaysPerMonth', 'updatedAt'
           ]);
@@ -616,7 +843,7 @@ service cloud.firestore {
           incoming().createdAt == existing().createdAt &&
           incoming().updatedAt == request.time &&
           incoming().diff(existing()).affectedKeys().hasOnly([
-            'name', 'description', 'color', 'icon', 'nationalWeightIBGE', 'isCustom', 'active', 'updatedAt'
+            'name', 'description', 'color', 'icon', 'profileMode', 'nationalWeightIBGE', 'isCustom', 'active', 'updatedAt'
           ]);
         allow delete: if isOwner(userId) && isValidId(groupId) && userExists(userId);
       }

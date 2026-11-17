@@ -1,16 +1,19 @@
 import React, { useEffect, useState } from 'react';
-import { ConsumptionGroup } from '../types';
-import { StorageService } from '../services/storage';
+import { ConsumptionGroup, ProfileMode } from '../types';
+import { StorageService, getDefaultGroupsForMode } from '../services/storage';
+import { getProfileModeCopy } from '../utils/profileMode';
 
 interface CategoryManagerModalProps {
   isOpen: boolean;
   onClose: () => void;
   onCategoriesUpdated: () => void;
   groups?: ConsumptionGroup[];
+  profileMode?: ProfileMode;
   onSaveGroup?: (group: ConsumptionGroup) => void | Promise<void>;
   onDeleteGroup?: (
     groupId: string
   ) => { success: boolean; message: string } | Promise<{ success: boolean; message: string }>;
+  onRestoreDefaults?: () => void | Promise<void>;
 }
 
 export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
@@ -18,10 +21,15 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
   onClose,
   onCategoriesUpdated,
   groups: propGroups,
+  profileMode = 'pessoal',
   onSaveGroup,
   onDeleteGroup,
+  onRestoreDefaults,
 }) => {
-  const [groups, setGroups] = useState<ConsumptionGroup[]>(() => propGroups ?? StorageService.getGroups());
+  const modeCopy = getProfileModeCopy(profileMode);
+  const [groups, setGroups] = useState<ConsumptionGroup[]>(
+    () => propGroups ?? StorageService.getGroups(modeCopy.mode)
+  );
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -34,9 +42,9 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
     if (propGroups) {
       setGroups(propGroups);
     } else if (isOpen) {
-      setGroups(StorageService.getGroups());
+      setGroups(StorageService.getGroups(modeCopy.mode));
     }
-  }, [propGroups, isOpen]);
+  }, [propGroups, isOpen, modeCopy.mode]);
 
   if (!isOpen) return null;
 
@@ -68,6 +76,7 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
         if (existing) {
           targetGroup = {
             ...existing,
+            profileMode: existing.profileMode || modeCopy.mode,
             name: name.trim(),
             description: description.trim(),
             color,
@@ -76,11 +85,12 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
         }
       } else {
         targetGroup = {
-          id: `grp-custom-${Date.now()}`,
+          id: `grp-custom-${modeCopy.mode}-${Date.now()}`,
           name: name.trim(),
           description: description.trim(),
           color,
           icon,
+          profileMode: modeCopy.mode,
           isCustom: true,
           active: true,
         };
@@ -90,16 +100,16 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
         if (onSaveGroup) {
           await onSaveGroup(targetGroup);
           if (!propGroups) {
-            setGroups(StorageService.getGroups());
+            setGroups(StorageService.getGroups(modeCopy.mode));
           }
         } else {
           StorageService.saveGroup(targetGroup);
-          setGroups(StorageService.getGroups());
+          setGroups(StorageService.getGroups(modeCopy.mode));
         }
         setFeedback(
           editingGroupId
             ? `Categoria "${targetGroup.name}" atualizada com sucesso!`
-            : `Nova categoria "${targetGroup.name}" criada com sucesso!`
+            : `Nova categoria "${targetGroup.name}" criada no ${modeCopy.badgeLabel}!`
         );
       }
 
@@ -119,12 +129,33 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
         setFeedback(res.message);
       } else {
         const res = StorageService.deleteGroup(groupId);
-        setGroups(StorageService.getGroups());
+        setGroups(StorageService.getGroups(modeCopy.mode));
         setFeedback(res.message);
       }
       onCategoriesUpdated();
     } catch {
       setFeedback('Não foi possível excluir a categoria.');
+    }
+  };
+
+  const handleRestoreDefaultsClick = async () => {
+    setSaving(true);
+    try {
+      if (onRestoreDefaults) {
+        await onRestoreDefaults();
+      } else {
+        const defaults = getDefaultGroupsForMode(modeCopy.mode);
+        for (const def of defaults) {
+          StorageService.saveGroup({ ...def, profileMode: modeCopy.mode });
+        }
+        setGroups(StorageService.getGroups(modeCopy.mode));
+      }
+      setFeedback(`Categorias padrão do ${modeCopy.badgeLabel} restauradas!`);
+      onCategoriesUpdated();
+    } catch {
+      setFeedback('Não foi possível restaurar as categorias padrão.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -135,8 +166,13 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
           <div className="flex items-center gap-2.5">
             <span className="material-symbols-outlined text-[24px] text-[#006a61]">category</span>
             <div>
-              <h3 className="text-base font-bold text-[#0b1c30]">Gerenciador de Grupos e Categorias</h3>
-              <p className="text-xs text-[#76777d]">Crie, renomeie ou personalize categorias de consumo para a cesta</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-base font-bold text-[#0b1c30]">Gerenciador de Grupos e Categorias</h3>
+                <span className="px-2 py-0.5 rounded bg-[#eff4ff] text-[10px] font-mono font-semibold text-[#006a61]">
+                  {modeCopy.badgeLabel}
+                </span>
+              </div>
+              <p className="text-xs text-[#76777d]">Crie, renomeie ou personalize categorias exclusivas desta modalidade</p>
             </div>
           </div>
           <button
@@ -269,7 +305,15 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
           </div>
         </div>
 
-        <div className="flex justify-end pt-2 border-t border-[#eff4ff]">
+        <div className="flex items-center justify-between gap-2 pt-2 border-t border-[#eff4ff] flex-wrap">
+          <button
+            type="button"
+            disabled={saving}
+            onClick={handleRestoreDefaultsClick}
+            className="h-9 px-3 rounded-lg bg-[#eff4ff] hover:bg-[#dce9ff] text-[#45464d] text-xs font-mono font-medium cursor-pointer disabled:opacity-50"
+          >
+            Restaurar Categorias Padrão ({modeCopy.shortTitle})
+          </button>
           <button
             type="button"
             onClick={onClose}

@@ -57,6 +57,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
   const modeCopy = getProfileModeCopy(profileMode);
   const isBiz = modeCopy.mode === 'negocio';
+  const isStudent = modeCopy.mode === 'estudante';
+  const hasNoOwnIncome = Boolean(summary.hasNoOwnIncome || activeProfile?.hasNoOwnIncome);
+  const surplusBreakdown = summary.surplusBreakdown;
   const todayIso = getTodayIsoDate();
 
   const [closureMonthKey, setClosureMonthKey] = useState<string>(todayIso.slice(0, 7));
@@ -151,7 +154,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             <span className="text-sm font-bold text-[#0b1c30]">
               {isBiz
                 ? 'Fechamentos Mensais & Relatório de Custos do Negócio'
-                : 'Fechamentos Mensais & Relatório do Orçamento Familiar'}
+                : isStudent
+                  ? 'Fechamentos Mensais & Relatório Estudantil'
+                  : 'Fechamentos Mensais & Relatório do Orçamento Familiar'}
             </span>
             <span className="text-xs text-[#45464d]">
               Salve snapshots mensais para comparar meses anteriores ou exporte o documento completo em PDF.
@@ -349,13 +354,29 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               <span>Laudo Econométrico Oficial • IPCA-Casa</span>
             </div>
             <h1 className="text-2xl lg:text-3xl font-bold text-[#0b1c30] tracking-tight mt-1">
-              Demonstrativo de Inflação Familiar Ponderada
+              {isBiz
+                ? 'Demonstrativo de Custos e Insumos do Negócio'
+                : isStudent
+                  ? 'Demonstrativo de Inflação Estudantil Ponderada'
+                  : 'Demonstrativo de Inflação Familiar Ponderada'}
             </h1>
             <span className="text-xs text-[#45464d] mt-1">
-              Metodologia de Laspeyres Ponderada por Gastos Reais da Família
+              {isBiz
+                ? 'Metodologia de Laspeyres Ponderada por Custos Reais do Negócio'
+                : isStudent
+                  ? 'Metodologia de Laspeyres Ponderada pelos Gastos Reais Estudantis'
+                  : 'Metodologia de Laspeyres Ponderada por Gastos Reais da Família'}
               {activeProfile
-                ? ` • ${activeProfile.name} (${activeProfile.referenceRegion}, ${activeProfile.membersCount} ${
-                    activeProfile.membersCount === 1 ? 'integrante' : 'integrantes'
+                ? ` • ${activeProfile.name} (${activeProfile.referenceRegion}${
+                    isBiz
+                      ? `, ${activeProfile.membersCount} ${
+                          activeProfile.membersCount === 1 ? 'pessoa no negócio' : 'pessoas no negócio'
+                        }`
+                      : isStudent
+                        ? ''
+                        : `, ${activeProfile.membersCount} ${
+                            activeProfile.membersCount === 1 ? 'integrante' : 'integrantes'
+                          }`
                   })`
                 : ''}
             </span>
@@ -365,7 +386,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             <span className="font-bold text-[#0b1c30]">Data de Emissão: {formatIsoDateBR(todayIso)}</span>
             <span>Período de Referência: {incomePeriodLabel}</span>
             <span className="text-[#006a61] font-semibold">
-              {isDemo ? 'Família Modelo (Demonstração)' : activeProfile?.name || 'Cesta Familiar Cadastrada'}
+              {isDemo
+                ? `Cesta Modelo (${modeCopy.shortTitle} · Demonstração)`
+                : activeProfile?.name || modeCopy.basketHeading}
             </span>
             <span className="text-[11px] text-[#76777d]">
               IBGE: {ibgeOriginLabel}
@@ -406,7 +429,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
           <div className="p-4 bg-[#eff4ff] rounded-xl flex flex-col border border-[#e5eeff]">
             <span className="font-mono text-xs text-[#45464d] uppercase tracking-wider">
-              Spread Familiar
+              {isBiz ? 'Spread dos Custos' : isStudent ? 'Spread Estudantil' : 'Spread Familiar'}
             </span>
             <span
               className={`text-2xl font-bold font-mono mt-1 ${
@@ -420,13 +443,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
           <div className="p-4 bg-[#eff4ff] rounded-xl flex flex-col border border-[#e5eeff]">
             <span className="font-mono text-xs text-[#45464d] uppercase tracking-wider">
-              Despesa Mensal Base
+              {modeCopy.spendLabel}
             </span>
             <span className="text-2xl font-bold font-mono text-[#0b1c30] mt-1">
               R$ {formatMoneyBR(totalMonthlySpend)}
             </span>
             <span className="text-[11px] text-[#76777d] mt-0.5">
               {calculatedItems.length} {calculatedItems.length === 1 ? 'item cadastrado' : 'itens cadastrados'}
+              {isBiz ? ` • ${modeCopy.surplusNotice}` : ''}
             </span>
           </div>
         </div>
@@ -519,7 +543,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         {/* Top Villains Section */}
         <div className="flex flex-col gap-3">
           <h2 className="text-base font-bold text-[#0b1c30]">
-            2. Principais Vilões do Orçamento Familiar (Maior Impacto Ponderado)
+            {isBiz
+              ? '2. Principais Ofensores de Custo do Negócio (Maior Impacto Ponderado)'
+              : isStudent
+                ? '2. Principais Vilões do Orçamento Estudantil (Maior Impacto Ponderado)'
+                : '2. Principais Vilões do Orçamento Familiar (Maior Impacto Ponderado)'}
           </h2>
           {topVillains.length === 0 ? (
             <div className="p-4 bg-[#eff4ff] rounded-xl text-xs font-mono text-[#76777d] border border-[#e5eeff]">
@@ -553,6 +581,20 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                       <span>Variação: {formatSignedPercent(pct, 1)}</span>
                       <span>Peso: {item.weightPercent.toFixed(2).replace('.', ',')}%</span>
                     </div>
+                    {(item.supplierName || item.paidDirectly === false) && (
+                      <div className="mt-1.5 flex flex-wrap gap-1 text-[10px] font-mono">
+                        {item.supplierName && (
+                          <span className="px-1.5 py-0.5 rounded bg-[#ffffff] text-[#45464d] border border-[#e5eeff]">
+                            Fornecedor: {item.supplierName}
+                          </span>
+                        )}
+                        {item.paidDirectly === false && (
+                          <span className="px-1.5 py-0.5 rounded bg-[#ffffff] text-[#45464d] border border-[#e5eeff]">
+                            Pago por responsável
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -563,47 +605,64 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         {/* Power of Purchase Analysis */}
         <div className="flex flex-col gap-3">
           <h2 className="text-base font-bold text-[#0b1c30]">
-            3. Diagnóstico do Poder de Compra & Equilíbrio Salarial
+            {isBiz
+              ? '3. Diagnóstico de Faturamento, Custos & Resultado Estimado'
+              : isStudent
+                ? '3. Diagnóstico de Renda / Auxílio & Poder de Compra Estudantil'
+                : '3. Diagnóstico do Poder de Compra & Equilíbrio Salarial'}
           </h2>
           <div className="p-4 bg-[#eff4ff] rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border border-[#e5eeff]">
             <div className="flex flex-col text-xs">
               <span className="font-bold text-[#0b1c30]">
-                {purchasingPower.realPurchasingPowerChangePercent !== null &&
-                purchasingPower.realPurchasingPowerChangePercent >= 0
-                  ? 'Evolução Real Positiva no Salário Familiar:'
-                  : 'Variação Real Sentida no Salário Familiar:'}
+                {hasNoOwnIncome
+                  ? 'Acompanhamento sem renda própria:'
+                  : purchasingPower.realPurchasingPowerChangePercent !== null &&
+                      purchasingPower.realPurchasingPowerChangePercent >= 0
+                    ? `Evolução Real Positiva (${modeCopy.incomeTermSingular}):`
+                    : `Variação Real Sentida (${modeCopy.incomeTermSingular}):`}
               </span>
               <p className="text-[#45464d] mt-1 leading-relaxed">
-                Com o IPCA-Casa acumulado em <strong>{formatSignedPercent(ipcaCasa12M)}</strong>
-                {purchasingPower.nominalIncomeGrowthPercent !== null && (
+                {hasNoOwnIncome ? (
                   <>
-                    {' '}e o reajuste salarial nominal observado de{' '}
-                    <strong>{formatSignedPercent(purchasingPower.nominalIncomeGrowthPercent)}</strong>
-                  </>
-                )}
-                {purchasingPower.realPurchasingPowerChangePercent !== null ? (
-                  <>
-                    , o poder de compra real da família registrou variação de{' '}
-                    <strong
-                      className={
-                        purchasingPower.realPurchasingPowerChangePercent < 0
-                          ? 'text-[#ba1a1a]'
-                          : 'text-[#006a61]'
-                      }
-                    >
-                      {formatSignedPercent(purchasingPower.realPurchasingPowerChangePercent)}
-                    </strong>
-                    .
+                    Com o IPCA-Casa acumulado em <strong>{formatSignedPercent(ipcaCasa12M)}</strong>, este perfil está configurado sem renda própria — acompanhamento focado na evolução dos custos da cesta, sem cálculo de déficit salarial.
                   </>
                 ) : (
-                  ', aguardando cadastro de renda inicial e atual para apuração da variação real do poder de compra.'
+                  <>
+                    Com o IPCA-Casa acumulado em <strong>{formatSignedPercent(ipcaCasa12M)}</strong>
+                    {purchasingPower.nominalIncomeGrowthPercent !== null && (
+                      <>
+                        {' '}e variação nominal observada de{' '}
+                        <strong>{formatSignedPercent(purchasingPower.nominalIncomeGrowthPercent)}</strong>
+                      </>
+                    )}
+                    {purchasingPower.realPurchasingPowerChangePercent !== null ? (
+                      <>
+                        , o poder de compra real registrou variação de{' '}
+                        <strong
+                          className={
+                            purchasingPower.realPurchasingPowerChangePercent < 0
+                              ? 'text-[#ba1a1a]'
+                              : 'text-[#006a61]'
+                          }
+                        >
+                          {formatSignedPercent(purchasingPower.realPurchasingPowerChangePercent)}
+                        </strong>
+                        .
+                      </>
+                    ) : (
+                      `, aguardando cadastro de ${modeCopy.incomeTermSingular.toLowerCase()} inicial e atual para apuração da variação real.`
+                    )}
+                  </>
                 )}
               </p>
             </div>
-            {purchasingPower.neededSalaryForBreakeven !== null &&
+            {!hasNoOwnIncome &&
+              purchasingPower.neededSalaryForBreakeven !== null &&
               purchasingPower.finalIncome !== null && (
                 <div className="p-3 bg-[#ffffff] rounded-lg shrink-0 font-mono text-xs flex flex-col items-end border border-[#c6c6cd]/30">
-                  <span className="text-[#76777d]">Salário Necessário para Breakeven:</span>
+                  <span className="text-[#76777d]">
+                    {isBiz ? 'Faturamento para Empate:' : 'Valor Necessário para Breakeven:'}
+                  </span>
                   <span className="text-lg font-bold text-[#006a61]">
                     R$ {formatMoneyBR(purchasingPower.neededSalaryForBreakeven)}
                   </span>
@@ -622,6 +681,39 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 </div>
               )}
           </div>
+
+          {surplusBreakdown && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 rounded-xl bg-[#ffffff] border border-[#eff4ff] text-xs">
+              <div>
+                <span className="font-mono text-[11px] text-[#76777d] block">Sobra informada</span>
+                <span className="font-mono font-bold text-[#0b1c30]">
+                  {surplusBreakdown.reportedMonthlySurplus !== null
+                    ? `R$ ${formatMoneyBR(surplusBreakdown.reportedMonthlySurplus)}`
+                    : 'Não informada'}
+                </span>
+              </div>
+              <div>
+                <span className="font-mono text-[11px] text-[#76777d] block">Sobra estimada</span>
+                <span className="font-mono font-bold text-[#0b1c30]">
+                  {surplusBreakdown.estimatedMonthlySurplus !== null
+                    ? `R$ ${formatMoneyBR(surplusBreakdown.estimatedMonthlySurplus)}`
+                    : 'Não apurada'}
+                </span>
+              </div>
+              <div>
+                <span className="font-mono text-[11px] text-[#76777d] block">
+                  Saldo efetivo calculado {isBiz ? `(${modeCopy.surplusNotice})` : ''}
+                </span>
+                <span className="font-mono font-bold text-[#006a61]">
+                  {hasNoOwnIncome
+                    ? 'Sem renda própria'
+                    : surplusBreakdown.effectiveCalculatedBalance !== null
+                      ? `R$ ${formatMoneyBR(surplusBreakdown.effectiveCalculatedBalance)}`
+                      : 'Aguardando renda'}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Audit Signatures / Footer */}

@@ -20,6 +20,7 @@ interface BasketViewProps {
   onDeleteGroup?: (
     groupId: string
   ) => { success: boolean; message: string } | Promise<{ success: boolean; message: string }>;
+  onRestoreDefaultGroups?: () => void | Promise<void>;
   externalSearchTerm?: string;
   onExternalSearchChange?: (term: string) => void;
   profileMode?: ProfileMode;
@@ -52,12 +53,14 @@ export const BasketView: React.FC<BasketViewProps> = ({
   groups: propGroups,
   onSaveGroup,
   onDeleteGroup,
+  onRestoreDefaultGroups,
   externalSearchTerm,
   onExternalSearchChange,
   profileMode = 'pessoal',
 }) => {
   const modeCopy = getProfileModeCopy(profileMode);
   const isBiz = modeCopy.mode === 'negocio';
+  const isStudent = modeCopy.mode === 'estudante';
   const [searchTerm, setSearchTerm] = useState(externalSearchTerm ?? '');
   const [selectedGroup, setSelectedGroup] = useState<string>('ALL');
   const [selectedClass, setSelectedClass] = useState<string>('ALL');
@@ -87,15 +90,17 @@ export const BasketView: React.FC<BasketViewProps> = ({
 
   // Category Manager Modal state
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
-  const [groups, setGroups] = useState<ConsumptionGroup[]>(() => propGroups ?? StorageService.getGroups());
+  const [groups, setGroups] = useState<ConsumptionGroup[]>(
+    () => propGroups ?? StorageService.getGroups(modeCopy.mode)
+  );
 
   useEffect(() => {
     if (propGroups) {
       setGroups(propGroups);
     } else {
-      setGroups(StorageService.getGroups());
+      setGroups(StorageService.getGroups(modeCopy.mode));
     }
-  }, [propGroups, isDemo]);
+  }, [propGroups, isDemo, modeCopy.mode]);
 
   // Confirm delete modal state
   const [itemToDelete, setItemToDelete] = useState<CalculatedItem | null>(null);
@@ -122,6 +127,7 @@ export const BasketView: React.FC<BasketViewProps> = ({
           !q ||
           item.name.toLowerCase().includes(q) ||
           (item.description && item.description.toLowerCase().includes(q)) ||
+          (item.supplierName && item.supplierName.toLowerCase().includes(q)) ||
           item.group.toLowerCase().includes(q);
 
         const matchesGroup = selectedGroup === 'ALL' || item.group === selectedGroup;
@@ -154,7 +160,7 @@ export const BasketView: React.FC<BasketViewProps> = ({
 
   const handleCategoriesUpdated = () => {
     if (!propGroups) {
-      setGroups(StorageService.getGroups());
+      setGroups(StorageService.getGroups(modeCopy.mode));
     }
     onRefreshData();
   };
@@ -186,7 +192,9 @@ export const BasketView: React.FC<BasketViewProps> = ({
                 {isDemo
                   ? 'Dados de demonstração — valores fictícios, não representam estatísticas oficiais.'
                   : isBiz
-                  ? 'Cadastre seus insumos, ingredientes e contas operacionais. O sistema calcula pesos e altas automaticamente.'
+                  ? 'Cadastre seus insumos, ingredientes, fornecedores e contas operacionais. O sistema calcula pesos e altas automaticamente.'
+                  : isStudent
+                  ? 'Cadastre lanches, transporte, materiais e cursos. O sistema mostra o peso de cada gasto na sua rotina estudantil.'
                   : 'Cadastre seus itens e despesas mensais uma única vez; o sistema calcula pesos e variação automaticamente.'}
               </span>
             </div>
@@ -297,6 +305,8 @@ export const BasketView: React.FC<BasketViewProps> = ({
                 placeholder={
                   isBiz
                     ? 'Buscar por insumo, ingrediente, fornecedor ou categoria...'
+                    : isStudent
+                    ? 'Buscar por lanche, transporte, material, curso ou categoria...'
                     : 'Buscar por produto, marca, serviço ou categoria...'
                 }
                 className="w-full h-10 pl-10 pr-10 rounded-lg bg-[#eff4ff] text-[#0b1c30] placeholder:text-[#76777d] text-sm focus:outline-none focus:bg-[#ffffff] focus:ring-1 focus:ring-[#006a61] transition-all"
@@ -435,11 +445,17 @@ export const BasketView: React.FC<BasketViewProps> = ({
                             shopping_basket
                           </span>
                           <span className="text-sm font-bold text-[#0b1c30]">
-                            {isBiz ? 'Sua lista de insumos e custos está vazia' : 'Sua cesta de gastos ainda está vazia'}
+                            {isBiz
+                              ? 'Sua lista de insumos e custos está vazia'
+                              : isStudent
+                              ? 'Sua cesta estudantil está vazia'
+                              : 'Sua cesta de gastos ainda está vazia'}
                           </span>
                           <span className="text-xs text-[#45464d]">
                             {isBiz
                               ? 'Adicione seus ingredientes, embalagens e contas operacionais para acompanhar a variação dos seus custos.'
+                              : isStudent
+                              ? 'Adicione refeições, passagens, materiais e mensalidades para acompanhar seus custos de estudo.'
                               : 'Adicione os produtos e despesas fixas da sua casa para calcular o seu custo de vida real.'}
                           </span>
                           <div className="flex items-center gap-2 mt-1">
@@ -478,8 +494,26 @@ export const BasketView: React.FC<BasketViewProps> = ({
                     <tr key={item.id} className="hover:bg-[#eff4ff]/60 transition-colors">
                       {/* Name & Unit */}
                       <td className="py-3.5 px-4">
-                        <div className="flex flex-col">
-                          <span className="font-semibold text-xs text-[#0b1c30]">{item.name}</span>
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-semibold text-xs text-[#0b1c30]">{item.name}</span>
+                            {isBiz && item.supplierName && (
+                              <span className="px-1.5 py-0.5 rounded bg-[#eff4ff] text-[#45464d] font-mono text-[10px]">
+                                Forn.: {item.supplierName}
+                              </span>
+                            )}
+                            {isStudent && item.paidDirectly !== undefined && (
+                              <span
+                                className={`px-1.5 py-0.5 rounded font-mono text-[10px] ${
+                                  item.paidDirectly
+                                    ? 'bg-[#86f2e4]/35 text-[#005049]'
+                                    : 'bg-[#eff4ff] text-[#45464d]'
+                                }`}
+                              >
+                                {item.paidDirectly ? 'Pago por mim' : 'Coberto por terceiros'}
+                              </span>
+                            )}
+                          </div>
                           <span className="text-[11px] font-mono text-[#76777d]">
                             Unidade: {item.unit || 'un'} {item.description ? `• ${item.description}` : ''}
                           </span>
@@ -652,8 +686,10 @@ export const BasketView: React.FC<BasketViewProps> = ({
         onClose={() => setIsCategoryModalOpen(false)}
         onCategoriesUpdated={handleCategoriesUpdated}
         groups={propGroups}
+        profileMode={modeCopy.mode}
         onSaveGroup={onSaveGroup}
         onDeleteGroup={onDeleteGroup}
+        onRestoreDefaults={onRestoreDefaultGroups}
       />
 
       {/* Confirm Item Deletion Modal */}

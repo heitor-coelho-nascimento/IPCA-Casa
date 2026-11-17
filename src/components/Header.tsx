@@ -108,9 +108,18 @@ export const Header: React.FC<HeaderProps> = ({
     if (summary.totalItemsCount === 0) {
       list.push({
         id: 'empty-basket',
-        title: 'Cesta Familiar Vazia',
+        title:
+          modeCopy.mode === 'negocio'
+            ? 'Cesta de Custos Vazia'
+            : modeCopy.mode === 'estudante'
+            ? 'Cesta Estudantil Vazia'
+            : 'Cesta Familiar Vazia',
         description:
-          'Cadastre produtos ou serviços em Minha Cesta Familiar para apurar a inflação real da residência.',
+          modeCopy.mode === 'negocio'
+            ? 'Cadastre insumos, matérias-primas e despesas operacionais em Insumos e Custos para medir sua variação real.'
+            : modeCopy.mode === 'estudante'
+            ? 'Cadastre lanches, transporte, materiais e cursos em Cesta Estudantil para acompanhar o impacto no seu orçamento.'
+            : 'Cadastre produtos ou serviços em Minha Cesta e Gastos para apurar a inflação real da residência.',
         icon: 'shopping_basket',
         tone: 'info',
       });
@@ -132,8 +141,19 @@ export const Header: React.FC<HeaderProps> = ({
       if (summary.spreadPP >= 0.5) {
         list.push({
           id: 'spread-high',
-          title: 'Inflação Pessoal Acima do IBGE',
-          description: `Seu IPCA-Casa está +${summary.spreadPP.toFixed(2).replace('.', ',')} p.p. acima do IPCA oficial (${formatSignedPercent(ibgeData.accumulated12MRate)}).`,
+          title:
+            modeCopy.mode === 'negocio'
+              ? 'Custos Acima do IPCA Oficial'
+              : modeCopy.mode === 'estudante'
+              ? 'Gastos Estudantis Acima do IBGE'
+              : 'Inflação Pessoal Acima do IBGE',
+          description: `${
+            modeCopy.mode === 'negocio'
+              ? 'A variação de custos do negócio está'
+              : modeCopy.mode === 'estudante'
+              ? 'Sua cesta estudantil está'
+              : 'Seu IPCA-Casa está'
+          } +${summary.spreadPP.toFixed(2).replace('.', ',')} p.p. acima do IPCA oficial (${formatSignedPercent(ibgeData.accumulated12MRate)}).`,
           icon: 'warning',
           tone: 'danger',
         });
@@ -163,7 +183,7 @@ export const Header: React.FC<HeaderProps> = ({
     }
 
     return list;
-  }, [summary, ibgeData]);
+  }, [summary, ibgeData, modeCopy.mode]);
 
   const hasCriticalAlert = alerts.some((a) => a.tone === 'danger');
 
@@ -226,7 +246,7 @@ export const Header: React.FC<HeaderProps> = ({
                     <div className="flex flex-col min-w-0">
                       <span className="truncate">{p.name}</span>
                       <span className="text-[11px] text-[#76777d] font-normal truncate">
-                        {p.referenceRegion} · {resolveProfileMode(p.profileMode) === 'negocio' ? 'Negócio' : 'Pessoal'}
+                        {p.referenceRegion} · {getProfileModeCopy(resolveProfileMode(p.profileMode)).shortTitle}
                       </span>
                     </div>
                     {p.id === activeProfile.id && (
@@ -339,11 +359,15 @@ export const Header: React.FC<HeaderProps> = ({
               placeholder={
                 modeCopy.mode === 'negocio'
                   ? 'Buscar insumo ou custo...'
+                  : modeCopy.mode === 'estudante'
+                  ? 'Buscar na cesta estudantil...'
                   : 'Buscar na cesta familiar...'
               }
               aria-label={
                 modeCopy.mode === 'negocio'
                   ? 'Buscar insumo ou custo'
+                  : modeCopy.mode === 'estudante'
+                  ? 'Buscar na cesta estudantil'
                   : 'Buscar na cesta familiar'
               }
               className="h-[33px] pl-9 pr-8 w-[224px] rounded-lg bg-[#eff4ff] text-[#0b1c30] placeholder:text-[#45464d] text-sm focus:outline-none focus:bg-[#ffffff] focus:ring-1 focus:ring-[#006a61] transition-all"

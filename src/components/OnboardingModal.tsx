@@ -1,526 +1,591 @@
-import React, { useState } from 'react';
-import { FamilyProfile, BasketItem, ProfileMode } from '../types';
-import { DEMO_BASKET_ITEMS, StorageService } from '../services/storage';
-import { getMonthsAgoIsoDate, getTodayIsoDate } from '../utils/dates';
+import React, { useEffect, useState } from 'react';
+import {
+  BasketItem,
+  ConsumptionGroup,
+  EstudanteQuestionnaireAnswers,
+  FamilyProfile,
+  IncomeRecord,
+  NegocioQuestionnaireAnswers,
+  PessoalQuestionnaireAnswers,
+  PriceRecord,
+  ProfileMode,
+  QuestionnaireDataPayload,
+} from '../types';
+import {
+  QUESTIONNAIRE_VERSION,
+  buildItemEntriesFromSelection,
+  createDefaultEstudanteAnswers,
+  createDefaultNegocioAnswers,
+  createDefaultPessoalAnswers,
+} from '../config/questionnaires';
+import {
+  PrefillBundleResult,
+  buildPrefillBundleFromQuestionnaire,
+  validateQuestionnaireStep,
+} from '../services/questionnairePrefill';
+import { StorageService, getDefaultGroupsForMode } from '../services/storage';
+import { ModalitySelectorStep } from './onboarding/ModalitySelectorStep';
+import { PessoalQuestionnaireForm } from './onboarding/PessoalQuestionnaireForm';
+import { NegocioQuestionnaireForm } from './onboarding/NegocioQuestionnaireForm';
+import { EstudanteQuestionnaireForm } from './onboarding/EstudanteQuestionnaireForm';
 
 export interface OnboardingBundle {
   initialIncome: number;
   currentIncome: number;
   items: BasketItem[];
+  prefillBundle?: PrefillBundleResult;
 }
 
 interface OnboardingModalProps {
   isOpen: boolean;
+  userId?: string;
   userDisplayName: string;
   targetProfileId?: string;
+  initialProfile?: FamilyProfile | null;
+  initialMode?: ProfileMode;
+  initialStep?: number;
+  allowModalitySelection?: boolean;
+  isEditingFromSettings?: boolean;
+  existingGroups?: ConsumptionGroup[];
+  existingItems?: BasketItem[];
+  existingIncomeRecords?: IncomeRecord[];
+  existingPriceRecords?: PriceRecord[];
   skipLocalPersistence?: boolean;
   onFinish: (profile: FamilyProfile, bundle?: OnboardingBundle) => void | Promise<void>;
+  onSaveDraft?: (draftProfile: FamilyProfile) => void | Promise<void>;
   onSkip: () => void;
 }
 
 export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   isOpen,
+  userId = 'local',
   userDisplayName,
   targetProfileId,
+  initialProfile,
+  initialMode,
+  initialStep,
+  allowModalitySelection = true,
+  isEditingFromSettings = false,
+  existingGroups = [],
+  existingItems = [],
+  existingIncomeRecords = [],
+  existingPriceRecords = [],
   skipLocalPersistence = false,
   onFinish,
+  onSaveDraft,
   onSkip,
 }) => {
-  const [step, setStep] = useState<number>(1);
+  const draftOwnerId = userId || 'local';
+  const resolvedInitialMode: ProfileMode =
+    initialMode || initialProfile?.profileMode || 'pessoal';
 
-  // Step 1: Perfil e Modo
-  const [profileMode, setProfileMode] = useState<ProfileMode>('pessoal');
-  const [profileName, setProfileName] = useState(`Orçamento de ${userDisplayName}`);
-  const [membersCount, setMembersCount] = useState(3);
+  const [selectingModality, setSelectingModality] = useState<boolean>(
+    allowModalitySelection && !initialProfile?.profileMode && !isEditingFromSettings
+  );
+  const [mode, setMode] = useState<ProfileMode>(resolvedInitialMode);
+  const [step, setStep] = useState<number>(initialStep || initialProfile?.onboardingStep || 1);
 
-  // Step 2: Renda / Faturamento
-  const [initialIncome, setInitialIncome] = useState<number>(6000);
-  const [currentIncome, setCurrentIncome] = useState<number>(6500);
+  const [profileName, setProfileName] = useState<string>(
+    initialProfile?.name || `Orçamento de ${userDisplayName}`
+  );
+  const [referenceRegion, setReferenceRegion] = useState<string>(
+    initialProfile?.referenceRegion || 'Brasil'
+  );
 
-  // Step 3: Gastos / Custos principais rápidos
-  const [groceriesSpend, setGroceriesSpend] = useState<number>(1800);
-  const [housingSpend, setHousingSpend] = useState<number>(2000);
-  const [transportSpend, setTransportSpend] = useState<number>(800);
+  const [pessoalAnswers, setPessoalAnswers] = useState<PessoalQuestionnaireAnswers>(() =>
+    createDefaultPessoalAnswers(initialProfile?.membersCount || 3)
+  );
+  const [negocioAnswers, setNegocioAnswers] = useState<NegocioQuestionnaireAnswers>(() =>
+    createDefaultNegocioAnswers(initialProfile?.name || '')
+  );
+  const [estudanteAnswers, setEstudanteAnswers] = useState<EstudanteQuestionnaireAnswers>(() =>
+    createDefaultEstudanteAnswers()
+  );
 
-  // Step 4: Região de referência para o IBGE
-  const [region, setRegion] = useState('Brasil');
-
-  // Step 5: Escolha da Cesta
-  const [basketChoice, setBasketChoice] = useState<'empty' | 'copy-demo'>('copy-demo');
   const [saving, setSaving] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorList, setErrorList] = useState<string[]>([]);
+
+  // Sincronizar quando modal abre com perfil existente / rascunho salvo
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const targetMode: ProfileMode =
+      initialMode || initialProfile?.profileMode || 'pessoal';
+    const resolvedProfileId = targetProfileId || initialProfile?.id || 'profile-clean-slate';
+    const localDraft = StorageService.loadQuestionnaireDraftLocal(draftOwnerId, resolvedProfileId);
+    const savedQd = initialProfile?.questionnaireData || localDraft;
+
+    setMode(targetMode);
+    setSelectingModality(
+      allowModalitySelection && !initialProfile?.profileMode && !isEditingFromSettings && !savedQd
+    );
+    setStep(
+      Math.max(
+        1,
+        Math.min(
+          5,
+          initialStep || initialProfile?.onboardingStep || savedQd?.currentStep || 1
+        )
+      )
+    );
+    setProfileName(
+      initialProfile?.name ||
+        (targetMode === 'negocio'
+          ? 'Meu Negócio'
+          : targetMode === 'estudante'
+            ? 'Perfil Estudante'
+            : `Orçamento de ${userDisplayName}`)
+    );
+    setReferenceRegion(initialProfile?.referenceRegion || 'Brasil');
+
+    if (savedQd?.pessoal) {
+      setPessoalAnswers(savedQd.pessoal);
+    } else {
+      const defP = createDefaultPessoalAnswers(initialProfile?.membersCount || 3);
+      defP.itemEntries = buildItemEntriesFromSelection(
+        defP.selectedRegularProducts,
+        [],
+        'pessoal'
+      );
+      setPessoalAnswers(defP);
+    }
+
+    if (savedQd?.negocio) {
+      setNegocioAnswers(savedQd.negocio);
+    } else {
+      setNegocioAnswers(
+        createDefaultNegocioAnswers(
+          targetMode === 'negocio' ? initialProfile?.name || '' : ''
+        )
+      );
+    }
+
+    if (savedQd?.estudante) {
+      setEstudanteAnswers(savedQd.estudante);
+    } else {
+      const defE = createDefaultEstudanteAnswers();
+      defE.itemEntries = buildItemEntriesFromSelection(
+        defE.selectedConsumptionCategories,
+        [],
+        'estudante'
+      );
+      setEstudanteAnswers(defE);
+    }
+
+    setErrorList([]);
+  }, [
+    isOpen,
+    draftOwnerId,
+    initialMode,
+    initialProfile,
+    initialStep,
+    allowModalitySelection,
+    isEditingFromSettings,
+    targetProfileId,
+    userDisplayName,
+  ]);
 
   if (!isOpen) return null;
 
-  const isBiz = profileMode === 'negocio';
+  const getCurrentAnswers = () => {
+    if (mode === 'negocio') return negocioAnswers;
+    if (mode === 'estudante') return estudanteAnswers;
+    return pessoalAnswers;
+  };
 
-  const handleComplete = async () => {
-    if (saving) return;
-    setErrorMsg(null);
+  const handleSelectMode = (nextMode: ProfileMode) => {
+    setMode(nextMode);
+    setErrorList([]);
+    if (!initialProfile?.name || initialProfile.name === `Orçamento de ${userDisplayName}`) {
+      if (nextMode === 'negocio') {
+        setProfileName(negocioAnswers.businessName || 'Meu Negócio');
+      } else if (nextMode === 'estudante') {
+        setProfileName(`Perfil Estudante (${userDisplayName.split(' ')[0] || 'Estudos'})`);
+      } else {
+        setProfileName(`Orçamento de ${userDisplayName}`);
+      }
+    }
+  };
 
-    const safeInitial = Number.isFinite(initialIncome) && initialIncome > 0 ? initialIncome : 0;
-    const safeCurrent = Number.isFinite(currentIncome) && currentIncome >= 0 ? currentIncome : 0;
-    if (safeInitial <= 0) {
-      setErrorMsg(
-        isBiz
-          ? 'Informe uma entrada mensal base maior que zero para acompanhar a margem.'
-          : 'Informe uma renda inicial maior que zero para calcular o poder de compra.'
-      );
-      setStep(2);
+  const handleProceedFromModality = () => {
+    setSelectingModality(false);
+    setStep(1);
+    setErrorList([]);
+  };
+
+  const handleNextStep = () => {
+    const validation = validateQuestionnaireStep(mode, step, getCurrentAnswers());
+    if (!validation.valid) {
+      setErrorList(validation.errors);
       return;
     }
+    setErrorList([]);
 
+    // Ao entrar na Etapa 4 pela primeira vez, garantir pré-preenchimento dos itens selecionados
+    if (step === 3) {
+      if (mode === 'pessoal' && pessoalAnswers.itemEntries.length === 0) {
+        setPessoalAnswers({
+          ...pessoalAnswers,
+          itemEntries: buildItemEntriesFromSelection(
+            pessoalAnswers.selectedRegularProducts,
+            [],
+            'pessoal'
+          ),
+        });
+      } else if (mode === 'estudante' && estudanteAnswers.itemEntries.length === 0) {
+        setEstudanteAnswers({
+          ...estudanteAnswers,
+          itemEntries: buildItemEntriesFromSelection(
+            estudanteAnswers.selectedConsumptionCategories,
+            [],
+            'estudante'
+          ),
+        });
+      }
+    }
+
+    setStep((s) => Math.min(5, s + 1));
+  };
+
+  const handleSaveDraft = async () => {
+    if (saving) return;
     setSaving(true);
+    setErrorList([]);
     try {
-      const profileId = targetProfileId || `prof_user_${Date.now()}`;
       const nowIso = new Date().toISOString();
-      const baseDateIso = getMonthsAgoIsoDate(12);
-      const currentDateIso = getTodayIsoDate();
+      const profileId = targetProfileId || initialProfile?.id || `prof_user_${Date.now()}`;
+      const qd: QuestionnaireDataPayload = {
+        mode,
+        version: QUESTIONNAIRE_VERSION,
+        updatedAt: nowIso,
+        currentStep: step,
+        ...(mode === 'pessoal' ? { pessoal: pessoalAnswers } : {}),
+        ...(mode === 'negocio' ? { negocio: negocioAnswers } : {}),
+        ...(mode === 'estudante' ? { estudante: estudanteAnswers } : {}),
+      };
 
-      const newProfile: FamilyProfile = {
+      const draftProfile: FamilyProfile = {
+        ...(initialProfile || {
+          id: profileId,
+          membersCount: 1,
+          currency: 'BRL',
+          isDemo: false,
+          createdAt: nowIso,
+        }),
         id: profileId,
-        name: profileName.trim() || `Orçamento de ${userDisplayName}`,
-        membersCount: Math.max(1, Math.min(20, Math.round(membersCount) || 1)),
-        referenceRegion: region,
-        currency: 'BRL',
-        profileMode,
-        priceAlertThresholdPercent: 10,
-        isDemo: false,
-        createdAt: nowIso,
+        name:
+          (mode === 'negocio' ? negocioAnswers.businessName.trim() : profileName.trim()) ||
+          initialProfile?.name ||
+          `Perfil ${mode}`,
+        profileMode: mode,
+        referenceRegion,
+        onboardingStatus:
+          initialProfile?.onboardingStatus === 'completed' ? 'completed' : 'in_progress',
+        onboardingStep: step,
+        questionnaireVersion: QUESTIONNAIRE_VERSION,
+        questionnaireData: qd,
         updatedAt: nowIso,
       };
 
-      const stamp = Date.now();
-      let onboardingItems: BasketItem[];
-      if (basketChoice === 'copy-demo') {
-        onboardingItems = DEMO_BASKET_ITEMS.map((item, idx) => ({
-          ...item,
-          id: `item-usr-${stamp}-${idx}`,
-          profileId,
-          oldPriceDate: baseDateIso,
-          currentPriceDate: currentDateIso,
-          createdAt: nowIso,
-          updatedAt: nowIso,
-        }));
+      StorageService.saveQuestionnaireDraftLocal(draftOwnerId, profileId, qd);
+      if (onSaveDraft) {
+        await onSaveDraft(draftProfile);
       } else {
-        onboardingItems = [
-          {
-            id: `item-ob-1-${stamp}`,
-            profileId,
-            name: isBiz ? 'Insumos e Matéria-Prima Principal' : 'Supermercado & Alimentação Básica',
-            group: 'Alimentação e bebidas',
-            classification: 'Essencial',
-            monthlySpend: Math.max(0, groceriesSpend || 0),
-            oldPrice: 100,
-            currentPrice: 108,
-            oldPriceDate: baseDateIso,
-            currentPriceDate: currentDateIso,
-            unit: 'mensal',
-            dataOrigin: 'estimado',
-            active: true,
-            createdAt: nowIso,
-            updatedAt: nowIso,
-          },
-          {
-            id: `item-ob-2-${stamp}`,
-            profileId,
-            name: isBiz
-              ? 'Estrutura Física (Aluguel / Energia / Água)'
-              : 'Habitação (Aluguel / Condomínio / Luz / Água)',
-            group: 'Habitação',
-            classification: 'Essencial',
-            monthlySpend: Math.max(0, housingSpend || 0),
-            oldPrice: 100,
-            currentPrice: 106,
-            oldPriceDate: baseDateIso,
-            currentPriceDate: currentDateIso,
-            unit: 'mensal',
-            dataOrigin: 'estimado',
-            active: true,
-            createdAt: nowIso,
-            updatedAt: nowIso,
-          },
-          {
-            id: `item-ob-3-${stamp}`,
-            profileId,
-            name: isBiz
-              ? 'Logística, Entregas e Combustível'
-              : 'Transporte (Combustível / Transporte Público)',
-            group: 'Transportes',
-            classification: 'Essencial',
-            monthlySpend: Math.max(0, transportSpend || 0),
-            oldPrice: 100,
-            currentPrice: 105,
-            oldPriceDate: baseDateIso,
-            currentPriceDate: currentDateIso,
-            unit: 'mensal',
-            dataOrigin: 'estimado',
-            active: true,
-            createdAt: nowIso,
-            updatedAt: nowIso,
-          },
-        ];
+        onSkip();
       }
-
-      if (!skipLocalPersistence) {
-        StorageService.saveProfile(newProfile);
-        StorageService.setActiveProfileId(profileId);
-        StorageService.saveIncome(safeInitial, safeCurrent, {
-          profileId,
-          initialDate: baseDateIso,
-          finalDate: currentDateIso,
-        });
-        StorageService.importItems(onboardingItems, profileId);
-      }
-
-      await onFinish(newProfile, {
-        initialIncome: safeInitial,
-        currentIncome: safeCurrent,
-        items: onboardingItems,
-      });
     } catch (err) {
-      setErrorMsg(
+      setErrorList([
         err instanceof Error && err.message
           ? err.message
-          : 'Não foi possível concluir o salvamento inicial. Tente novamente.'
-      );
+          : 'Não foi possível salvar o rascunho agora.',
+      ]);
     } finally {
       setSaving(false);
     }
   };
 
+  const handleComplete = async () => {
+    if (saving) return;
+    const validation = validateQuestionnaireStep(mode, 5, getCurrentAnswers());
+    if (!validation.valid) {
+      setErrorList(validation.errors);
+      return;
+    }
+
+    setSaving(true);
+    setErrorList([]);
+    try {
+      const nowIso = new Date().toISOString();
+      const profileId = targetProfileId || initialProfile?.id || `prof_user_${Date.now()}`;
+      const baseProfile: FamilyProfile = {
+        ...(initialProfile || {
+          id: profileId,
+          membersCount: mode === 'pessoal' ? pessoalAnswers.membersCount : 1,
+          currency: 'BRL',
+          isDemo: false,
+          createdAt: nowIso,
+        }),
+        id: profileId,
+        name:
+          (mode === 'negocio' ? negocioAnswers.businessName.trim() : profileName.trim()) ||
+          initialProfile?.name ||
+          `Orçamento de ${userDisplayName}`,
+        profileMode: mode,
+        referenceRegion,
+        currency: initialProfile?.currency || 'BRL',
+        priceAlertThresholdPercent: initialProfile?.priceAlertThresholdPercent ?? 10,
+        isDemo: false,
+        updatedAt: nowIso,
+      };
+
+      const bundle = buildPrefillBundleFromQuestionnaire({
+        mode,
+        baseProfile,
+        answers: getCurrentAnswers(),
+        existingGroups,
+        existingItems,
+        existingIncomeRecords,
+        existingPriceRecords,
+        defaultGroupsForMode: getDefaultGroupsForMode(mode),
+        isUpdateFromSettings: isEditingFromSettings,
+      });
+
+      StorageService.clearQuestionnaireDraftLocal(draftOwnerId, profileId);
+
+      if (!skipLocalPersistence) {
+        StorageService.saveProfile(bundle.profile);
+        StorageService.setActiveProfileId(bundle.profile.id);
+        for (const grp of bundle.consumptionGroups) {
+          if (grp.isCustom) {
+            StorageService.saveGroup(grp);
+          }
+        }
+        const profileIncomes = bundle.incomeRecords.filter(
+          (rec) => rec.profileId === bundle.profile.id
+        );
+        StorageService.replaceIncomeRecordsForProfile(bundle.profile.id, profileIncomes);
+        if (bundle.useDemoBasket) {
+          StorageService.loadDemoBasket(mode);
+        } else {
+          if (bundle.items.length > 0) {
+            StorageService.importItems(bundle.items, bundle.profile.id);
+          }
+          if (bundle.priceRecords.length > 0) {
+            StorageService.mergePriceRecordsLocal(bundle.priceRecords);
+          }
+        }
+      }
+
+      const currIncome = bundle.incomeRecords[bundle.incomeRecords.length - 1]?.nominalIncome || 0;
+      const initIncome = bundle.incomeRecords[0]?.nominalIncome || currIncome;
+
+      await onFinish(bundle.profile, {
+        initialIncome: initIncome,
+        currentIncome: currIncome,
+        items: bundle.items,
+        prefillBundle: bundle,
+      });
+    } catch (err) {
+      setErrorList([
+        err instanceof Error && err.message
+          ? err.message
+          : 'Não foi possível concluir o questionário inicial. Tente novamente.',
+      ]);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const modalityTitle =
+    mode === 'negocio'
+      ? 'Negócio / Pequena Empresa'
+      : mode === 'estudante'
+        ? 'Estudante'
+        : 'Pessoal / Familiar';
+
   return (
-    <div className="fixed inset-0 bg-[#213145]/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-[#ffffff] rounded-2xl max-w-lg w-full shadow-2xl p-6 flex flex-col gap-6 border border-[#eff4ff]">
-        {/* Progress Bar & Header */}
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between text-xs font-mono text-[#76777d]">
-            <span>Passo {step} de 5</span>
-            <button
-              onClick={onSkip}
-              className="text-[#45464d] hover:text-[#0b1c30] underline cursor-pointer"
-            >
-              Pular e explorar agora
-            </button>
+    <div className="fixed inset-0 bg-[#213145]/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
+      <div className="bg-[#ffffff] rounded-2xl max-w-3xl w-full max-h-[92vh] shadow-2xl flex flex-col border border-[#eff4ff] overflow-hidden">
+        {/* Top Header */}
+        <div className="px-5 sm:px-6 pt-5 pb-3 border-b border-[#eff4ff] flex flex-col gap-2.5 bg-[#ffffff]">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 font-mono text-[#76777d]">
+              {selectingModality ? (
+                <span>Seleção de Modalidade</span>
+              ) : (
+                <span>
+                  {modalityTitle} · Etapa {step} de 5
+                </span>
+              )}
+              {isEditingFromSettings && (
+                <span className="text-[#006a61] font-semibold">· Atualizando respostas</span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3">
+              {!selectingModality && allowModalitySelection && !isEditingFromSettings && (
+                <button
+                  type="button"
+                  onClick={() => setSelectingModality(true)}
+                  className="text-xs font-semibold text-[#497cff] hover:underline cursor-pointer"
+                >
+                  Trocar modalidade
+                </button>
+              )}
+              {!selectingModality && (
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={handleSaveDraft}
+                  className="text-xs font-semibold text-[#0b1c30] hover:underline cursor-pointer disabled:opacity-50"
+                >
+                  Salvar e continuar depois
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onSkip}
+                className="text-xs text-[#76777d] hover:text-[#0b1c30] underline cursor-pointer"
+              >
+                {isEditingFromSettings ? 'Fechar' : 'Pular por agora'}
+              </button>
+            </div>
           </div>
-          <div className="w-full bg-[#eff4ff] h-1.5 rounded-full overflow-hidden">
-            <div
-              className="bg-[#000000] h-full transition-all duration-300"
-              style={{ width: `${(step / 5) * 100}%` }}
-            />
-          </div>
-          {errorMsg && (
-            <div className="p-2.5 rounded-lg bg-[#ffdad6]/50 border border-[#ba1a1a]/30 text-xs font-mono text-[#ba1a1a]">
-              {errorMsg}
+
+          {!selectingModality && (
+            <div className="w-full bg-[#eff4ff] h-1.5 rounded-full overflow-hidden">
+              <div
+                className="bg-[#006a61] h-full transition-all duration-300"
+                style={{ width: `${(step / 5) * 100}%` }}
+              />
+            </div>
+          )}
+
+          {errorList.length > 0 && (
+            <div className="p-2.5 rounded-lg bg-[#ffdad6]/60 border border-[#ba1a1a]/30 text-xs text-[#ba1a1a] flex flex-col gap-0.5">
+              {errorList.map((err) => (
+                <span key={err}>• {err}</span>
+              ))}
             </div>
           )}
         </div>
 
-        {/* STEP 1: Perfil e Modo de Uso */}
-        {step === 1 && (
-          <div className="flex flex-col gap-4">
-            <div>
-              <h2 className="text-xl font-bold text-[#0b1c30]">1. Como você vai usar o IPCA-Casa?</h2>
-              <p className="text-xs text-[#45464d] mt-1">
-                Escolha o estilo de acompanhamento que faz mais sentido para sua rotina. Você pode mudar depois.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                onClick={() => setProfileMode('pessoal')}
-                className={`p-3 rounded-xl border-2 text-left transition-all cursor-pointer ${
-                  profileMode === 'pessoal'
-                    ? 'border-[#000000] bg-[#eff4ff]/70'
-                    : 'border-[#eff4ff] hover:border-[#c6c6cd]'
-                }`}
-              >
-                <span className="text-xs font-bold text-[#0b1c30] block">Uso Pessoal / Casa</span>
-                <span className="text-[11px] text-[#45464d] block mt-0.5 leading-snug">
-                  Compras do mês, contas da casa e quanto o salário rende.
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setProfileMode('negocio')}
-                className={`p-3 rounded-xl border-2 text-left transition-all cursor-pointer ${
-                  profileMode === 'negocio'
-                    ? 'border-[#000000] bg-[#eff4ff]/70'
-                    : 'border-[#eff4ff] hover:border-[#c6c6cd]'
-                }`}
-              >
-                <span className="text-xs font-bold text-[#0b1c30] block">Pequeno Negócio</span>
-                <span className="text-[11px] text-[#45464d] block mt-0.5 leading-snug">
-                  Insumos, ingredientes, custos operacionais e impacto na margem.
-                </span>
-              </button>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono text-[#45464d]">
-                {isBiz ? 'Nome do Negócio ou Operação:' : 'Nome do Perfil Familiar:'}
-              </label>
-              <input
-                type="text"
-                value={profileName}
-                onChange={(e) => setProfileName(e.target.value)}
-                className="h-10 px-3.5 rounded-lg border border-[#c6c6cd] text-xs font-semibold text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono text-[#45464d]">
-                {isBiz ? 'Pessoas / Unidades envolvidas:' : 'Quantidade de Moradores / Integrantes:'}
-              </label>
-              <input
-                type="number"
-                min="1"
-                max="20"
-                value={membersCount}
-                onChange={(e) => setMembersCount(parseInt(e.target.value, 10) || 1)}
-                className="h-10 px-3.5 rounded-lg border border-[#c6c6cd] text-xs font-mono text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
-              />
-            </div>
-          </div>
-        )}
-
-        {/* STEP 2: Renda / Faturamento */}
-        {step === 2 && (
-          <div className="flex flex-col gap-4">
-            <div>
-              <h2 className="text-xl font-bold text-[#0b1c30]">
-                {isBiz ? '2. Faturamento Mensal de Referência' : '2. Renda Familiar e Salário'}
-              </h2>
-              <p className="text-xs text-[#45464d] mt-1">
-                {isBiz
-                  ? 'Usamos esses valores para mostrar quanto da sua entrada mensal está sendo consumida pela alta dos insumos.'
-                  : 'Fundamental para calcular o impacto em Reais e a variação real do seu poder de compra.'}
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono text-[#45464d]">
-                {isBiz ? 'Faturamento Mensal no Início do Período (R$):' : 'Renda Mensal no Início do Período (R$):'}
-              </label>
-              <input
-                type="number"
-                step="100"
-                value={initialIncome}
-                onChange={(e) => setInitialIncome(parseFloat(e.target.value) || 0)}
-                className="h-10 px-3.5 rounded-lg border border-[#c6c6cd] text-xs font-mono text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
-              />
-              <span className="text-[11px] text-[#76777d]">
-                {isBiz ? 'Entrada mensal de referência (ex.: há 1 ano)' : 'Salário líquido ou bruto de referência (ex: há 1 ano)'}
-              </span>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono text-[#45464d]">
-                {isBiz ? 'Faturamento Mensal Atual (R$):' : 'Renda Mensal Atual (R$):'}
-              </label>
-              <input
-                type="number"
-                step="100"
-                value={currentIncome}
-                onChange={(e) => setCurrentIncome(parseFloat(e.target.value) || 0)}
-                className="h-10 px-3.5 rounded-lg border border-[#c6c6cd] text-xs font-mono text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
-              />
-              <span className="text-[11px] text-[#76777d]">
-                {isBiz ? 'Entrada atual para acompanhar a sobra após custos' : 'Salário atual para comparar reajuste vs inflação'}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* STEP 3: Principais Gastos / Custos */}
-        {step === 3 && (
-          <div className="flex flex-col gap-4">
-            <div>
-              <h2 className="text-xl font-bold text-[#0b1c30]">
-                {isBiz ? '3. Principais Custos da Operação' : '3. Principais Gastos Domésticos'}
-              </h2>
-              <p className="text-xs text-[#45464d] mt-1">
-                Estime os valores aproximados das 3 categorias mais pesadas no mês.
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono text-[#45464d]">
-                {isBiz ? 'Insumos, Ingredientes e Mercadorias (R$/mês):' : 'Alimentação & Supermercado (R$/mês):'}
-              </label>
-              <input
-                type="number"
-                step="50"
-                value={groceriesSpend}
-                onChange={(e) => setGroceriesSpend(parseFloat(e.target.value) || 0)}
-                className="h-10 px-3.5 rounded-lg border border-[#c6c6cd] text-xs font-mono text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono text-[#45464d]">
-                {isBiz
-                  ? 'Aluguel do Ponto, Luz, Água e Gás (R$/mês):'
-                  : 'Habitação (Aluguel, Luz, Água, Condomínio) (R$/mês):'}
-              </label>
-              <input
-                type="number"
-                step="50"
-                value={housingSpend}
-                onChange={(e) => setHousingSpend(parseFloat(e.target.value) || 0)}
-                className="h-10 px-3.5 rounded-lg border border-[#c6c6cd] text-xs font-mono text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono text-[#45464d]">
-                {isBiz ? 'Entregas, Frete e Combustível (R$/mês):' : 'Transporte (Combustível, Transporte Público) (R$/mês):'}
-              </label>
-              <input
-                type="number"
-                step="50"
-                value={transportSpend}
-                onChange={(e) => setTransportSpend(parseFloat(e.target.value) || 0)}
-                className="h-10 px-3.5 rounded-lg border border-[#c6c6cd] text-xs font-mono text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
-              />
-            </div>
-          </div>
-        )}
-
-        {/* STEP 4: Região de Comparação */}
-        {step === 4 && (
-          <div className="flex flex-col gap-4">
-            <div>
-              <h2 className="text-xl font-bold text-[#0b1c30]">4. Localidade para Comparação</h2>
-              <p className="text-xs text-[#45464d] mt-1">
-                Permite contrastar a variação dos seus custos com os índices oficiais da sua região.
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono text-[#45464d]">Sua Região / Capital:</label>
-              <select
-                value={region}
-                onChange={(e) => setRegion(e.target.value)}
-                className="h-10 px-3 rounded-lg border border-[#c6c6cd] text-xs font-semibold text-[#0b1c30] bg-[#ffffff] focus:outline-none focus:border-[#000000]"
-              >
-                <option value="Brasil">Brasil (Média Nacional)</option>
-                <option value="São Paulo - SP">São Paulo - SP</option>
-                <option value="Rio de Janeiro - RJ">Rio de Janeiro - RJ</option>
-                <option value="Belo Horizonte - MG">Belo Horizonte - MG</option>
-                <option value="Porto Alegre - RS">Porto Alegre - RS</option>
-                <option value="Curitiba - PR">Curitiba - PR</option>
-                <option value="Salvador - BA">Salvador - BA</option>
-                <option value="Recife - PE">Recife - PE</option>
-                <option value="Fortaleza - CE">Fortaleza - CE</option>
-                <option value="Brasília - DF">Brasília - DF</option>
-                <option value="Goiânia - GO">Goiânia - GO</option>
-                <option value="Belém - PA">Belém - PA</option>
-              </select>
-            </div>
-          </div>
-        )}
-
-        {/* STEP 5: Escolha da Cesta */}
-        {step === 5 && (
-          <div className="flex flex-col gap-4">
-            <div>
-              <h2 className="text-xl font-bold text-[#0b1c30]">5. Como prefere iniciar?</h2>
-              <p className="text-xs text-[#45464d] mt-1">
-                Você pode começar com itens de exemplo para explorar os gráficos ou usar apenas os 3 valores informados agora.
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <div
-                onClick={() => setBasketChoice('copy-demo')}
-                className={`p-3.5 rounded-xl border-2 transition-all cursor-pointer flex items-center justify-between ${
-                  basketChoice === 'copy-demo'
-                    ? 'border-[#000000] bg-[#eff4ff]/60'
-                    : 'border-[#eff4ff] hover:border-[#c6c6cd]'
-                }`}
-              >
-                <div>
-                  <span className="text-xs font-bold text-[#0b1c30] block">
-                    Copiar Lista de Exemplo (Recomendado)
-                  </span>
-                  <span className="text-[11px] text-[#76777d]">
-                    Inclui {DEMO_BASKET_ITEMS.length} itens demonstrativos que você poderá editar, excluir e personalizar livremente.
-                  </span>
-                </div>
-                {basketChoice === 'copy-demo' && (
-                  <span className="material-symbols-outlined text-[#006a61] text-[20px]">check_circle</span>
-                )}
-              </div>
-
-              <div
-                onClick={() => setBasketChoice('empty')}
-                className={`p-3.5 rounded-xl border-2 transition-all cursor-pointer flex items-center justify-between ${
-                  basketChoice === 'empty'
-                    ? 'border-[#000000] bg-[#eff4ff]/60'
-                    : 'border-[#eff4ff] hover:border-[#c6c6cd]'
-                }`}
-              >
-                <div>
-                  <span className="text-xs font-bold text-[#0b1c30] block">
-                    Iniciar apenas com os 3 itens básicos
-                  </span>
-                  <span className="text-[11px] text-[#76777d]">
-                    Comece limpo usando os valores aproximados que você acabou de informar.
-                  </span>
-                </div>
-                {basketChoice === 'empty' && (
-                  <span className="material-symbols-outlined text-[#006a61] text-[20px]">check_circle</span>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Action Buttons */}
-        <div className="flex items-center justify-between pt-4 border-t border-[#eff4ff]">
-          {step > 1 ? (
-            <button
-              type="button"
-              onClick={() => setStep(step - 1)}
-              className="h-9 px-4 rounded-lg bg-[#eff4ff] text-[#0b1c30] text-xs font-semibold hover:bg-[#e5eeff] transition-colors cursor-pointer"
-            >
-              Voltar
-            </button>
+        {/* Scrollable Content Body */}
+        <div className="p-5 sm:p-6 overflow-y-auto flex-1">
+          {selectingModality ? (
+            <ModalitySelectorStep
+              selectedMode={mode}
+              onSelectMode={handleSelectMode}
+            />
+          ) : mode === 'pessoal' ? (
+            <PessoalQuestionnaireForm
+              step={step}
+              answers={pessoalAnswers}
+              onChange={setPessoalAnswers}
+              profileName={profileName}
+              onProfileNameChange={setProfileName}
+              referenceRegion={referenceRegion}
+              onReferenceRegionChange={setReferenceRegion}
+            />
+          ) : mode === 'negocio' ? (
+            <NegocioQuestionnaireForm
+              step={step}
+              answers={negocioAnswers}
+              onChange={setNegocioAnswers}
+              referenceRegion={referenceRegion}
+              onReferenceRegionChange={setReferenceRegion}
+            />
           ) : (
-            <button
-              type="button"
-              onClick={onSkip}
-              className="text-xs text-[#76777d] hover:text-[#0b1c30] cursor-pointer"
-            >
-              Pular Tudo
-            </button>
+            <EstudanteQuestionnaireForm
+              step={step}
+              answers={estudanteAnswers}
+              onChange={setEstudanteAnswers}
+              profileName={profileName}
+              onProfileNameChange={setProfileName}
+            />
           )}
+        </div>
 
-          {step < 5 ? (
-            <button
-              type="button"
-              onClick={() => setStep(step + 1)}
-              className="h-10 px-5 rounded-lg bg-[#000000] text-[#ffffff] text-xs font-mono font-semibold hover:bg-[#213145] transition-all cursor-pointer shadow-sm flex items-center gap-1.5"
-            >
-              <span>Avançar</span>
-              <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
-            </button>
+        {/* Footer Actions */}
+        <div className="px-5 sm:px-6 py-4 border-t border-[#eff4ff] bg-[#f8f9ff] flex items-center justify-between gap-3">
+          {selectingModality ? (
+            <>
+              <button
+                type="button"
+                onClick={onSkip}
+                className="text-xs text-[#76777d] hover:text-[#0b1c30] cursor-pointer"
+              >
+                Pular por agora
+              </button>
+              <button
+                type="button"
+                onClick={handleProceedFromModality}
+                className="h-10 px-5 rounded-lg bg-[#0b1c30] text-[#ffffff] text-xs font-mono font-semibold hover:bg-[#213145] transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <span>Começar Questionário</span>
+                <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+              </button>
+            </>
           ) : (
-            <button
-              type="button"
-              disabled={saving}
-              onClick={handleComplete}
-              className="h-10 px-6 rounded-lg bg-[#006a61] text-[#ffffff] text-xs font-mono font-semibold hover:bg-[#004e47] transition-all cursor-pointer shadow-sm flex items-center gap-1.5 disabled:opacity-50"
-            >
-              <span>{saving ? 'Salvando na nuvem...' : 'Concluir e Ver Análise'}</span>
-              <span className="material-symbols-outlined text-[16px]">{saving ? 'sync' : 'check'}</span>
-            </button>
+            <>
+              {step > 1 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setErrorList([]);
+                    setStep((s) => Math.max(1, s - 1));
+                  }}
+                  className="h-9 px-4 rounded-lg bg-[#ffffff] border border-[#c6c6cd] text-[#0b1c30] text-xs font-semibold hover:bg-[#eff4ff] transition-colors cursor-pointer"
+                >
+                  Voltar
+                </button>
+              ) : allowModalitySelection && !isEditingFromSettings ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setErrorList([]);
+                    setSelectingModality(true);
+                  }}
+                  className="h-9 px-4 rounded-lg bg-[#ffffff] border border-[#c6c6cd] text-[#0b1c30] text-xs font-semibold hover:bg-[#eff4ff] transition-colors cursor-pointer"
+                >
+                  Mudar Modalidade
+                </button>
+              ) : (
+                <span />
+              )}
+
+              {step < 5 ? (
+                <button
+                  type="button"
+                  onClick={handleNextStep}
+                  className="h-10 px-5 rounded-lg bg-[#0b1c30] text-[#ffffff] text-xs font-mono font-semibold hover:bg-[#213145] transition-all cursor-pointer shadow-sm flex items-center gap-1.5"
+                >
+                  <span>Avançar</span>
+                  <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={handleComplete}
+                  className="h-10 px-6 rounded-lg bg-[#006a61] text-[#ffffff] text-xs font-mono font-semibold hover:bg-[#004e47] transition-all cursor-pointer shadow-sm flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <span>
+                    {saving
+                      ? 'Salvando...'
+                      : isEditingFromSettings
+                        ? 'Salvar Atualizações'
+                        : 'Concluir e Ver Análise'}
+                  </span>
+                  <span className="material-symbols-outlined text-[16px]">
+                    {saving ? 'sync' : 'check'}
+                  </span>
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
     </div>
   );
 };
-

@@ -105,6 +105,7 @@ export const SavingStrategiesView: React.FC<SavingStrategiesViewProps> = ({
 }) => {
   const modeCopy = getProfileModeCopy(profileMode);
   const isBiz = modeCopy.mode === 'negocio';
+  const isStudent = modeCopy.mode === 'estudante';
   const targetProfId = activeProfileId || 'default';
 
   const [plansA, setPlansA] = useState<SubstitutePlanA[]>(() =>
@@ -590,7 +591,11 @@ export const SavingStrategiesView: React.FC<SavingStrategiesViewProps> = ({
           <span className="material-symbols-outlined text-[16px] text-[#006a61]">verified_user</span>
           <span>
             Simulação Ativa:{' '}
-            {isDemo ? 'Cesta Demonstrativa' : `Orçamento Familiar (${summary.totalItemsCount} itens)`}
+            {isDemo
+              ? 'Cesta Demonstrativa'
+              : `${
+                  isBiz ? 'Custos do Negócio' : isStudent ? 'Orçamento Estudantil' : 'Orçamento Familiar'
+                } (${summary.totalItemsCount} itens)`}
           </span>
           <span className="hidden md:inline text-[#c6c6cd]">•</span>
           <span className="hidden md:inline">Algoritmo de Paridade IPCA</span>
@@ -607,12 +612,18 @@ export const SavingStrategiesView: React.FC<SavingStrategiesViewProps> = ({
                 <span>{modeCopy.badgeLabel} • Economia Prática</span>
               </div>
               <h1 className="text-3xl font-bold text-[#0b1c30] tracking-tight">
-                {isBiz ? 'Estratégias de Redução de Custos' : 'Estratégias de Economia'}
+                {isBiz
+                  ? 'Estratégias de Redução de Custos'
+                  : isStudent
+                    ? 'Estratégias de Economia Estudantil'
+                    : 'Estratégias de Economia'}
               </h1>
               <p className="text-xs text-[#45464d] leading-relaxed">
                 {isBiz
                   ? 'Compare troca de fornecedores ou marcas de insumos, metas de consumo de energia/água e reserva do negócio.'
-                  : 'Simule trocas de produtos por preço unitário equivalente, metas de economia nas contas e quanto rende investir a diferença.'}
+                  : isStudent
+                    ? 'Compare alternativas de alimentação, transporte, materiais e serviços para reduzir o peso dos preços no orçamento estudantil.'
+                    : 'Simule trocas de produtos por preço unitário equivalente, metas de economia nas contas e quanto rende investir a diferença.'}
               </p>
             </div>
 
@@ -673,7 +684,11 @@ export const SavingStrategiesView: React.FC<SavingStrategiesViewProps> = ({
 
                 <div className="inline-flex flex-col items-end bg-[#86f2e4]/30 p-3 rounded-xl border border-[#006a61]/20">
                   <span className="font-mono text-[11px] text-[#006a61] uppercase tracking-wide font-semibold">
-                    Alívio na Inflação Familiar
+                    {isBiz
+                      ? 'Alívio nos Custos do Negócio'
+                      : isStudent
+                        ? 'Alívio na Inflação Estudantil'
+                        : 'Alívio na Inflação Familiar'}
                   </span>
                   <div className="flex items-center gap-1 text-[#006a61] text-xl font-bold font-mono">
                     <span className="material-symbols-outlined text-[20px]">trending_down</span>
@@ -727,7 +742,7 @@ export const SavingStrategiesView: React.FC<SavingStrategiesViewProps> = ({
               <div className="flex flex-col gap-2">
                 <div className="flex items-center justify-between">
                   <span className="font-mono text-xs text-[#45464d] uppercase tracking-wider font-semibold">
-                    {isBiz ? 'Estrutura de Custos' : 'Cesta de Gastos'}
+                    {isBiz ? 'Estrutura de Custos' : isStudent ? 'Cesta Estudantil' : 'Cesta de Gastos'}
                   </span>
                   <span className="w-2 h-2 rounded-full bg-[#006a61]" />
                 </div>

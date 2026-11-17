@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   EconomicCalculationSummary,
+  FamilyProfile,
   MonthlyClosure,
   PriceHistory,
   ProfileMode,
@@ -23,6 +24,7 @@ interface OverviewViewProps {
   onOpenQuickPrice: () => void;
   isDemo: boolean;
   profileMode?: ProfileMode;
+  activeProfile?: FamilyProfile | null;
   priceRecords?: PriceHistory[];
   monthlyClosures?: MonthlyClosure[];
   alertThresholdPercent?: number;
@@ -47,6 +49,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
   onOpenQuickPrice,
   isDemo,
   profileMode = 'pessoal',
+  activeProfile = null,
   priceRecords = [],
   monthlyClosures = [],
   alertThresholdPercent = 10,
@@ -59,8 +62,10 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
     setLocalThreshold(alertThresholdPercent);
   }, [alertThresholdPercent]);
 
-  const modeCopy = getProfileModeCopy(profileMode);
+  const modeCopy = getProfileModeCopy(profileMode || activeProfile?.profileMode);
   const isBiz = modeCopy.mode === 'negocio';
+  const isStudent = modeCopy.mode === 'estudante';
+  const hasNoOwnIncome = Boolean(summary.hasNoOwnIncome || activeProfile?.hasNoOwnIncome);
 
   const ibgeOriginBadge =
     ibgeData?.sourceMode === 'live' && !ibgeData.isContingencyData
@@ -229,8 +234,16 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         id: 'empty-basket',
         icon: 'playlist_add',
         iconColor: 'text-[#497cff]',
-        title: 'Cesta Familiar Aguardando Itens',
-        body: 'Cadastre seus gastos mensais com preço anterior e atual para calcular seu IPCA-Casa ponderado.',
+        title: isBiz
+          ? 'Cesta de Custos Aguardando Itens'
+          : isStudent
+          ? 'Cesta Estudantil Aguardando Itens'
+          : 'Cesta Familiar Aguardando Itens',
+        body: isBiz
+          ? 'Cadastre seus insumos, matérias-primas e despesas operacionais para calcular a variação real dos custos.'
+          : isStudent
+          ? 'Cadastre seus gastos com lanches, transporte, materiais e cursos para medir seu custo estudantil.'
+          : 'Cadastre seus gastos mensais com preço anterior e atual para calcular seu IPCA-Casa ponderado.',
         badge: 'Próximo passo: Cadastrar Item',
         badgeColor: 'text-[#497cff]',
       });
@@ -258,11 +271,17 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         iconColor: spreadPP > 0.2 ? 'text-[#ba1a1a]' : 'text-[#006a61]',
         title:
           spreadPP > 0.2
-            ? 'Inflação Pessoal Acima do IBGE'
+            ? isBiz
+              ? 'Custos Acima do IPCA Oficial'
+              : isStudent
+              ? 'Gastos Estudantis Acima do IBGE'
+              : 'Inflação Pessoal Acima do IBGE'
             : spreadPP < -0.2
-            ? 'Inflação Pessoal Abaixo do IBGE'
-            : 'Inflação Pessoal Alinhada ao País',
-        body: `Seu IPCA-Casa (${formatSignedPercent(ipcaCasa12M)}) vs. IPCA IBGE (${formatSignedPercent(ipcaIBGE12M)} — ${ibgeOriginBadge}).`,
+            ? isBiz
+              ? 'Custos Abaixo do IPCA Oficial'
+              : 'Inflação Pessoal Abaixo do IBGE'
+            : 'Variação Alinhada ao País',
+        body: `Seu índice (${formatSignedPercent(ipcaCasa12M)}) vs. IPCA IBGE (${formatSignedPercent(ipcaIBGE12M)} — ${ibgeOriginBadge}).`,
         badge: `Diferencial: ${spreadPP >= 0 ? '+' : ''}${spreadPP.toFixed(2).replace('.', ',')} p.p.`,
         badgeColor: spreadPP > 0.2 ? 'text-[#ba1a1a]' : 'text-[#006a61]',
       });
@@ -274,13 +293,23 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         id: 'income-gap',
         icon: gap < 0 ? 'account_balance_wallet' : 'verified',
         iconColor: gap < 0 ? 'text-[#ba1a1a]' : 'text-[#006a61]',
-        title: gap < 0 ? 'Defasagem no Poder de Compra' : 'Ganho Real de Renda Preservado',
+        title: gap < 0 ? 'Defasagem no Poder de Compra' : 'Ganho Real Preservado',
         body:
           gap < 0
             ? `A entrada atual está R$ ${formatCurrencyBR(Math.abs(gap))}/mês abaixo do necessário para empatar com sua cesta.`
             : `Sua entrada atual supera em R$ ${formatCurrencyBR(gap)}/mês o necessário para acompanhar a inflação.`,
         badge: `Poder de compra: ${formatSignedPercent(purchasingPower.realPurchasingPowerChangePercent ?? 0)}`,
         badgeColor: gap < 0 ? 'text-[#ba1a1a]' : 'text-[#006a61]',
+      });
+    } else if (hasNoOwnIncome) {
+      alerts.push({
+        id: 'student-no-income',
+        icon: 'school',
+        iconColor: 'text-[#497cff]',
+        title: 'Perfil Sem Renda Própria',
+        body: 'Você indicou não possuir renda própria no momento. O sistema acompanha seus gastos e variações de preço sem exigir cadastro de salário.',
+        badge: 'Acompanhamento de despesas',
+        badgeColor: 'text-[#497cff]',
       });
     } else {
       alerts.push({
@@ -305,6 +334,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
     ibgeOriginBadge,
     purchasingPower,
     modeCopy.incomeNavLabel,
+    isBiz,
+    isStudent,
+    hasNoOwnIncome,
   ]);
 
   const comparableAlerts = useMemo(
@@ -385,7 +417,11 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               </span>
             </div>
             <h1 className="text-3xl lg:text-4xl font-bold text-[#0b1c30] tracking-tight mt-0.5">
-              {isBiz ? 'Painel de Custos e Alta nos Insumos' : 'Termômetro do Seu Custo de Vida'}
+              {isBiz
+                ? 'Painel de Custos e Alta nos Insumos'
+                : isStudent
+                ? 'Painel de Gastos e Preços do Estudante'
+                : 'Termômetro do Seu Custo de Vida'}
             </h1>
           </div>
 
@@ -444,10 +480,18 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                   <span>Comece a Medir Sua Inflação Real</span>
                 </div>
                 <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-                  Sua cesta pessoal está pronta para o primeiro registro.
+                  {isBiz
+                    ? 'Sua cesta de custos e insumos está pronta para o primeiro registro.'
+                    : isStudent
+                    ? 'Sua cesta estudantil está pronta para o primeiro registro.'
+                    : 'Sua cesta pessoal está pronta para o primeiro registro.'}
                 </h2>
                 <p className="text-xs text-[#bec6e0] leading-relaxed">
-                  Adicione itens do seu orçamento mensal com os respectivos preços anterior e atual para apurar automaticamente quanto a inflação custa no seu bolso em Reais (R$).
+                  {isBiz
+                    ? 'Adicione insumos, embalagens e contas da operação com preço anterior e atual para apurar automaticamente o impacto no custo mensal.'
+                    : isStudent
+                    ? 'Adicione lanches, transporte, materiais e cursos com preço anterior e atual para acompanhar quanto os preços subiram no seu dia a dia.'
+                    : 'Adicione itens do seu orçamento mensal com os respectivos preços anterior e atual para apurar automaticamente quanto a inflação custa no seu bolso em Reais (R$).'}
                 </p>
               </div>
               <div className="flex flex-col sm:flex-row lg:flex-col gap-3 shrink-0">
@@ -551,10 +595,16 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
                 <div className="p-3.5 rounded-xl bg-[#eff4ff] flex flex-col justify-between gap-1">
                   <span className="text-[#45464d] font-medium">
-                    {isBiz ? 'Quanto entrou no mês' : 'Quanto entrou de renda'}
+                    {isBiz
+                      ? 'Quanto entrou no mês'
+                      : isStudent
+                      ? 'Renda / Auxílio no mês'
+                      : 'Quanto entrou de renda'}
                   </span>
                   <strong className="text-lg font-mono text-[#0b1c30]">
-                    {monthlyIncome !== null && monthlyIncome > 0
+                    {hasNoOwnIncome && (!monthlyIncome || monthlyIncome <= 0)
+                      ? 'Sem renda própria'
+                      : monthlyIncome !== null && monthlyIncome > 0
                       ? `R$ ${formatCurrencyBR(monthlyIncome)}`
                       : 'Não informado'}
                   </strong>
@@ -563,7 +613,11 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                     onClick={() => onNavigateTab('renda-e-poder-de-compra')}
                     className="text-[11px] text-[#497cff] font-semibold text-left hover:underline cursor-pointer"
                   >
-                    {monthlyIncome ? 'Atualizar entrada →' : 'Informar entrada →'}
+                    {monthlyIncome
+                      ? 'Atualizar entrada →'
+                      : hasNoOwnIncome
+                      ? 'Informar se passar a receber →'
+                      : 'Informar entrada →'}
                   </button>
                 </div>
 
@@ -581,7 +635,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
 
                 <div className="p-3.5 rounded-xl bg-[#eff4ff] flex flex-col justify-between gap-1">
                   <span className="text-[#45464d] font-medium">
-                    {isBiz ? 'Saldo / Margem do mês' : 'Quanto sobrou ou faltou'}
+                    {isBiz ? 'Resultado estimado' : 'Quanto sobrou ou faltou'}
                   </span>
                   <strong
                     className={`text-lg font-mono ${
@@ -593,14 +647,20 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                     }`}
                   >
                     {monthlyBalance === null
-                      ? 'Aguardando entrada'
+                      ? hasNoOwnIncome
+                        ? 'Sem renda própria'
+                        : 'Aguardando entrada'
                       : `${monthlyBalance >= 0 ? '+R$ ' : '-R$ '}${formatCurrencyBR(Math.abs(monthlyBalance))}`}
                   </strong>
                   <span className="text-[11px] text-[#76777d]">
                     {monthlyBalance === null
-                      ? 'Preencha quanto entra'
+                      ? hasNoOwnIncome
+                        ? 'Acompanhando apenas despesas'
+                        : 'Preencha quanto entra'
+                      : isBiz
+                      ? modeCopy.surplusNotice
                       : monthlyBalance >= 0
-                      ? 'Saldo positivo no mês'
+                      ? 'Saldo efetivo calculado positivo'
                       : 'Saídas maiores que entradas'}
                   </span>
                 </div>
@@ -643,6 +703,45 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                   </span>
                 </div>
               </div>
+
+              {summary.surplusBreakdown &&
+                (summary.surplusBreakdown.reportedMonthlySurplus !== null ||
+                  summary.surplusBreakdown.estimatedMonthlySurplus !== null ||
+                  isBiz) && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-[#f8faff] border border-[#e5eeff] text-[11px] font-mono text-[#45464d]">
+                    <div className="flex flex-wrap items-center gap-3">
+                      {summary.surplusBreakdown.reportedMonthlySurplus !== null && (
+                        <span>
+                          Sobra informada no questionário:{' '}
+                          <strong className="text-[#0b1c30]">
+                            R$ {formatCurrencyBR(summary.surplusBreakdown.reportedMonthlySurplus)}
+                          </strong>
+                        </span>
+                      )}
+                      {summary.surplusBreakdown.estimatedMonthlySurplus !== null && (
+                        <span>
+                          Sobra estimada (entrada − gasto estimado):{' '}
+                          <strong className="text-[#0b1c30]">
+                            R$ {formatCurrencyBR(summary.surplusBreakdown.estimatedMonthlySurplus)}
+                          </strong>
+                        </span>
+                      )}
+                      {summary.surplusBreakdown.effectiveCalculatedBalance !== null && (
+                        <span>
+                          Saldo efetivo calculado:{' '}
+                          <strong className="text-[#006a61]">
+                            R$ {formatCurrencyBR(summary.surplusBreakdown.effectiveCalculatedBalance)}
+                          </strong>
+                        </span>
+                      )}
+                    </div>
+                    {isBiz && (
+                      <span className="text-[#b45309] font-semibold">
+                        {modeCopy.surplusNotice}
+                      </span>
+                    )}
+                  </div>
+                )}
             </div>
           );
         })()}
@@ -760,11 +859,15 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           {/* KPI 5: Variação da Renda */}
           <div className="bg-[#ffffff] rounded-xl p-4 shadow-sm flex flex-col justify-between border border-[#eff4ff]">
             <div className="flex items-center justify-between text-[#45464d]">
-              <span className="font-mono text-xs uppercase tracking-wider font-semibold">Sua Renda</span>
+              <span className="font-mono text-xs uppercase tracking-wider font-semibold">
+                {modeCopy.incomeTermSingular}
+              </span>
               <span className="material-symbols-outlined text-[18px] text-[#006a61]">trending_up</span>
             </div>
             <div className="my-2">
-              <span className="text-[11px] text-[#45464d] font-medium">Mudança no Salário</span>
+              <span className="text-[11px] text-[#45464d] font-medium">
+                {isBiz ? 'Mudança no Faturamento' : isStudent ? 'Mudança na Entrada' : 'Mudança no Salário'}
+              </span>
               <div className="text-2xl font-bold text-[#0b1c30] tracking-tight tabular-nums font-mono">
                 {purchasingPower.nominalIncomeGrowthPercent !== null
                   ? formatSignedPercent(purchasingPower.nominalIncomeGrowthPercent)
@@ -774,7 +877,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             <div className="text-[#45464d] font-mono text-[11px] tabular-nums truncate">
               {purchasingPower.hasIncomeData && purchasingPower.initialIncome !== null && purchasingPower.finalIncome !== null
                 ? `R$ ${purchasingPower.initialIncome.toLocaleString('pt-BR')} → R$ ${purchasingPower.finalIncome.toLocaleString('pt-BR')}`
-                : 'Renda não informada'}
+                : hasNoOwnIncome
+                ? 'Sem renda própria'
+                : 'Não informado'}
             </div>
           </div>
 
@@ -795,7 +900,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               </span>
             </div>
             <div className="my-2">
-              <span className="text-[11px] text-[#45464d] font-medium">O que seu dinheiro compra</span>
+              <span className="text-[11px] text-[#45464d] font-medium">
+                {isBiz ? 'Faturamento vs. Custos' : 'O que seu dinheiro compra'}
+              </span>
               <div
                 className={`text-2xl font-bold tracking-tight tabular-nums font-mono ${
                   purchasingPower.realPurchasingPowerChangePercent === null
@@ -812,16 +919,16 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             </div>
             <div className="flex items-center gap-1 text-[#45464d] font-mono text-[11px]">
               {purchasingPower.realPurchasingPowerChangePercent === null ? (
-                <span>Informe sua renda</span>
+                <span>{hasNoOwnIncome ? 'Acompanhamento de gastos' : 'Informe sua entrada'}</span>
               ) : purchasingPower.realPurchasingPowerChangePercent < 0 ? (
                 <>
                   <span className="material-symbols-outlined text-[14px] text-[#ba1a1a]">arrow_downward</span>
-                  <span>Dinheiro comprando menos</span>
+                  <span>{isBiz ? 'Custos subindo mais' : 'Dinheiro comprando menos'}</span>
                 </>
               ) : (
                 <>
                   <span className="material-symbols-outlined text-[14px] text-[#006a61]">arrow_upward</span>
-                  <span>Dinheiro comprando mais</span>
+                  <span>{isBiz ? 'Margem preservada' : 'Dinheiro comprando mais'}</span>
                 </>
               )}
             </div>
@@ -1095,9 +1202,15 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           <div className="lg:col-span-7 bg-[#ffffff] rounded-xl p-6 shadow-sm flex flex-col justify-between border border-[#eff4ff]">
             <div>
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-[#0b1c30]">Vilões do Orçamento Familiar</h2>
+                <h2 className="text-lg font-semibold text-[#0b1c30]">
+                  {isBiz
+                    ? 'Principais Ofensores de Custo'
+                    : isStudent
+                    ? 'Principais Ofensores do Orçamento Estudantil'
+                    : 'Vilões do Orçamento Familiar'}
+                </h2>
                 <span className="font-mono text-xs bg-[#ffdad6]/40 text-[#ba1a1a] px-2 py-0.5 rounded font-semibold">
-                  Impacto no IPCA-Casa
+                  Impacto no Índice
                 </span>
               </div>
               <p className="text-xs text-[#45464d] mt-0.5">
@@ -1364,7 +1477,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             <div className="bg-[#131b2e] text-[#ffffff] rounded-xl p-5 shadow-sm flex flex-col justify-between">
               <div className="flex items-center justify-between">
                 <span className="font-mono text-[11px] uppercase tracking-wider text-[#dae2fd] font-semibold">
-                  {isBiz ? 'Saúde da Margem' : 'Diagnóstico do Bolso'}
+                  {isBiz ? 'Saúde da Margem' : isStudent ? 'Diagnóstico Estudantil' : 'Diagnóstico do Bolso'}
                 </span>
                 <span className="material-symbols-outlined text-[#86f2e4] text-[20px]">shield</span>
               </div>
@@ -1374,11 +1487,15 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                     ? purchasingPower.monthlyPurchasingDeficitOrGain < 0
                       ? `Déficit Real de R$ ${formatCurrencyBR(Math.abs(purchasingPower.monthlyPurchasingDeficitOrGain))}/mês`
                       : `Ganho Real de +R$ ${formatCurrencyBR(purchasingPower.monthlyPurchasingDeficitOrGain)}/mês`
+                    : hasNoOwnIncome
+                    ? 'Acompanhamento Sem Renda Própria'
                     : `${modeCopy.incomeNavLabel} Aguardando Dados`}
                 </h3>
                 <p className="text-xs text-[#bec6e0] mt-1 leading-relaxed">
                   {purchasingPower.monthlyPurchasingDeficitOrGain === null
-                    ? `Informe suas entradas na aba ${modeCopy.incomeNavLabel} para calcular quanto falta ou sobra frente à variação de preços.`
+                    ? hasNoOwnIncome
+                      ? 'Acompanhe o peso de cada despesa na sua cesta e identifique substituições econômicas sem precisar informar salário.'
+                      : `Informe suas entradas na aba ${modeCopy.incomeNavLabel} para calcular quanto falta ou sobra frente à variação de preços.`
                     : purchasingPower.monthlyPurchasingDeficitOrGain < 0
                     ? 'Para recompor sua margem mantendo a mesma cesta, avalie ajustes de preço ou substituições táticas de itens.'
                     : 'Suas entradas superaram a variação da cesta. Você pode simular economias e reservas na aba Estratégias.'}
@@ -1387,7 +1504,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               <button
                 onClick={() =>
                   onNavigateTab(
-                    purchasingPower.monthlyPurchasingDeficitOrGain === null
+                    purchasingPower.monthlyPurchasingDeficitOrGain === null && !hasNoOwnIncome
                       ? 'renda-e-poder-de-compra'
                       : 'estrategias-de-economia'
                   )
@@ -1396,7 +1513,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                 type="button"
               >
                 <span>
-                  {purchasingPower.monthlyPurchasingDeficitOrGain === null
+                  {purchasingPower.monthlyPurchasingDeficitOrGain === null && !hasNoOwnIncome
                     ? `Ir para ${modeCopy.incomeNavLabel}`
                     : 'Simular Estratégias de Economia'}
                 </span>

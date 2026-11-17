@@ -46,6 +46,7 @@ export const InflationAnalysisView: React.FC<InflationAnalysisViewProps> = ({
 }) => {
   const modeCopy = getProfileModeCopy(profileMode);
   const isBiz = modeCopy.mode === 'negocio';
+  const isStudent = modeCopy.mode === 'estudante';
   const [showFormula, setShowFormula] = useState(false);
   const [filterGroup, setFilterGroup] = useState('ALL');
   const [filterText, setFilterText] = useState('');
@@ -254,10 +255,18 @@ export const InflationAnalysisView: React.FC<InflationAnalysisViewProps> = ({
               </span>
             </div>
             <h1 className="text-3xl lg:text-4xl font-bold text-[#0b1c30] tracking-tight">
-              {isBiz ? 'O Que Puxou a Alta nos Custos' : 'O Que Puxou a Alta nos Seus Gastos'}
+              {isBiz
+                ? 'O Que Puxou a Alta nos Custos'
+                : isStudent
+                  ? 'O Que Puxou a Alta nos Gastos Estudantis'
+                  : 'O Que Puxou a Alta nos Seus Gastos'}
             </h1>
             <p className="text-xs text-[#45464d] max-w-2xl leading-relaxed">
-              Veja quais itens e categorias mais pesaram no seu bolso comparados à média oficial do país, sem precisar fazer contas manuais.
+              {isBiz
+                ? 'Veja quais insumos e categorias mais pesaram nos custos do negócio comparados à média oficial do país.'
+                : isStudent
+                  ? 'Veja quais itens da rotina estudantil mais pesaram no seu bolso comparados à média oficial do país.'
+                  : 'Veja quais itens e categorias mais pesaram no seu bolso comparados à média oficial do país, sem precisar fazer contas manuais.'}
             </p>
           </div>
 
@@ -453,7 +462,13 @@ export const InflationAnalysisView: React.FC<InflationAnalysisViewProps> = ({
             <div className="absolute top-0 left-0 w-1.5 h-full bg-[#006a61]" />
             <div className="flex items-start justify-between">
               <div className="flex flex-col">
-                <span className="font-mono text-xs text-[#45464d] uppercase font-semibold">Amostra Familiar</span>
+                <span className="font-mono text-xs text-[#45464d] uppercase font-semibold">
+                  {isBiz
+                    ? 'Amostra do Negócio'
+                    : isStudent
+                      ? 'Amostra Estudantil'
+                      : 'Amostra Familiar'}
+                </span>
                 <span className="text-xs text-[#76777d]">Cesta Ativa Auditada</span>
               </div>
               <span className="material-symbols-outlined text-[#006a61] text-[22px]">category</span>
@@ -533,7 +548,11 @@ export const InflationAnalysisView: React.FC<InflationAnalysisViewProps> = ({
                   </div>
 
                   <p className="text-xs text-[#bec6e0] leading-relaxed">
-                    A inflação real de sua família não é uma média simples dos preços de prateleira, mas sim o somatório da variação percentual de cada bem multiplicada pelo peso exato que ele representa nos seus gastos totais.
+                    {isBiz
+                      ? 'A inflação de custos do negócio não é uma média simples dos preços, mas o somatório da variação de cada insumo multiplicada pelo peso exato que ele representa nos gastos totais.'
+                      : isStudent
+                        ? 'A inflação estudantil não é uma média simples de preços, mas o somatório da variação de cada item multiplicada pelo peso que ele ocupa nos seus gastos mensais.'
+                        : 'A inflação real de sua família não é uma média simples dos preços de prateleira, mas sim o somatório da variação percentual de cada bem multiplicada pelo peso exato que ele representa nos seus gastos totais.'}
                   </p>
                 </div>
 
@@ -545,7 +564,7 @@ export const InflationAnalysisView: React.FC<InflationAnalysisViewProps> = ({
                       <span>Peso (w<sub>i</sub>)</span>
                     </div>
                     <p className="text-xs text-[#45464d] mt-1">
-                      Fração percentual da despesa mensal gasta no item sobre o gasto total familiar.
+                      Fração percentual da despesa mensal gasta no item sobre o gasto total da cesta.
                     </p>
                     <div className="mt-auto pt-2 font-mono text-[11px] text-[#0b1c30] font-semibold">
                       {sampleFormulaItem
@@ -999,13 +1018,13 @@ export const InflationAnalysisView: React.FC<InflationAnalysisViewProps> = ({
                     <td colSpan={8} className="py-10 px-4 text-center text-xs text-[#76777d]">
                       {calculatedItems.length === 0 ? (
                         <div className="flex flex-col items-center gap-2">
-                          <span>Sua cesta doméstica ainda não possui itens cadastrados.</span>
+                          <span>Sua cesta ativa ainda não possui itens cadastrados.</span>
                           <button
                             type="button"
                             onClick={() => onNavigateTab('minha-cesta-familiar')}
                             className="px-3 py-1.5 rounded-lg bg-[#000000] text-[#ffffff] font-mono text-xs hover:bg-[#213145] cursor-pointer"
                           >
-                            Cadastrar Itens da Cesta
+                            Ir para {modeCopy.basketNavLabel}
                           </button>
                         </div>
                       ) : (
@@ -1110,7 +1129,7 @@ export const InflationAnalysisView: React.FC<InflationAnalysisViewProps> = ({
                 {calculatedItems.length === 0 ? (
                   <>
                     Adicione itens com gasto mensal, preço base e preço atual na aba{' '}
-                    <strong>Minha Cesta Familiar</strong> para gerar o diagnóstico personalizado dos seus maiores ofensores.
+                    <strong>{modeCopy.basketNavLabel}</strong> para gerar o diagnóstico personalizado dos seus maiores ofensores.
                   </>
                 ) : positiveGroups.length >= 2 ? (
                   <>

@@ -21,6 +21,7 @@ interface PriceHistoryViewProps {
   onRefreshData: () => void;
   isDemo: boolean;
   profileMode?: ProfileMode;
+  suppliers?: string[];
   selectedItemForHistory?: BasketItem | null;
   priceRecords?: PriceHistory[];
   onAddPriceRecord?: (record: {
@@ -31,6 +32,7 @@ interface PriceHistoryViewProps {
     packageSize?: number;
     packageUnit?: string;
     origin?: string;
+    supplierName?: string;
   }) => void | Promise<void>;
   onUpdatePriceRecord?: (
     priceId: string,
@@ -54,6 +56,7 @@ export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
   onRefreshData,
   isDemo,
   profileMode = 'pessoal',
+  suppliers = [],
   selectedItemForHistory,
   priceRecords: propPriceRecords,
   onAddPriceRecord,
@@ -61,6 +64,7 @@ export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
   onDeletePriceRecord,
 }) => {
   const modeCopy = getProfileModeCopy(profileMode);
+  const isBiz = modeCopy.mode === 'negocio';
   const { calculatedItems } = summary;
   const [selectedItemId, setSelectedItemId] = useState<string>(
     selectedItemForHistory?.id || calculatedItems[0]?.id || ''
@@ -105,6 +109,9 @@ export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
         parseIsoDateToLocalTimestamp(b.referenceDate)
     );
 
+  // Filtro por fornecedor (Modo Negócio)
+  const [supplierFilter, setSupplierFilter] = useState<string>('ALL');
+
   // Modal Adicionar / Editar Cotação
   const [isPriceModalOpen, setIsPriceModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<PriceHistory | null>(null);
@@ -113,6 +120,7 @@ export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
   const [recordUnit, setRecordUnit] = useState<string>(selectedItem?.unit || 'un');
   const [recordPackageSize, setRecordPackageSize] = useState<number>(selectedItem?.packageSize || 1);
   const [recordOrigin, setRecordOrigin] = useState<string>('Supermercado / Cupom');
+  const [recordSupplier, setRecordSupplier] = useState<string>('');
   const [isSavingRecord, setIsSavingRecord] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
 
@@ -139,7 +147,8 @@ export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
     setRecordDate(getTodayIsoDate());
     setRecordUnit(selectedItem?.unit || 'un');
     setRecordPackageSize(selectedItem?.packageSize || 1);
-    setRecordOrigin(modeCopy.mode === 'negocio' ? 'Fornecedor / Nota' : 'Supermercado / Cupom');
+    setRecordOrigin(isBiz ? 'Fornecedor / Nota' : 'Supermercado / Cupom');
+    setRecordSupplier(selectedItem?.supplierName || '');
     setIsPriceModalOpen(true);
   };
 
@@ -151,6 +160,7 @@ export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
     setRecordUnit(record.packageUnit || record.unit || selectedItem?.unit || 'un');
     setRecordPackageSize(record.packageSize && record.packageSize > 0 ? record.packageSize : 1);
     setRecordOrigin(record.source || 'Supermercado Local');
+    setRecordSupplier(record.supplierName || selectedItem?.supplierName || '');
     setIsPriceModalOpen(true);
   };
 
@@ -192,6 +202,7 @@ export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
           unit: cleanUnit,
           packageUnit: cleanUnit,
           packageSize: recordPackageSize,
+          ...(isBiz && recordSupplier.trim() ? { supplierName: recordSupplier.trim() } : {}),
         };
         if (onUpdatePriceRecord) {
           await onUpdatePriceRecord(editingRecord.id, updatedFields);
@@ -208,6 +219,7 @@ export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
           packageUnit: cleanUnit,
           packageSize: recordPackageSize,
           origin: cleanOrigin,
+          ...(isBiz && recordSupplier.trim() ? { supplierName: recordSupplier.trim() } : {}),
         };
         if (onAddPriceRecord) {
           await onAddPriceRecord(recordPayload);
@@ -244,7 +256,21 @@ export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
   const itemBaseUnit = selectedItem?.packageUnit || selectedItem?.unit || 'un';
   let prevComparableNormPrice: number | null = null;
 
-  const enrichedHistory = priceHistory.map((record) => {
+  const availableItemSuppliers = Array.from(
+    new Set(
+      [
+        ...(selectedItem?.supplierName ? [selectedItem.supplierName] : []),
+        ...priceHistory.map((p) => p.supplierName).filter((s): s is string => Boolean(s && s.trim())),
+      ]
+    )
+  );
+
+  const visibleHistory =
+    isBiz && supplierFilter !== 'ALL'
+      ? priceHistory.filter((p) => (p.supplierName || selectedItem?.supplierName || '') === supplierFilter)
+      : priceHistory;
+
+  const enrichedHistory = visibleHistory.map((record) => {
     const recUnit = record.packageUnit || record.unit || itemBaseUnit;
     const recSize = record.packageSize && record.packageSize > 0 ? record.packageSize : 1;
     const unitMatches = areUnitsCompatible(recUnit, itemBaseUnit);
@@ -347,12 +373,12 @@ export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
             <span className="font-mono text-xs text-[#45464d] uppercase tracking-wider font-semibold">
               Selecione o Item ({calculatedItems.length})
             </span>
-            <span className="text-xs text-[#76777d]">Cesta Familiar</span>
+            <span className="text-xs text-[#76777d]">{modeCopy.shortTitle}</span>
           </div>
 
           {calculatedItems.length === 0 ? (
             <div className="p-6 rounded-xl bg-[#eff4ff]/50 text-center text-xs font-mono text-[#76777d]">
-              Nenhum item ativo cadastrado na cesta familiar. Cadastre produtos na aba Minha Cesta Familiar para acompanhar cotações.
+              Nenhum item ativo cadastrado. Cadastre itens na aba {modeCopy.basketNavLabel} para acompanhar cotações.
             </div>
           ) : (
             <div className="flex flex-col gap-1 max-h-[520px] overflow-y-auto pr-1">
@@ -481,10 +507,24 @@ export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
                       Evolução das Cotações: {selectedItem.name}
                     </h3>
                     <p className="text-xs text-[#45464d]">
-                      Série histórica de preços coletados para este item na família.
+                      Série histórica de preços coletados para este item ({modeCopy.shortTitle}).
                     </p>
                   </div>
                   <div className="flex items-center flex-wrap gap-2 font-mono text-xs">
+                    {isBiz && availableItemSuppliers.length > 0 && (
+                      <select
+                        value={supplierFilter}
+                        onChange={(e) => setSupplierFilter(e.target.value)}
+                        className="h-7 px-2.5 bg-[#eff4ff] text-[#0b1c30] rounded-md text-xs font-mono cursor-pointer"
+                      >
+                        <option value="ALL">Todos os fornecedores</option>
+                        {availableItemSuppliers.map((sup) => (
+                          <option key={sup} value={sup}>
+                            {sup}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     {excludedCount > 0 && (
                       <span className="px-2.5 py-1 bg-[#ffdad6]/50 text-[#ba1a1a] rounded-md font-semibold">
                         {excludedCount} {excludedCount === 1 ? 'registro incompatível excluído' : 'registros incompatíveis excluídos'}
@@ -626,12 +666,19 @@ export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
                                 )}
                               </td>
                               <td className="py-3 px-4 text-[#45464d]">
-                                <span className="inline-flex items-center gap-1.5">
-                                  <span className="material-symbols-outlined text-[15px] text-[#76777d]">
-                                    storefront
+                                <div className="flex flex-col">
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <span className="material-symbols-outlined text-[15px] text-[#76777d]">
+                                      storefront
+                                    </span>
+                                    {record.source || (isBiz ? 'Fornecedor Local' : 'Supermercado Local')}
                                   </span>
-                                  {record.source || 'Supermercado Local'}
-                                </span>
+                                  {isBiz && (record.supplierName || selectedItem?.supplierName) && (
+                                    <span className="text-[10px] font-mono text-[#006a61]">
+                                      Fornecedor: {record.supplierName || selectedItem?.supplierName}
+                                    </span>
+                                  )}
+                                </div>
                               </td>
                               <td className="py-3 px-4 text-center whitespace-nowrap">
                                 <div className="inline-flex items-center gap-1">
@@ -665,8 +712,8 @@ export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
           ) : (
             <div className="bg-[#ffffff] rounded-xl p-12 shadow-sm border border-[#eff4ff] text-center text-[#76777d]">
               {calculatedItems.length === 0
-                ? 'Adicione itens à sua cesta familiar para registrar e acompanhar cotações históricas.'
-                : 'Selecione um item da cesta ao lado para visualizar seu histórico de preços.'}
+                ? `Adicione itens em ${modeCopy.basketNavLabel} para registrar e acompanhar cotações históricas.`
+                : 'Selecione um item ao lado para visualizar seu histórico de preços.'}
             </div>
           )}
         </div>
@@ -791,6 +838,29 @@ export const PriceHistoryView: React.FC<PriceHistoryViewProps> = ({
                   className="h-10 px-3 rounded-lg border border-[#c6c6cd] text-xs focus:border-[#497cff] outline-none"
                 />
               </div>
+
+              {isBiz && (
+                <div className="flex flex-col gap-1.5">
+                  <label className="font-mono text-xs text-[#45464d] uppercase tracking-wider font-semibold">
+                    Fornecedor (Opcional)
+                  </label>
+                  <input
+                    type="text"
+                    list="history-suppliers-list"
+                    value={recordSupplier}
+                    onChange={(e) => setRecordSupplier(e.target.value)}
+                    placeholder="Ex: Moinho Paulista, Atacadão..."
+                    className="h-10 px-3 rounded-lg border border-[#c6c6cd] text-xs focus:border-[#497cff] outline-none"
+                  />
+                  {suppliers.length > 0 && (
+                    <datalist id="history-suppliers-list">
+                      {suppliers.map((sup) => (
+                        <option key={sup} value={sup} />
+                      ))}
+                    </datalist>
+                  )}
+                </div>
+              )}
 
               <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#eff4ff]">
                 <button

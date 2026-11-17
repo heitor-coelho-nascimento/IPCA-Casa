@@ -1,4 +1,4 @@
-import { BasketItem, ItemClassification } from '../types';
+import { BasketItem, ItemClassification, ProfileMode } from '../types';
 import { extractIsoDatePrefix, getMonthsAgoIsoDate, getTodayIsoDate } from './dates';
 
 export type AmbiguityPreference = 'ask' | 'thousand' | 'decimal';
@@ -22,6 +22,8 @@ export interface CsvPreviewRow {
   currentPriceDate: string;
   unit: string;
   notes: string;
+  supplierName?: string;
+  profileMode?: ProfileMode;
   rawSpend: string;
   rawOldPrice: string;
   rawCurrentPrice: string;
@@ -274,6 +276,7 @@ export function parseCsvForPreview(params: {
   text: string;
   existingItems: BasketItem[];
   targetProfileId: string;
+  profileMode?: ProfileMode;
   ambiguityPreference?: AmbiguityPreference;
 }): CsvPreviewResult {
   const cleanText = String(params.text || '').replace(/^\uFEFF/, '');
@@ -315,6 +318,12 @@ export function parseCsvForPreview(params: {
     const rawCurrentDate = (cols[8] || '').trim();
     const unit = (cols[9] || 'unidade').trim() || 'unidade';
     const notes = (cols[10] || 'Importado via planilha CSV').trim();
+    const supplierName = (cols[11] || '').trim() || undefined;
+    const rawRowMode = (cols[12] || '').trim().toLowerCase();
+    const rowMode: ProfileMode | undefined =
+      rawRowMode === 'pessoal' || rawRowMode === 'negocio' || rawRowMode === 'estudante'
+        ? rawRowMode
+        : undefined;
 
     if (!name && cols.every((c) => !c.trim())) {
       continue;
@@ -328,6 +337,11 @@ export function parseCsvForPreview(params: {
     }
     if (cols.length < 5) {
       issues.push('Linha com menos de 5 colunas obrigatórias.');
+    }
+    if (rowMode && params.profileMode && rowMode !== params.profileMode) {
+      issues.push(
+        `Modalidade da linha ("${rowMode}") difere do perfil ativo ("${params.profileMode}").`
+      );
     }
 
     const spendRes = parseLocalizedNumber(rawSpend, pref);
@@ -410,6 +424,7 @@ export function parseCsvForPreview(params: {
       itemPayload = {
         id: rawId && /^[a-zA-Z0-9_-]{3,128}$/.test(rawId) ? rawId : `import-${stamp}-${i}`,
         profileId: params.targetProfileId,
+        profileMode: rowMode || params.profileMode,
         name,
         group,
         classification,
@@ -419,6 +434,7 @@ export function parseCsvForPreview(params: {
         oldPriceDate: oldDateResolved,
         currentPriceDate: curDateResolved,
         unit,
+        ...(supplierName ? { supplierName } : {}),
         notes,
         dataOrigin: 'usuario',
         active: true,
@@ -440,6 +456,8 @@ export function parseCsvForPreview(params: {
       currentPriceDate: curDateResolved,
       unit,
       notes,
+      supplierName,
+      profileMode: rowMode || params.profileMode,
       rawSpend,
       rawOldPrice,
       rawCurrentPrice,
